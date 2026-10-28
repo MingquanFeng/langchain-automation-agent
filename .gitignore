@@ -9,8 +9,3 @@ __pycache__/
 # PyCharm 的本地配置，不进版本库。
 # .run/ 是 JetBrains 的共享运行配置目录，要提交。
 .idea/
-
-# 课件处理工具（PDF 转 Markdown、裁剪清理等）。
-# 它们操作的是仓库外的 courseware/ 目录，
-# 跟 automation_agent 的源码没有关系，属于本地工具链。
-/scripts/
