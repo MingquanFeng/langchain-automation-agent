@@ -116,7 +116,7 @@ def main() -> None:
     #    读完就固化成 MODEL / RUNTIME 两个对象。
     #    之后再改 os.environ 不会自动反映到 RUNTIME 上。
     #
-    # 2. 所以 --no-schedule 要先写环境变量，
+    # 2. 所以 --no-schedule 要先写覆盖，
     #    再 reload(agent.config) 让它重新读一遍。
     #
     # 3. runtime/server.py 用 `from agent.config import RUNTIME` 导入，
@@ -124,41 +124,37 @@ def main() -> None:
     #    因此 server 必须在 reload 之后才导入，
     #    它拿到的才是开关已生效的那份 RUNTIME。
     #
-    # 顺序反了（先 import server 再设环境变量），
+    # 顺序反了（先 import server 再设开关），
     # --no-schedule 就会失效，调度器照常启动。
     #
-    # 注意（已知坑，未修）：
-    # agent/config.py 用 load_dotenv(override=True) 加载 .env，
-    # override=True 的含义是「.env 覆盖已有环境变量」。
-    # 所以下面这行设进去的 "0"，
-    # 会被 reload(agent.config) 时重新读 .env 的动作顶掉
-    # （.env.example 里默认就带着 SCHEDULER_ENABLED=1）。
+    # 注意：
+    # 这里用的是 agent.config.set_cli_override() 而不是
+    # os.environ["SCHEDULER_ENABLED"] = "0"。
     #
-    # 实测：
-    # .env 里存在 SCHEDULER_ENABLED=1 时，
-    # python -m runtime --no-schedule 依然会启动调度器，
-    # /health 返回的 scheduler 也是 true。
+    # 因为 agent/config.py 用 load_dotenv(override=True) 加载 .env，
+    # 含义是「.env 覆盖已有环境变量」——
+    # 直接设进 os.environ 的那个 "0"，
+    # 会在 reload 时重新读 .env 的动作里被顶掉
+    # （.env.example 里默认就带着 SCHEDULER_ENABLED=1），
+    # --no-schedule 形同虚设。
     #
-    # 规避办法（不改代码）：
-    # 用 SCHEDULER_ENABLED=0 python -m runtime 之外的环境变量也没用
-    # （同样会被 .env 覆盖），
-    # 只能临时把 .env 里那行改掉，或者先 mv .env .env.bak。
-    # 真正的修法是让 config.py 改用 load_dotenv(override=False)，
-    # 或者把 --no-schedule 的开关写成不经过环境变量的独立路径。
+    # set_cli_override() 写的是另一个独立前缀的键，
+    # .env 里不会有它，reload 也不会清掉它，
+    # 所以开关能真正生效。
+    #
+    # 下面的 import agent.config 必须在这一行之前 ——
+    # set_cli_override 是 agent.config 的函数，
+    # 模块还没导入就调不到。
+    import agent.config
+
     if args.no_schedule:
-        os.environ["SCHEDULER_ENABLED"] = "0"
+        agent.config.set_cli_override("SCHEDULER_ENABLED", "0")
 
     # importlib：标准库模块，用来重新加载模块。
     #
     # reload() 会重新执行模块代码，
     # 对 config.py 来说就是重新读一遍环境变量。
     import importlib
-
-    # import agent.config
-    #
-    # 必须先 import 再 reload：
-    # reload 要求模块对象已经存在于 sys.modules 里。
-    import agent.config
 
     importlib.reload(agent.config)
 
@@ -199,14 +195,23 @@ def main() -> None:
     # uvicorn.run() 直接接收 app 对象并阻塞运行，
     # 直到进程被 Ctrl-C 打断。
     #
-    # 注意：
-    # --reload 目前不可用。
-    # uvicorn 要求开启 reload 时应用必须以「导入字符串」形式传入
-    # （如 "runtime.server:app"），
-    # 传对象它会直接 sys.exit(1) 退出。
-    # 这是开发期想用热重载时需要注意的坑。
+    # 注意 --reload 要传导入字符串，不能传对象：
+    # uvicorn 开启 reload（或 workers）时要求应用以
+    # 「模块:属性」的形式传入，比如 "runtime.server:app"，
+    # 传对象它会直接 sys.exit(1)。
+    #
+    # 传字符串之后，uvicorn 的监视进程会另起一个子进程，
+    # 由子进程重新导入 runtime.server:app 并真正提供服务。
+    #
+    # 好处是子进程继承当前进程的 os.environ，
+    # 所以 --no-schedule 写的命令行覆盖在子进程里同样生效。
+    #
+    # 前提是项目根目录在 sys.path 上，
+    # 用 python -m runtime 启动时 cwd 就是项目根，没问题。
+    target = "runtime.server:app" if args.reload else server.app
+
     uvicorn.run(
-        server.app,
+        target,
         host=args.host,
         port=args.port,
         reload=args.reload,

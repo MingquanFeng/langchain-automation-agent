@@ -70,14 +70,9 @@ async def lifespan(app: FastAPI):
 
     启动逻辑：
     按 RUNTIME.scheduler_enabled 决定要不要拉起调度器。
-    注意这个开关是 agent/config.py 在模块导入时读环境变量固化的，
-    所以 --no-schedule 必须在导入本模块之前设置好环境变量。
-
-    注意（已知坑，未修）：
-    config.py 用 load_dotenv(override=True)，
-    .env 里的 SCHEDULER_ENABLED 会盖掉命令行设进去的值，
-    所以 .env 存在时 --no-schedule 实际不生效。
-    详见 runtime/__main__.py 里同名的注释。
+    注意这个开关是 agent/config.py 在模块导入时读配置固化的，
+    所以 --no-schedule 必须在导入本模块之前设置好命令行覆盖
+    （见 agent/config.py 的 set_cli_override）。
 
     关闭逻辑：
     停掉调度器。

@@ -24,7 +24,46 @@ from dotenv import load_dotenv
 
 # 将 .env 文件中的变量加载到当前进程环境中。
 # override=True 表示 .env 中的同名变量覆盖已有环境变量。
+#
+# 注意：
+# 因为是「.env 覆盖环境变量」，
+# 所以 os.environ["SCHEDULER_ENABLED"] = "0" 这种写法会被 .env 里的
+# SCHEDULER_ENABLED=1 顶回去 —— 命令行开关传不进来。
+# 命令行开关要通过下面的「命令行覆盖通道」写，见 set_cli_override()。
 load_dotenv(override=True)
+
+# 命令行覆盖通道的键名前缀。
+#
+# 完整键名形如 __CLI_SCHEDULER_ENABLED__。
+#
+# 为什么用这么别扭的名字：
+# 1. .env 里绝不会出现这种键，所以 load_dotenv 不会碰它；
+# 2. 配置文件被 importlib.reload() 重新加载时，
+#    它依然留在 os.environ 里，覆盖依然有效。
+#
+# 这样既能让命令行开关压过 .env，
+# 又不用改变「.env 覆盖普通环境变量」这个既有语义。
+_CLI_PREFIX = "__CLI_"
+
+
+def set_cli_override(name: str, value: str) -> None:
+    """
+    写入一条命令行覆盖，供 runtime/__main__.py 调用。
+
+    参数：
+        name：配置项名，例如 "SCHEDULER_ENABLED"。
+        value：覆盖值。
+
+    效果：
+        之后 _env(name) 优先返回这个值，
+        忽略环境变量和 .env 里的同名项。
+
+    注意：
+        要在 agent.config 被 reload 之前调用，
+        或者说 —— 调用顺序无所谓，
+        因为它写进的是 os.environ，reload 不会清掉。
+    """
+    os.environ[f"{_CLI_PREFIX}{name}__"] = str(value)
 
 
 # ============================================================
@@ -53,7 +92,12 @@ DATA_DIR.mkdir(exist_ok=True)
 
 def _env(name: str, default: str = "") -> str:
     """
-    读取环境变量并去除首尾空白字符。
+    读取配置项，去除首尾空白字符。
+
+    取值优先级：
+        1. 命令行覆盖（见 set_cli_override）
+        2. 环境变量（含 .env 加载进来的）
+        3. default
 
     参数：
         name：环境变量名称。
@@ -66,6 +110,13 @@ def _env(name: str, default: str = "") -> str:
         如果环境变量存在但为空字符串，
         不会自动使用 default。
     """
+    # 命令行覆盖优先于一切。
+    #
+    # .env 里的同名项因为 load_dotenv(override=True) 会盖住普通环境变量，
+    # 所以命令行开关只能走这个独立的通道才能生效。
+    cli = os.getenv(f"{_CLI_PREFIX}{name}__")
+    if cli is not None:
+        return cli.strip()
     return os.getenv(name, default).strip()
 
 

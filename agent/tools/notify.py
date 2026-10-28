@@ -31,14 +31,12 @@ notify / notify_summary 都属于**写工具**，
 
 from __future__ import annotations
 
-# json：标准库。
-# 当前代码没有直接用到它 ——
-# httpx 的 json= 参数会自己把 dict 序列化成请求体。
-# 属于预留导入，换平台需要手拼 JSON 字符串时才用得上。
-import json
-
 # httpx：HTTP 客户端。
 # 用于向 webhook 地址 POST 消息体。
+#
+# 说明：
+# 这里没有 import json —— httpx 的 json= 参数会自己把 dict
+# 序列化成请求体，用不到标准库的 json 模块。
 import httpx
 
 # @tool：LangChain 的工具装饰器。

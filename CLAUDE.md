@@ -146,7 +146,9 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
    ```
    注意 `override` 是**替换**语义 —— 要在原提示词后追加，得自己把原文拼进去，否则原提示词会被冲掉。`ContextInjectionMiddleware.wrap_model_call` 是正例。
 
-10. **`SCHEDULER_ENABLED` 必须在 import `runtime.server` 之前生效。** `server.py` 在模块导入时就读了 `RUNTIME.scheduler_enabled` 做启动钩子，所以 `runtime/__main__.py` 里 `--no-schedule` 要先设 `os.environ` 再 `importlib.reload(agent.config)` 和 `reload(server)`。改启动逻辑时别把这个顺序弄丢了。
+10. **`SCHEDULER_ENABLED` 必须在 import `runtime.server` 之前生效。** `server.py` 在模块导入时就读了 `RUNTIME.scheduler_enabled` 做启动钩子，所以 `runtime/__main__.py` 里 `--no-schedule` 要先写覆盖再 `importlib.reload(agent.config)` 和 `reload(server)`。改启动逻辑时别把这个顺序弄丢了。
+
+    **写覆盖要用 `agent.config.set_cli_override("SCHEDULER_ENABLED", "0")`，不能直接 `os.environ["SCHEDULER_ENABLED"] = "0"`。** 因为 `config.py` 用的是 `load_dotenv(override=True)`（.env 覆盖环境变量），直接设进 `os.environ` 的值会在 reload 时重新读 `.env` 的动作里被顶掉 —— `.env` 里默认带着 `SCHEDULER_ENABLED=1`，`--no-schedule` 形同虚设（`/health` 仍返回 `scheduler: true`）。`set_cli_override` 写的是 `__CLI_SCHEDULER_ENABLED__` 这种独立前缀的键，`.env` 里不会有它，reload 也不会清掉它。
 
 11. **FastAPI 的 `@app.on_event` 已废弃**（fastapi 0.135），要用 `lifespan` 上下文管理器。`server.py` 里是 `lifespan` 写法：启动逻辑放 `yield` 前，清理逻辑放 `yield` 后。
 
