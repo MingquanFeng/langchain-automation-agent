@@ -73,9 +73,11 @@ python -m runtime --reload       # 开发模式热重载
 | POST | `/run/stream` | SSE 流式触发 |
 
 ```bash
+# allow_write 默认 false：只读模式，写工具（notify / write_file 等）会被拦截。
+# 需要写权限时显式传 allow_write=true
 curl -X POST http://127.0.0.1:8000/run \
   -H 'Content-Type: application/json' \
-  -d '{"instruction":"列出数据目录下的文件并汇总通知"}'
+  -d '{"instruction":"列出数据目录下的文件并汇总通知","allow_write":true}'
 ```
 
 ## 学习路径

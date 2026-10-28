@@ -8,7 +8,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from agent.config import RUNTIME
-from agent.context import AgentContext
+from agent.context import AgentContext, Trigger
 from agent.graph import build_agent
 
 # 复用同一个 agent 实例，保留 checkpointer 里的记忆
@@ -25,8 +25,8 @@ def get_agent():
 def run_task(
     instruction: str,
     task_name: str | None = None,
-    trigger: str = "cli",
-    allow_write: bool = True,
+    trigger: Trigger = "cli",
+    allow_write: bool = False,
     thread_id: str | None = None,
 ) -> dict[str, Any]:
     """执行一次任务。

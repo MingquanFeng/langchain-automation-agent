@@ -6,6 +6,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+# 触发来源。schedule=定时调度，api=HTTP 接口，cli=命令行/直接调用，lab=实验脚本
+Trigger = Literal["schedule", "api", "cli", "lab"]
 
 
 @dataclass
@@ -17,9 +21,9 @@ class AgentContext:
 
     # 本次任务的人类可读名称，出现在日志与通知里
     task_name: str = "manual"
-    # 触发来源：schedule / api / cli
-    trigger: str = "cli"
-    # 是否允许写操作（发消息、改文件、删数据）
-    allow_write: bool = True
+    # 触发来源：schedule / api / cli / lab
+    trigger: Trigger = "cli"
+    # 是否允许写操作（发消息、改文件、删数据）。默认关闭，写权限需显式开启
+    allow_write: bool = False
     # 通知出口标识，用于日志区分
     notify_channel: str = "terminal"

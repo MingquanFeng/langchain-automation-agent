@@ -14,7 +14,7 @@ class ScheduledTask:
     name: str
     cron: str
     instruction: str
-    allow_write: bool = True
+    allow_write: bool = False
     enabled: bool = True
 
 
@@ -27,6 +27,8 @@ TASKS: list[ScheduledTask] = [
             "读取数据目录下的 todo.md，整理出今天要做的 3 件最优先的事，"
             "用 notify 推送给我。每件事一行，不要展开。"
         ),
+        # notify 属于写工具，要推送就必须显式开写权限
+        allow_write=True,
     ),
     ScheduledTask(
         name="数据目录巡检",

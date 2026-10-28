@@ -44,14 +44,14 @@ class TaskRequest(BaseModel):
     instruction: str = Field(..., description="给 Agent 的自然语言指令")
     task_name: str | None = Field(None, description="任务名，出现在通知标题里")
     thread_id: str | None = Field(None, description="会话 ID，相同则共享记忆")
-    allow_write: bool = Field(True, description="是否允许写操作")
+    allow_write: bool = Field(False, description="是否允许写操作")
 
 
 class ScheduledTaskRequest(BaseModel):
     name: str
     cron: str = Field(..., description="cron 表达式，如 '0 9 * * *'")
     instruction: str
-    allow_write: bool = True
+    allow_write: bool = False
 
 
 @app.get("/health")

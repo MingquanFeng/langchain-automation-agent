@@ -72,8 +72,8 @@ $PY lab/03_memory.py
 | POST | `/tasks` | 动态添加定时任务（cron + 指令） |
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 列出调度器已注册的 job 与下次运行时间 |
-| POST | `/run` | 同步触发一次任务 |
-| POST | `/run/stream` | SSE 流式触发 |
+| POST | `/run` | 同步触发一次任务（默认只读，`allow_write=true` 才开写权限） |
+| POST | `/run/stream` | SSE 流式触发（同上，默认只读） |
 
 首次使用需 `cp .env.example .env` 并填 `LLM_API_KEY`。环境变量全清单见 `.env.example`。
 
@@ -97,7 +97,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 ### agent/ — 能力与状态层
 
 - `config.py` — 唯一的配置出口。`MODEL` 和 `RUNTIME` 两个 frozen dataclass 在模块导入时从环境变量读一次。改配置只改这里 + `.env`。`MEMORY_BACKEND` 决定记忆后端（`sqlite` 落盘到 `data/memory.sqlite`，`memory` 只在内存）。
-- `context.py` — `AgentContext`，每次调用的静态运行时配置（任务名、触发来源、是否允许写）。
+- `context.py` — `AgentContext`，每次调用的静态运行时配置（任务名、触发来源、是否允许写）。`trigger` 用 `Literal["schedule", "api", "cli", "lab"]` 限定，新增触发方式要同步改这个类型别名。
 - `graph.py` — **装配中心**。`build_agent()` 是唯一创建 Agent 的地方，模型/工具/记忆后端都从这里注入。中间件栈在这里组装：`LIMITS`（限次）→ `RETRY`（重试）→ `TODO`（任务拆解）→ `CONTEXT_EDITING`（上下文清理）→ `CUSTOM_MIDDLEWARE`（自定义）。
 - `tools/` — L1 能力层。`files.py` 的文件工具被沙箱限制在 `data/` 目录内（`_resolve` 越界抛 `ValueError`）；`notify.py` 是通知出口，webhook 未配置时降级为终端输出。
 - `middleware/custom.py` — L4 守卫层的自定义部分。三个中间件分别负责只读拦截、上下文注入、耗时统计。
@@ -164,7 +164,7 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 ## 约定
 
 - **记忆隔离靠 `thread_id`**。定时任务用 `cron-{任务名}` 作为 thread_id，保留跨天记忆；`POST /run` 每次生成随机 `task-{uuid}`；`POST /run/stream` 默认生成随机 `stream-{uuid}`，只有显式传 `thread_id` 才复用会话。
-- **写操作受 `AgentContext.allow_write` 控制**。只读模式由 `TaskGateMiddleware` 拦截。新增写类工具时，要同步更新 `TaskGateMiddleware.WRITE_TOOLS`。
+- **写操作受 `AgentContext.allow_write` 控制，默认关闭**（只读是默认态，写权限要显式开启：`AgentContext(allow_write=True)` / `/run` 传 `allow_write=true` / `ScheduledTask(allow_write=True)`）。只读模式由 `TaskGateMiddleware` 拦截。注意 `notify` / `notify_summary` 也算写工具，需要推送的任务必须显式开权限。新增写类工具时，要同步更新 `TaskGateMiddleware.WRITE_TOOLS`。
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
 - **中间件顺序有意义**：`LIMITS` 放最前（先挡住跑飞），`CUSTOM_MIDDLEWARE` 放最后（能看到前面中间件的结果）。
 - **测试会真写 `data/` 目录**（`data/out/report.md` 等），`data/` 已在 `.gitignore` 里，跑测试不必清理。
