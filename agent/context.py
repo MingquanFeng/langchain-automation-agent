@@ -47,7 +47,7 @@ Trigger = Literal["schedule", "api", "cli", "lab"]
 # schedule：定时调度器触发（runtime/scheduler.py）。
 # api：HTTP 接口触发（runtime/server.py）。
 # cli：命令行或直接调用触发（runtime/runner.py、runtime/repl.py）。
-# lab：学习实验脚本触发（lab/ 目录）。
+# lab：学习实验脚本触发（自己写的实验脚本）。
 
 
 # ============================================================

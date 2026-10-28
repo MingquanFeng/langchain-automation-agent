@@ -37,7 +37,7 @@ PY=/opt/miniconda3/envs/langchain1.2/bin/python
 所有命令都在本目录（`automation_agent/`）下执行。
 
 ```bash
-# 跑测试（35 项，全部用假模型，不调真实 API）
+# 跑测试（39 项，全部用假模型，不调真实 API）
 $PY -m pytest tests/ -q
 
 # 跑单个测试
@@ -57,14 +57,9 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 
 # 交互式终端（REPL）
 $PY -m runtime chat
-
-# 跑学习实验（不需要 API key，用假模型）
-$PY lab/01_agent_loop.py
-$PY lab/02_middleware.py
-$PY lab/03_memory.py
 ```
 
-**本项目只有 pytest 一道验证关卡**，没有 lint、type-check、build 步骤（纯 Python 包，无打包产物）。提交前的验证底线就是 `pytest tests/ -q` 35 项全过 + 按实际需求跑一次服务确认能起来。
+**本项目只有 pytest 一道验证关卡**，没有 lint、type-check、build 步骤（纯 Python 包，无打包产物）。提交前的验证底线就是 `pytest tests/ -q` 39 项全过 + 按实际需求跑一次服务确认能起来。
 
 服务起来后的 HTTP 端点：
 
@@ -82,11 +77,7 @@ $PY lab/03_memory.py
 
 ## 学习材料
 
-- `LEARNING.md` — **学习地图**：课件章节 ↔ 源码位置 ↔ lab 实验 ↔ 练习的对照表。想学这个项目先看它。
-- `lab/` — 动手实验脚本，**不需要 API key**（用脚本化的假模型编排，不花钱也不限流）：
-  - `lab/01_agent_loop.py` — 看清 agent 循环：模型输出的 tool_calls 如何变成 ToolMessage 回灌
-  - `lab/02_middleware.py` — 看清中间件如何改变行为（只读闸门如何拦截写操作）
-  - `lab/03_memory.py` — 看清 thread_id 如何隔离记忆
+- `LEARNING.md` — **学习地图**：课件章节 ↔ 源码位置 ↔ 练习的对照表。想学这个项目先看它。
 
 ## 架构
 
@@ -178,4 +169,4 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
 - **中间件顺序有意义**：`LIMITS` 放最前（先挡住跑飞），`CUSTOM_MIDDLEWARE` 放最后（能看到前面中间件的结果）。
 - **测试会真写 `data/` 目录**（`data/out/report.md` 等），`data/` 已在 `.gitignore` 里，跑测试不必清理。
-- 提交前跑 `pytest tests/ -q`，35 项必须全过。
+- 提交前跑 `pytest tests/ -q`，39 项必须全过。

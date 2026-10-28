@@ -8,12 +8,12 @@
 源码注释里的「对应课件 XX 章 X.X 节」就是索引。本文档把这三样东西串起来：
 
 ```
-课件小节  →  该读哪几个文件（按顺序）  →  跑哪个 lab 脚本  →  做哪个练习
+课件小节  →  该读哪几个文件（按顺序）  →  做哪个练习
 ```
 
-节奏建议：**先跑实验建立直觉，再读源码，最后动手改**。反过来读代码会陷入 API 细节，看不出设计意图。
+节奏建议：**先动手试出直觉，再读源码，最后动手改**。反过来读代码会陷入 API 细节，看不出设计意图。
 
-所有 `lab/` 脚本都**不需要 API key**（用脚本化的假模型编排），不花钱也不限流。真实模型的行为和课件一致，只是脚本可控。
+动手试的部分用交互式终端（`python -m runtime chat`）就能完成，不用额外写脚本。
 
 ---
 
@@ -48,14 +48,12 @@
 **关键认知**：1.x 里「Agent」不再是一个需要 `initialize_agent` 的类，而是一次 `create_agent()` 调用返回的**编译好的图**。
 模型、工具、中间件、记忆全是**注入参数** —— 所以换模型/换工具不用改调用方，这就是 `build_agent()` 存在的意义。
 
-**lab**：`lab/01_agent_loop.py`
-
 **练习**：
-1. 把 `SYSTEM_PROMPT` 改成完全不同的角色（比如算命先生），跑 lab/01，看模型输出怎么变。
+1. 把 `SYSTEM_PROMPT` 改成完全不同的角色（比如算命先生），起 `python -m runtime chat` 看模型输出怎么变。
 2. 给 `build_agent()` 加一个参数（比如 `store`），验证 `runtime/runner.py` 的 `_AGENT` 单例不会因此重建。
 
 **延伸**：课件 07 章 8.2 讲了 7 种 `stream_mode`（values / updates / messages / tasks / debug / checkpoints / custom）。
-项目只用了 `values`（`server.py:113`）。改成 `messages` 再跑 lab/01，观察输出粒度的差别。
+项目只用了 `values`（`server.py:113`）。改成 `messages` 再起一次服务，观察输出粒度的差别。
 
 ---
 
@@ -78,7 +76,7 @@
 - docstring 要写 **Google 风格**（参数逐个说明）—— 项目里 `notify` 用了 `Args:` 段，`files.py` 的几个工具**没写**，模型只能靠参数名猜。
 
 **练习**：
-1. 给 `files.py` 的 `read_file` 补一段 Google 风格 docstring（参数说明 + 返回值 + 一句例子），跑 lab/01 对比模型选工具的准确率。
+1. 给 `files.py` 的 `read_file` 补一段 Google 风格 docstring（参数说明 + 返回值 + 一句例子），在终端里对比模型选工具的准确率。
 2. 加一个 `count_lines(path)` 工具，故意**完全不写 docstring**，跑一次看模型会不会用；再补 docstring 再跑一次，对比效果。
 3. 把 `_resolve` 的沙箱临时放开到整个项目目录，写一个能读到 `agent/graph.py` 的工具，观察 agent 拿到源码后会干什么。
 
@@ -151,8 +149,6 @@
 **记忆治理（课件 09 章 2.4）**：消息裁剪 / 消息删除 / 摘要。
 项目做的是**工具结果清理**（`ContextEditingMiddleware` + `ClearToolUsesEdit`，属于 08 章 3.8），
 而不是消息裁剪 —— 这条路还没走。
-
-**lab**：`lab/03_memory.py`
 
 **练习**：
 1. 在同一个 thread 里连续 invoke 两次，打印 `result["messages"]` 的长度，观察历史如何累积。

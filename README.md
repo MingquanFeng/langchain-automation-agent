@@ -15,8 +15,8 @@
 
 - **1.x 新写法**：`create_agent` + 中间件体系 + `state`/`store`/`checkpointer`，不混用 0.x 的 `AgentExecutor`
 - **中间件栈完整**：限次 → 重试 → 任务拆解 → 上下文清理 → 自定义守卫，顺序可考
-- **测试零成本**：35 项端到端测试全部用假模型，不调用任何真实 API
-- **学习材料齐备**：`LEARNING.md` 学习地图 + `lab/` 三个免 API key 的动手实验
+- **测试零成本**：39 项端到端测试全部用假模型，不调用任何真实 API
+- **学习材料齐备**：`LEARNING.md` 学习地图，课件章节 ↔ 源码位置 ↔ 练习一一对应
 
 ## 快速开始
 
@@ -91,13 +91,7 @@ curl -X POST http://127.0.0.1:8000/run \
 4. **上下文与记忆** —— `AgentContext` / `state` / `store` / `checkpointer` 四者分工
 5. **运行时外壳** —— 定时任务、HTTP 服务、会话隔离
 
-每个实验脚本都不需要 API key：
-
-```bash
-python lab/01_agent_loop.py   # 看清 agent 循环：tool_calls 如何变成 ToolMessage 回灌
-python lab/02_middleware.py   # 看清中间件如何改变行为（只读闸门）
-python lab/03_memory.py       # 看清 thread_id 如何隔离记忆
-```
+每条主线都配了动手练习，都写在 `LEARNING.md` 里。
 
 ## 目录结构
 
@@ -114,7 +108,6 @@ runtime/
   server.py          FastAPI，/run 同步、/run/stream 流式
   repl.py            交互式终端，python -m runtime chat
   tasks.py           定时任务表，改这里就改 Agent 每天自动做什么
-lab/                 动手实验脚本
 tests/               端到端测试
 ```
 
