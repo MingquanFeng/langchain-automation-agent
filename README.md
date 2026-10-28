@@ -15,7 +15,7 @@
 
 - **1.x 新写法**：`create_agent` + 中间件体系 + `state`/`store`/`checkpointer`，不混用 0.x 的 `AgentExecutor`
 - **中间件栈完整**：限次 → 重试 → 任务拆解 → 上下文清理 → 自定义守卫，顺序可考
-- **测试零成本**：16 项端到端测试全部用假模型，不调用任何真实 API
+- **测试零成本**：35 项端到端测试全部用假模型，不调用任何真实 API
 - **学习材料齐备**：`LEARNING.md` 学习地图 + `lab/` 三个免 API key 的动手实验
 
 ## 快速开始
@@ -50,7 +50,7 @@ cp .env.example .env
 python -m pytest tests/ -q
 ```
 
-预期输出 `16 passed`。全部使用假模型，不需要 API key。
+预期输出 `35 passed`。全部使用假模型，不需要 API key。
 
 ### 4. 起服务
 
@@ -58,6 +58,7 @@ python -m pytest tests/ -q
 python -m runtime                # 含定时任务
 python -m runtime --no-schedule  # 只起 HTTP 服务
 python -m runtime --reload       # 开发模式热重载
+python -m runtime chat           # 交互式终端（REPL）
 ```
 
 服务起在 `http://127.0.0.1:8000`：
@@ -111,10 +112,40 @@ runtime/
   runner.py          唯一 Agent 调用入口，调度器和 HTTP 都走它
   scheduler.py       APScheduler 封装（LangGraph 1.x 本地没有内置 cron）
   server.py          FastAPI，/run 同步、/run/stream 流式
+  repl.py            交互式终端，python -m runtime chat
   tasks.py           定时任务表，改这里就改 Agent 每天自动做什么
 lab/                 动手实验脚本
 tests/               端到端测试
 ```
+
+## 交互式终端
+
+不想用 HTTP 接口时，直接在终端里跟 Agent 聊：
+
+```bash
+python -m runtime chat
+```
+
+```
+› 用一句话介绍你自己
+🤖 我是一个自动化日常事务助手，会用 Todo 清单拆解任务、逐条推进……
+
+› 上面那个助手叫什么？
+🤖 它没有名字，我刚才只做了自我介绍……
+```
+
+斜杠命令做控制，其余输入都是给 Agent 的指令：
+
+| 命令 | 作用 |
+|---|---|
+| `/help` | 显示帮助 |
+| `/new` | 开新会话（换 thread_id，上下文清空） |
+| `/thread` | 显示当前会话 ID |
+| `/write on\|off` | 开关写权限（默认 off，只读） |
+| `/think on\|off` | 是否显示模型思考过程（默认 off） |
+| `/exit` | 退出（Ctrl-D、Ctrl-C 同效） |
+
+会话 ID 默认是 `cli-chat`，重启终端还能接着上次聊。
 
 ## 实现要点
 

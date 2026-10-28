@@ -37,7 +37,7 @@ PY=/opt/miniconda3/envs/langchain1.2/bin/python
 所有命令都在本目录（`automation_agent/`）下执行。
 
 ```bash
-# 跑测试（16 项，全部用假模型，不调真实 API）
+# 跑测试（35 项，全部用假模型，不调真实 API）
 $PY -m pytest tests/ -q
 
 # 跑单个测试
@@ -55,13 +55,16 @@ $PY -m runtime --reload
 # 换端口/监听地址
 $PY -m runtime --host 0.0.0.0 --port 8080
 
+# 交互式终端（REPL）
+$PY -m runtime chat
+
 # 跑学习实验（不需要 API key，用假模型）
 $PY lab/01_agent_loop.py
 $PY lab/02_middleware.py
 $PY lab/03_memory.py
 ```
 
-**本项目只有 pytest 一道验证关卡**，没有 lint、type-check、build 步骤（纯 Python 包，无打包产物）。提交前的验证底线就是 `pytest tests/ -q` 16 项全过 + 按实际需求跑一次服务确认能起来。
+**本项目只有 pytest 一道验证关卡**，没有 lint、type-check、build 步骤（纯 Python 包，无打包产物）。提交前的验证底线就是 `pytest tests/ -q` 35 项全过 + 按实际需求跑一次服务确认能起来。
 
 服务起来后的 HTTP 端点：
 
@@ -99,7 +102,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 - `config.py` — 唯一的配置出口。`MODEL` 和 `RUNTIME` 两个 frozen dataclass 在模块导入时从环境变量读一次。改配置只改这里 + `.env`。`MEMORY_BACKEND` 决定记忆后端（`sqlite` 落盘到 `data/memory.sqlite`，`memory` 只在内存）。
 - `context.py` — `AgentContext`，每次调用的静态运行时配置（任务名、触发来源、是否允许写）。`trigger` 用 `Literal["schedule", "api", "cli", "lab"]` 限定，新增触发方式要同步改这个类型别名。
 - `graph.py` — **装配中心**。`build_agent()` 是唯一创建 Agent 的地方，模型/工具/记忆后端都从这里注入。中间件栈在这里组装：`LIMITS`（限次）→ `RETRY`（重试）→ `TODO`（任务拆解）→ `CONTEXT_EDITING`（上下文清理）→ `CUSTOM_MIDDLEWARE`（自定义）。
-- `tools/` — L1 能力层。`files.py` 的文件工具被沙箱限制在 `data/` 目录内（`_resolve` 越界抛 `ValueError`）；`notify.py` 是通知出口，webhook 未配置时降级为终端输出。
+- `tools/` — L1 能力层。`files.py` 的文件工具被沙箱限制在 `data/` 目录内（`_resolve` 越界抛 `ValueError`）；读文件有 200KB 上限、二进制文件拒绝、记忆库（`memory.sqlite`）禁读 —— 否则 agent 一句「看下这个文件」就能撑爆上下文窗口；`notify.py` 是通知出口，webhook 未配置时降级为终端输出。
 - `middleware/custom.py` — L4 守卫层的自定义部分。三个中间件分别负责只读拦截、上下文注入、耗时统计。
 
 ### runtime/ — 运行时外壳
@@ -107,6 +110,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 - `runner.py` — 唯一的 Agent 调用入口，调度器和 HTTP 服务都走它，保证行为一致。`_AGENT` 单例复用，保留 checkpointer 里的记忆。
 - `scheduler.py` — APScheduler 封装。**LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力），所以定时触发必须自己接 APScheduler。cron 表达式按 `SCHEDULER_TIMEZONE` 解释，用 `CronTrigger.from_crontab`，即标准 5 段格式。
 - `server.py` — FastAPI。`/run` 同步，`/run/stream` 走 SSE 流式。
+- `repl.py` — 交互式终端，`python -m runtime chat`。斜杠命令控会话（`/new` `/write` `/think`），其余输入当指令发给 Agent。走 `stream_mode=["messages","values"]`：增量文本从 messages 流取，工具调用从 values 流里的 `tool_calls` 认（messages 模式下非流式模型不吐 `tool_call_chunks`）。
 - `tasks.py` — 定时任务表。改这个文件就改 Agent 每天自动做什么。**注意 `TASKS` 是模块级内存字典，不落盘** —— `POST /tasks` 动态加的任务进程重启即消失，只有改代码里的 `TASKS` 列表才是持久定义。
 
 ## 关键 API 陷阱
@@ -150,6 +154,10 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 13. **别从网上抄 0.x 的写法。** 0.x 的老 API 没删，都挪进了 `langchain-classic` 包 —— 所以能 import 但不该用：`AgentExecutor`、`create_react_agent`、`create_tool_calling_agent`、`create_structured_chat_agent`、`ConversationBufferMemory` 这类 `xxxMemory` 类、`JsonOutputParser` 拼提示词。1.x 对应的新写法见 `LEARNING.md` 开头的版本对照表。
 
+14. **只读闸门拦下工具时必须补 ToolMessage。** `TaskGateMiddleware` 拦掉写工具后，要给每个被拦的 `tool_call` 补一条对应 `tool_call_id` 的 `ToolMessage`。少了它，消息历史里留着没有结果的 `tool_call`，下一轮请求被 OpenAI / MiniMax 兼容接口直接 400（`tool call result does not follow tool call`）。**只补 ToolMessage、不补收尾消息** —— agent 图的路由（`langchain/agents/factory.py`）看的是最后一条 AIMessage 的 `tool_calls`：都已回应就判定为「人工注入的工具消息」，跳回模型节点重新回答，于是 agent 会改用文字给结论。这跟官方 `HumanInTheLoopMiddleware` 的拒绝路径一致。
+
+15. **`build_agent(checkpointer=None)` 不是「不要记忆」，是「用默认的」。** 源码写的是 `checkpointer if checkpointer is not None else _build_checkpointer()`，传 None 会建**真实的 sqlite checkpointer**。测试里要显式传 `InMemorySaver()`，否则测试会话会落进 `data/memory.sqlite` 并跨次累积，最后把测试搞挂。
+
 ## 可选增强
 
 langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopMiddleware`（人工审批）、`SummarizationMiddleware`（摘要压缩）、`PIIMiddleware`（敏感信息脱敏）都可用，但当前**没有启用**：
@@ -168,4 +176,4 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
 - **中间件顺序有意义**：`LIMITS` 放最前（先挡住跑飞），`CUSTOM_MIDDLEWARE` 放最后（能看到前面中间件的结果）。
 - **测试会真写 `data/` 目录**（`data/out/report.md` 等），`data/` 已在 `.gitignore` 里，跑测试不必清理。
-- 提交前跑 `pytest tests/ -q`，16 项必须全过。
+- 提交前跑 `pytest tests/ -q`，35 项必须全过。
