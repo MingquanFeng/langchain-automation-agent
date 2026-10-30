@@ -3,9 +3,9 @@
 Agent 装配模块（graph.py）。
 
 对应课件：
-- 第 07 章：create_agent，创建 Agent。
-- 第 08 章：Middleware，中间件机制。
-- 第 09 章：Memory，记忆与状态持久化。
+- 第 07 章（courseware/尚硅谷-07-智能体.pdf）：create_agent，创建 Agent。
+- 第 08 章（courseware/尚硅谷-08-中间件.pdf）：Middleware，中间件机制。
+- 第 09 章（courseware/尚硅谷-09-上下文与记忆.pdf）：Memory，记忆与状态持久化。
 
 主要职责：
 1. 配置上下文清理、失败重试和调用次数限制。

@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目性质
 
-这是一个**学习驱动**的项目，不是生产系统。`automation_agent/` 是边学边搭的自动化 Agent 骨架，课件在上一级的 `../langchain学习/01-课件/`（尚硅谷 LangChain 1.x 的 10 章 PDF + 配套资料）。
+这是一个**学习驱动**的项目，不是生产系统。`automation_agent/` 是边学边搭的自动化 Agent 骨架，课件在仓库内的 `courseware/`（尚硅谷 LangChain 1.x 的 10 章 PDF 原件，见 `courseware/README.md` 的来源说明与章节索引）。
 
 课件对每个知识点都有对应章节，源码注释里用「对应课件 XX 章 X.X 节」标注了出处。**改代码前先看对应课件章节**，保持实现与课件 API 一致；只有当课件 API 与 langchain 1.2 实际行为冲突时，才按实际行为写并在注释里说明差异。
 
-PDF 文件名即章节号（`尚硅谷-05-Tools.pdf` → 课件 05 章）。本仓库没有 README，这份文件就是唯一的项目说明。
+PDF 文件名即章节号（`courseware/尚硅谷-05-Tools.pdf` → 课件 05 章）。`LEARNING.md` 是「章节 ↔ 源码位置 ↔ 练习」的索引，`courseware/` 是原文，两者配合使用。
 
-> 当前目录**尚未 git init**（`git status` 报「不是 Git 仓库」）。要提交需先初始化仓库。
+> 本仓库没有 README，`CLAUDE.md` 与 `README.md` 就是项目说明。
 
 ## 环境
 
@@ -26,12 +26,11 @@ PY=/opt/miniconda3/envs/langchain1.2/bin/python
 /opt/miniconda3/bin/conda env list
 ```
 
-依赖基线来自 `../langchain学习/01-课件/requirements.txt`（57 项，LangChain/LangGraph/MCP/模型供应商/Web/配置/日志/记忆，RAG 及以后章节被注释掉）。本项目在此之上额外装了：`apscheduler`（定时）、`langgraph-cli`（服务化）、`langgraph-checkpoint-sqlite`（持久化记忆）。
+依赖基线来自 `courseware/requirements.txt`（57 项，LangChain/LangGraph/MCP/模型供应商/Web/配置/日志/记忆，RAG 及以后章节被注释掉）。本项目在此之上额外装了：`apscheduler`（定时）、`langgraph-cli`（服务化）、`langgraph-checkpoint-sqlite`（持久化记忆）。
 
 已装关键版本：`langchain 1.2.12`、`langchain-core 1.2.18`、`langgraph 1.1.2`、`langgraph-checkpoint-sqlite 3.1.2`、`apscheduler 3.11.3`、`fastapi 0.135.1`、`uvicorn 0.46.0`、`httpx 0.28.1`。
 
 > **课件的 requirements.txt 是 UTF-16 LE 编码。** 直接 `pip install -r` 会乱码，需先 `iconv -f UTF-16LE -t UTF-8` 转码。
-
 ## 常用命令
 
 所有命令都在本目录（`automation_agent/`）下执行。

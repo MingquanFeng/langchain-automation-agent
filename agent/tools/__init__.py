@@ -1,7 +1,7 @@
 """
 Agent 工具集合的统一导出入口。
 
-对应课件 05 章：@tool 定义工具，docstring 就是给模型看的说明。
+对应课件 05 章（courseware/尚硅谷-05-Tools.pdf）：@tool 定义工具，docstring 就是给模型看的说明。
 
 主要职责：
 1. 汇总文件工具和通知工具。

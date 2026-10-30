@@ -4,7 +4,7 @@
 都是同一个 webhook 接口，只是 payload 格式不同，这里按飞书格式组装，
 其他平台改 `_format_payload` 即可。
 
-对应课件 05 章：@tool 装饰器定义工具，docstring 即给模型的工具说明。
+对应课件 05 章（courseware/尚硅谷-05-Tools.pdf）：@tool 装饰器定义工具，docstring 即给模型的工具说明。
 
 主要职责：
 1. 提供 notify / notify_summary 两个通知出口。

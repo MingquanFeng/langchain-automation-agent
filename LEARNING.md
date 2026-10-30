@@ -15,6 +15,10 @@
 
 动手试的部分用交互式终端（`python -m runtime chat`）就能完成，不用额外写脚本。
 
+课件原文就在本仓库的 `courseware/` 目录（尚硅谷 LangChain 1.x 的 10 章 PDF 原件），
+文件名的数字即章号 —— `courseware/尚硅谷-05-Tools.pdf` 就是课件 05 章。
+章节与源码的对应索引见 `courseware/README.md`。
+
 ---
 
 ## ⚠️ 第一件事：分清 1.x 和 0.x
