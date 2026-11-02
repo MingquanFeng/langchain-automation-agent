@@ -1,19 +1,18 @@
 # 学习地图
 
 这个项目只有 1100 行，但它把 **langchain 1.x agent 开发的每个知识点都落到了可运行的代码上**。
-它的价值不在业务功能，而在于「每段代码都标了对应课件章节，每章都能动手验证」。
+它的价值不在业务功能，而在于「每段代码都标了对应课件章节，每个知识点都有对应的实现」。
 
 ## 怎么用这张地图
 
-源码注释里的「对应课件 XX 章 X.X 节」就是索引。本文档把这三样东西串起来：
+源码注释里的「对应课件 XX 章 X.X 节」就是索引。本文档把两样东西串起来：
 
 ```
-课件小节  →  该读哪几个文件（按顺序）  →  做哪个练习
+课件小节  →  该读哪几个文件（按顺序）
 ```
 
-节奏建议：**先动手试出直觉，再读源码，最后动手改**。反过来读代码会陷入 API 细节，看不出设计意图。
-
-动手试的部分用交互式终端（`python -m runtime chat`）就能完成，不用额外写脚本。
+每条主线先给源码位置，再给这个知识点的关键认知和容易踩的坑 —— 看代码时对照着看，
+比通读课件更快定位到自己要用的那部分。
 
 课件原文就在本仓库的 `courseware/` 目录（尚硅谷 LangChain 1.x 的 10 章 PDF 原件），
 文件名的数字即章号 —— `courseware/尚硅谷-05-Tools.pdf` 就是课件 05 章。
@@ -55,12 +54,8 @@
 **关键认知**：1.x 里「Agent」不再是一个需要 `initialize_agent` 的类，而是一次 `create_agent()` 调用返回的**编译好的图**。
 模型、工具、中间件、记忆全是**注入参数** —— 所以换模型/换工具不用改调用方，这就是 `build_agent()` 存在的意义。
 
-**练习**：
-1. 把 `SYSTEM_PROMPT` 改成完全不同的角色（比如算命先生），起 `python -m runtime chat` 看模型输出怎么变。
-2. 给 `build_agent()` 加一个参数（比如 `store`），验证 `runtime/runner.py` 的 `_AGENT` 单例不会因此重建。
-
 **延伸**：课件 07 章 8.2 讲了 7 种 `stream_mode`（values / updates / messages / tasks / debug / checkpoints / custom）。
-项目只用了 `values`（`server.py:113`）。改成 `messages` 再起一次服务，观察输出粒度的差别。
+项目只用了 `values`（`server.py:113`）和 `messages`（`repl.py:458`）。
 
 ---
 
@@ -81,13 +76,6 @@
 **两条工具设计规范**：
 - 工具数量 **2-5 个最佳**（**07 章** P21：「只给 Agent 需要的工具，工具太多会混淆。一般 2-5 个工具最佳」）—— 本项目有 8 个（6 个文件 + 2 个通知），已经偏多，模型选错工具的概率会上升。
 - docstring 要写 **Google 风格**（参数逐个说明，**05 章** 3.1）—— 项目现在 8 个工具全部开了 `parse_docstring=True` 且写成 Google 风格，参数说明会进 schema 的 `properties.<arg>.description`，模型不用靠参数名猜。
-
-**练习**：
-1. 把 `files.py` 里某个工具的 docstring 改模糊（比如把 `read_file` 的首行改成「读文件」），在终端里对比模型选工具的准确率 —— 这就是 docstring 质量换来的差别。
-2. 加一个 `count_lines(path)` 工具，故意**完全不写 docstring**，跑一次看模型会不会用；再补 docstring 再跑一次，对比效果。
-3. 把 `_resolve` 的沙箱临时放开到整个项目目录，写一个能读到 `agent/graph.py` 的工具，观察 agent 拿到源码后会干什么。
-
-> 注意练习 3 要改的是 `agent/tools/files.py` 里的 `SANDBOX` —— 越界检查本身在 `_resolve` / `_resolve_safe` 两处。
 
 ---
 
@@ -119,11 +107,6 @@
 这条规则解释了为什么 `LIMITS` 必须放最前：它的限次检查是 `before_model` 型，
 放最前 = 最先检查 = 能在模型跑飞之前拦住。放最后就晚了。
 
-**练习**：
-1. 在 `CUSTOM_MIDDLEWARE` 里加一个中间件，限制单轮工具调用次数不超过 2（用 `before_model` 数 `state["messages"]` 里的 tool_calls）。
-2. 把 `TaskGateMiddleware` 的 `after_model` 改成 `wrap_tool_call`，对比两种写法拦截点的差别（课件 5.3 vs 5.4）。
-3. 调换中间件顺序，把 `CUSTOM_MIDDLEWARE` 放到最前，观察 `TimingMiddleware` 还能不能统计到完整数据 —— 用 5.6 的规则推演，再跑一遍验证。
-
 **可加的内置中间件**（课件 08 章 2.x 都讲过）：
 - `PIIMiddleware(pii_type="email", strategy="mask")` —— 自动脱敏，防止把敏感信息发给模型
 - `SummarizationMiddleware(model=..., trigger=..., keep=...)` —— 上下文满了自动摘要
@@ -153,17 +136,11 @@
 **课件 09 章 4.1 讲了三种在钩子里读 context 的方式**，项目实现了两种：
 - ✅ Node-style hooks（`before_model` / `after_model`）—— `TaskGateMiddleware` 用了
 - ✅ Wrap-style hooks（`wrap_model_call` / `wrap_tool_call`）—— `ContextInjectionMiddleware` 用了
-- ❌ `dynamic_prompt` —— **项目没实现**，这是动态改写系统提示词的官方方式，值得练一次
+- ❌ `dynamic_prompt` —— **项目没实现**，这是动态改写系统提示词的官方方式
 
 **记忆治理（课件 09 章 2.4）**：消息裁剪 / 消息删除 / 摘要。
 项目做的是**工具结果清理**（`ContextEditingMiddleware` + `ClearToolUsesEdit`，属于 08 章 3.8），
 而不是消息裁剪 —— 这条路还没走。
-
-**练习**：
-1. 在同一个 thread 里连续 invoke 两次，打印 `result["messages"]` 的长度，观察历史如何累积。
-2. 换 thread_id 再跑一次，对比消息数。
-3. 把 `MEMORY_BACKEND` 改成 `memory` 和 `sqlite` 各跑一次，重启进程看记忆还在不在。
-4. 实现一个 `dynamic_prompt` 中间件：让系统提示词随 `AgentContext.task_name` 变化而变化。
 
 ---
 
@@ -178,15 +155,11 @@
 | `server.py:113` `/run/stream` | SSE 流式。`stream_mode="values"` 每步给全量状态 |
 | `tasks.py:22` `TASKS` | 改这个文件就改 Agent 每天自动做什么。注意它是**内存字典，不落盘** |
 
-**练习**：
-1. 给 `runtime/tasks.py` 加一个每天 8 点的任务，起服务后 `GET /jobs` 看它有没有被注册。
-2. 用 `curl -N -X POST /run/stream` 看流式输出长什么样。
-
 ---
 
-## 课件里有、这个项目还没覆盖的（正好当你的练习）
+## 课件里有、这个项目还没接入的
 
-| 课件章 | 项目现状 | 建议 |
+| 课件章 | 项目现状 | 怎么接 |
 |---|---|---|
 | 03 LangSmith | 没配追踪 | 加 `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` + `LANGSMITH_PROJECT`（**1.x 是 `LANGSMITH_` 前缀，不是老版本的 `LANGCHAIN_TRACING_V2`**）。看每次 invoke 的完整 trace，这是最快的调试利器 |
 | 06 结构化输出 | 只有手写的 `save_json` | 用 `model.with_structured_output(PydanticModel)` 让模型直接返回结构化对象，比让模型「输出 JSON 字符串再解析」可靠得多。四种模式见课件 06 章 2.1-2.4（Pydantic / TypedDict / JSON Schema / dataclass） |
@@ -210,17 +183,3 @@
 
 ---
 
-## 自检清单
-
-学完一个主线，能回答这几个问题就是过关了：
-
-- [ ] 模型输出的 `tool_calls` 是什么结构？谁负责真正执行它？
-- [ ] `create_agent` 和 0.x 的 `AgentExecutor` 有什么根本区别？
-- [ ] 中间件的 `after_model` 和 `wrap_tool_call` 分别在什么时候执行？
-- [ ] 课件 08 章 5.6 的执行顺序规则是什么？`LIMITS` 为什么必须放最前？
-- [ ] `before_model` 和 `wrap_model_call` 都能改系统提示词，区别在哪？
-- [ ] context、state、store、checkpointer 四者分别管什么？
-- [ ] 为什么 `runtime.context` 会是 `None`？兜底该怎么写？
-- [ ] 定时任务为什么必须自己接 APScheduler？
-- [ ] `thread_id` 变了会发生什么？
-- [ ] 工具的 docstring 写得好不好，会影响什么？

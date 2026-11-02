@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 课件对每个知识点都有对应章节，源码注释里用「对应课件 XX 章 X.X 节」标注了出处。**改代码前先看对应课件章节**，保持实现与课件 API 一致；只有当课件 API 与 langchain 1.2 实际行为冲突时，才按实际行为写并在注释里说明差异。
 
-PDF 文件名即章节号（`courseware/尚硅谷-05-Tools.pdf` → 课件 05 章）。`LEARNING.md` 是「章节 ↔ 源码位置 ↔ 练习」的索引，`courseware/` 是原文，两者配合使用。
+PDF 文件名即章节号（`courseware/尚硅谷-05-Tools.pdf` → 课件 05 章）。`LEARNING.md` 是「章节 ↔ 源码位置」的索引，`courseware/` 是原文，两者配合使用。
 
 > 本仓库没有 README，`CLAUDE.md` 与 `README.md` 就是项目说明。
 
@@ -76,7 +76,7 @@ $PY -m runtime chat
 
 ## 学习材料
 
-- `LEARNING.md` — **学习地图**：课件章节 ↔ 源码位置 ↔ 练习的对照表。想学这个项目先看它。
+- `LEARNING.md` — **源码索引**：课件章节 ↔ 源码位置的对照表。想学这个项目先看它。
 - `KNOWLEDGE.md` — **知识点总结**：只讲本项目实际用到的 API 是什么、怎么写、坑在哪。当速查手册用。
 
 ## 架构

@@ -16,7 +16,7 @@
 - **1.x 新写法**：`create_agent` + 中间件体系 + `state`/`store`/`checkpointer`，不混用 0.x 的 `AgentExecutor`
 - **中间件栈完整**：限次 → 重试 → 任务拆解 → 上下文清理 → 自定义守卫，顺序可考
 - **测试零成本**：46 项端到端测试全部用假模型，不调用任何真实 API
-- **学习材料齐备**：`LEARNING.md` 学习地图，课件章节 ↔ 源码位置 ↔ 练习一一对应
+- **学习材料齐备**：`LEARNING.md` 源码索引，课件章节 ↔ 源码位置一一对应；`KNOWLEDGE.md` 把相关知识点浓缩成速查手册
 
 ## 快速开始
 
@@ -50,7 +50,7 @@ cp .env.example .env
 python -m pytest tests/ -q
 ```
 
-预期输出 `35 passed`。全部使用假模型，不需要 API key。
+预期输出 `47 passed`。全部使用假模型，不需要 API key。
 
 ### 4. 起服务
 
@@ -81,9 +81,9 @@ curl -X POST http://127.0.0.1:8000/run \
   -d '{"instruction":"列出数据目录下的文件并汇总通知","allow_write":true}'
 ```
 
-## 学习路径
+## 代码导览
 
-从 [LEARNING.md](LEARNING.md) 开始。它把教程章节、源码位置和练习串成五条主线：
+从 [LEARNING.md](LEARNING.md) 开始。它把教程章节和源码位置串成五条主线：
 
 1. **模型怎么变成 Agent** —— `create_agent` 的参数注入模型、工具、中间件、记忆
 2. **工具** —— `@tool` 装饰器、docstring 如何影响模型选工具、沙箱边界
@@ -91,7 +91,8 @@ curl -X POST http://127.0.0.1:8000/run \
 4. **上下文与记忆** —— `AgentContext` / `state` / `store` / `checkpointer` 四者分工
 5. **运行时外壳** —— 定时任务、HTTP 服务、会话隔离
 
-每条主线都配了动手练习，都写在 `LEARNING.md` 里。
+每条主线给出源码位置、对应课件章节和这个知识点的关键认知。
+只想拿结论、不想通读课件的话，看 [KNOWLEDGE.md](KNOWLEDGE.md)。
 
 ## 目录结构
 
@@ -155,7 +156,7 @@ python -m runtime chat
 
 源码注释里的「对应课件 XX 章 X.X 节」指向一套 LangChain 1.x 中文课程（PDF 共 10 章：概述 / 模型调用 / LangSmith / Message 与提示词 / Tools / 结构化输出 / 智能体 / 中间件 / 上下文与记忆 / RAG）。
 
-本仓库只含代码，课程资料需自行获取。
+课件 PDF 原件就在本仓库的 `courseware/` 目录（10 章），章节索引见 `courseware/README.md`。
 
 ## 说明
 
