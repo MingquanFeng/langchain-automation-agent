@@ -144,13 +144,12 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 11. **FastAPI 的 `@app.on_event` 已废弃**（fastapi 0.135），要用 `lifespan` 上下文管理器。`server.py` 里是 `lifespan` 写法：启动逻辑放 `yield` 前，清理逻辑放 `yield` 后。
 
-12. **1.x 的 `response_format` 必须显式包策略类**：`create_agent(response_format=Schema)` 直接传 Pydantic 类已不支持，要写 `ToolStrategy(Schema)` / `ProviderStrategy(Schema)` / `AutoStrategy()`。这是 0.x 到 1.x 常见踩坑点（项目目前没用 `response_format`，但加结构化输出时会撞上）。
+12. **1.x 的 `response_format` 必须显式包策略类**：`create_agent(response_format=Schema)` 直接传 Pydantic 类已不支持，要写 `ToolStrategy(Schema)` / `ProviderStrategy(Schema)` / `AutoStrategy()`。（项目目前没用 `response_format`，但加结构化输出时会撞上。）
 
-13. **别从网上抄 0.x 的写法。** 0.x 的老 API 没删，都挪进了 `langchain-classic` 包 —— 所以能 import 但不该用：`AgentExecutor`、`create_react_agent`、`create_tool_calling_agent`、`create_structured_chat_agent`、`ConversationBufferMemory` 这类 `xxxMemory` 类、`JsonOutputParser` 拼提示词。1.x 对应的新写法见 `LEARNING.md` 开头的版本对照表。
 
-14. **只读闸门拦下工具时必须补 ToolMessage。** `TaskGateMiddleware` 拦掉写工具后，要给每个被拦的 `tool_call` 补一条对应 `tool_call_id` 的 `ToolMessage`。少了它，消息历史里留着没有结果的 `tool_call`，下一轮请求被 OpenAI / MiniMax 兼容接口直接 400（`tool call result does not follow tool call`）。**只补 ToolMessage、不补收尾消息** —— agent 图的路由（`langchain/agents/factory.py`）看的是最后一条 AIMessage 的 `tool_calls`：都已回应就判定为「人工注入的工具消息」，跳回模型节点重新回答，于是 agent 会改用文字给结论。这跟官方 `HumanInTheLoopMiddleware` 的拒绝路径一致。
+13. **只读闸门拦下工具时必须补 ToolMessage。** `TaskGateMiddleware` 拦掉写工具后，要给每个被拦的 `tool_call` 补一条对应 `tool_call_id` 的 `ToolMessage`。少了它，消息历史里留着没有结果的 `tool_call`，下一轮请求被 OpenAI / MiniMax 兼容接口直接 400（`tool call result does not follow tool call`）。**只补 ToolMessage、不补收尾消息** —— agent 图的路由（`langchain/agents/factory.py`）看的是最后一条 AIMessage 的 `tool_calls`：都已回应就判定为「人工注入的工具消息」，跳回模型节点重新回答，于是 agent 会改用文字给结论。这跟官方 `HumanInTheLoopMiddleware` 的拒绝路径一致。
 
-15. **`build_agent(checkpointer=None)` 不是「不要记忆」，是「用默认的」。** 源码写的是 `checkpointer if checkpointer is not None else _build_checkpointer()`，传 None 会建**真实的 sqlite checkpointer**。测试里要显式传 `InMemorySaver()`，否则测试会话会落进 `data/memory.sqlite` 并跨次累积，最后把测试搞挂。
+14. **`build_agent(checkpointer=None)` 不是「不要记忆」，是「用默认的」。** 源码写的是 `checkpointer if checkpointer is not None else _build_checkpointer()`，传 None 会建**真实的 sqlite checkpointer**。测试里要显式传 `InMemorySaver()`，否则测试会话会落进 `data/memory.sqlite` 并跨次累积，最后把测试搞挂。
 
 ## 可选增强
 

@@ -18,7 +18,7 @@
 | 章 | 内容 | 主要课件来源 |
 |---|---|---|
 | [一](#一一次调用的完整数据流) | 一次调用的完整数据流 | — |
-| [二](#二版本地雷1x-vs-0x) | 版本地雷：1.x vs 0.x | 01 章 |
+| [二](#二包结构) | 包结构 | 01 章 |
 | [三](#三模型与消息02--04-章) | 模型与消息 | 02 / 04 章 |
 | [四](#四工具05-章) | 工具 | 05 章 |
 | [五](#五agent07-章) | Agent | 07 章 |
@@ -79,38 +79,17 @@
 
 ---
 
-## 二、版本地雷：1.x vs 0.x
+## 二、包结构
 
-**网上关于 LangChain Agent 的教程绝大多数是 0.x 的，照着抄必然跑不通。** 这是学这门课第一件事。
-
-### 2.1 六组 API 对照
-
-| 知识 | 1.x（本项目在用） | 0.x 老写法（能 import，不该用） |
-|---|---|---|
-| 创建 Agent | `create_agent(...)` | `AgentExecutor` / `initialize_agent` |
-| 预置 Agent | `create_agent` 自带 | `create_react_agent`、`create_tool_calling_agent`、`create_structured_chat_agent` |
-| 定制 Agent | **中间件体系** | `llm_agent` + `agent_kwargs` + `allowed_tools` |
-| 记忆 | `state` + `store` + `checkpointer` | `ConversationBufferMemory` 等 `xxxMemory` 类 |
-| 结构化输出 | `with_structured_output()` / `response_format=ToolStrategy(Schema)` | `JsonOutputParser` + 提示词拼格式（课件明确「不推荐」） |
-| 输出解析 | 标准化 `content_blocks` | 正则 / 手写文本解析 |
-
-### 2.2 抄错就废的三处
-
-1. **入参形状完全不同。** 0.x 是 `executor.invoke({"input": "问题"})`，1.x 是 `agent.invoke({"messages": [...]})`。
-2. **0.x 的 API 没被删除，都挪进了 `langchain-classic` 包** —— 所以你搜到的代码**能 import 但不该用**。
-   `AgentExecutor`、`create_react_agent`、`create_structured_chat_agent`、`create_tool_calling_agent`、
-   `ConversationBufferMemory` 这类 `xxxMemory` 类、`JsonOutputParser` 全在清单里。（🧩 `CLAUDE.md` 陷阱 13）
-3. **课件自己给的对照表**（📘 01 章 2.2）明确写了 v0.3 是「过渡性版本，设计上以链为核心」，
-   v1.2 是「生产级稳定版本，标志着从『链式调用』到『智能体框架』的范式转变」，且**官方承诺 1.x 系列在 2.0 前不引入破坏性变更**。
-
-### 2.3 包结构（📘 01 章 2.3）
+📘 01 章 2.3 —— 1.x 把包结构拆清了：装哪个用哪个，不必把整个生态都装上。
 
 | 包 | 定位 | 本项目用到的 |
 |---|---|---|
-| `langchain-core` | 官方推荐的核心 API（Runnable、BaseMessage 等） | `HumanMessage`、`@tool` |
-| `langchain-classic` | 0.x 遗留 API 的安置处 | **不用** |
+| `langchain-core` | 核心 API（Runnable、BaseMessage 等） | `HumanMessage`、`@tool` |
 | `langchain-community` | 第三方集成，按需安装 | `langchain-deepseek`（provider=deepseek 时自动装） |
 | `langgraph` | 图编排层：状态、checkpointer、store、中间件运行时 | `Runtime`、`InMemorySaver`、`SqliteSaver`、`InMemoryStore` |
+
+主 `langchain` 包保持轻量，Agent 的能力都从 `langchain.agents` 进。
 
 ---
 
@@ -472,8 +451,8 @@ def _resolve(path: str) -> Path:
 
 📘 07 章 1.4.2：
 
-> LangChain 在 1.0 版本后做了彻底重构：将所有 Agent 的创建方式统一为一个入口 `create_agent()`。
-> 它取代了旧版本中的 `create_react_agent`、`create_json_agent`、`create_tool_calling_agent` 等多种分支函数。
+> LangChain 在 1.0 版本后做了彻底重构：将所有 Agent 的创建方式统一为一个入口 `create_agent()`，
+> 不再按场景分成多个分支函数。
 
 📘 07 章 P4-5 的参数签名：
 
@@ -516,7 +495,7 @@ return create_agent(
 )
 ```
 
-**关键认知**：1.x 里「Agent」不再是一个需要 `initialize_agent` 的类，而是一次 `create_agent()` 调用返回的**编译好的图**。
+**关键认知**：「Agent」不是一个需要实例化的类，而是一次 `create_agent()` 调用返回的**编译好的图**。
 模型、工具、中间件、记忆全是**注入参数** —— 所以换模型/换工具不用改调用方，这就是 `build_agent()` 存在的意义。
 
 **坑**
@@ -990,8 +969,8 @@ Thread ID  ：用于唯一标识 State，LangChain 运行时会按照 thread_id 
 
 课件类比：「就像玩 RPG 游戏时的『自动存档』」。
 
-📘 09 章 1.3.2 明确：**在 LangChain v0.x 版本中，通过专用的 `xxxMemory` 类管理记忆。
-v1.x 通过 state 和 store 构建记忆系统** —— `ConversationBufferMemory` 之类已挪进 `langchain-classic`。
+📘 09 章 1.3.2 明确：**1.x 通过 state 和 store 构建记忆系统**，没有专门的记忆类 ——
+记忆由 checkpointer 持久化 state 来实现。
 
 ### 7.3 checkpointer 自动管理历史（📘 09 章 12-13 页）
 

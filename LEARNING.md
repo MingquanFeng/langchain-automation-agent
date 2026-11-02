@@ -23,23 +23,6 @@
 
 ---
 
-## ⚠️ 第一件事：分清 1.x 和 0.x
-
-网上关于 LangChain Agent 的教程**绝大多数是 0.x 的**，照着抄会写出跑不通的代码。先记住这张表：
-
-| 知识 | 1.x 写法（本项目在用） | 0.x 老写法（已过时，别抄） |
-|---|---|---|
-| 创建 Agent | `create_agent(...)` | `AgentExecutor` / `initialize_agent` |
-| 预置 Agent | `create_agent` 自带 | `create_react_agent`、`create_tool_calling_agent`、`create_structured_chat_agent` |
-| 定制 Agent | **中间件体系** | `llm_agent` + `agent_kwargs` + `allowed_tools` |
-| 记忆 | `state` + `store` + `checkpointer` | `ConversationBufferMemory` 等 `xxxMemory` 类 |
-| 结构化输出 | `with_structured_output()` | `JsonOutputParser` + 提示词拼格式（课件明确「不推荐」） |
-| Agent 的结构化响应 | `response_format=ToolStrategy(Schema)` | 直接传 `response_format=Schema`（**1.x 已不支持**） |
-
-0.x 的老 API 没被删除，而是挪进了 `langchain-classic` 包 —— 所以你搜到的代码**能 import 但不该用**。
-
----
-
 ## 主线 1：模型怎么变成 Agent（课件 02 / 04 / 07 章）
 
 **读源码**：`agent/graph.py` → `agent/config.py`
@@ -51,7 +34,7 @@
 | `config.py:32` `ModelConfig.build()` | `init_chat_model(model=..., model_provider=...)` | 02 章 2.2「兼容用法」 |
 | `runtime/runner.py:46` | `HumanMessage` 构造输入 | 04 章 1.5.2 |
 
-**关键认知**：1.x 里「Agent」不再是一个需要 `initialize_agent` 的类，而是一次 `create_agent()` 调用返回的**编译好的图**。
+**关键认知**：「Agent」不是一个需要实例化的类，而是一次 `create_agent()` 调用返回的**编译好的图**。
 模型、工具、中间件、记忆全是**注入参数** —— 所以换模型/换工具不用改调用方，这就是 `build_agent()` 存在的意义。
 
 **延伸**：课件 07 章 8.2 讲了 7 种 `stream_mode`（values / updates / messages / tasks / debug / checkpoints / custom）。

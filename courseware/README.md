@@ -24,7 +24,7 @@
 
 | 章 | 文件 | 内容 | 在本项目里的位置 |
 |---|---|---|---|
-| 01 | `尚硅谷-01-LangChain概述.pdf` | 课程总览、1.x 相比 0.x 的变化 | 背景概念，代码里没有直接对应 |
+| 01 | `尚硅谷-01-LangChain概述.pdf` | 课程总览、1.x 的架构与生态定位 | 背景概念，代码里没有直接对应 |
 | 02 | `尚硅谷-02-模型的创建与调用.pdf` | 模型接入、`init_chat_model` | 主线 1 —— `agent/config.py` 的 `ModelConfig.build()` |
 | 03 | `尚硅谷-03-LangSmith的使用.pdf` | LangSmith 追踪 | 本项目未使用 |
 | 04 | `尚硅谷-04-Message与提示词模板.pdf` | 消息类型、提示词模板 | 主线 1 —— `HumanMessage` 输入构造 |
