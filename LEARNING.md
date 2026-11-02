@@ -70,22 +70,24 @@
 
 | 位置 | 看什么 | 对应课件 |
 |---|---|---|
-| `files.py:27` `@tool` | 装饰器把函数变成工具。**docstring 就是给模型看的工具说明** | 05 章 2.2「工具描述的各部分」 |
-| `files.py:19` `_resolve()` | 沙箱。路径越界抛 `ValueError` | 05 章 1.3「工具调用的整体流程」 |
-| `files.py:66` `save_json` | 参数标了 `dict`，langchain 自动转成 JSON schema | 05 章 2.2.4「参数类型」 |
+| `files.py` `@tool(parse_docstring=True)` | 装饰器把函数变成工具。**docstring 就是给模型看的工具说明**；开了 `parse_docstring` 后 `Args:` 段会进 schema 的参数说明 | 05 章 2.2「工具描述的各部分」/ 3.1 |
+| `files.py` `_resolve()` / `_resolve_safe()` | 沙箱。越界时工具层返回中文说明（不抛异常，避免被重试 3 次） | 05 章 1.3「工具调用的整体流程」 |
+| `files.py` `save_json` | 参数标了 `dict | list`，langchain 自动转成 JSON schema | 05 章 2.2.4「参数类型」 |
 | `notify.py:23` `_deliver()` | 通知有 webhook 和终端两条路，未配置时降级 | — |
 
 **关键认知**：模型**不执行你的 Python 函数**。它只输出一段结构化的 `tool_calls`（名字 + JSON 参数 + id），
 由框架代为执行，再把返回值包成 `ToolMessage` 回灌进对话 —— 这个来回就是 agent 循环。
 
-**两条工具设计规范，项目正好是反例/正例**：
+**两条工具设计规范**：
 - 工具数量 **2-5 个最佳**（**07 章** P21：「只给 Agent 需要的工具，工具太多会混淆。一般 2-5 个工具最佳」）—— 本项目有 8 个（6 个文件 + 2 个通知），已经偏多，模型选错工具的概率会上升。
-- docstring 要写 **Google 风格**（参数逐个说明，**05 章** 3.1）—— 项目里 `notify` 用了 `Args:` 段，`files.py` 的几个工具**没写**，模型只能靠参数名猜。
+- docstring 要写 **Google 风格**（参数逐个说明，**05 章** 3.1）—— 项目现在 8 个工具全部开了 `parse_docstring=True` 且写成 Google 风格，参数说明会进 schema 的 `properties.<arg>.description`，模型不用靠参数名猜。
 
 **练习**：
-1. 给 `files.py` 的 `read_file` 补一段 Google 风格 docstring（参数说明 + 返回值 + 一句例子），在终端里对比模型选工具的准确率。
+1. 把 `files.py` 里某个工具的 docstring 改模糊（比如把 `read_file` 的首行改成「读文件」），在终端里对比模型选工具的准确率 —— 这就是 docstring 质量换来的差别。
 2. 加一个 `count_lines(path)` 工具，故意**完全不写 docstring**，跑一次看模型会不会用；再补 docstring 再跑一次，对比效果。
 3. 把 `_resolve` 的沙箱临时放开到整个项目目录，写一个能读到 `agent/graph.py` 的工具，观察 agent 拿到源码后会干什么。
+
+> 注意练习 3 要改的是 `agent/tools/files.py` 里的 `SANDBOX` —— 越界检查本身在 `_resolve` / `_resolve_safe` 两处。
 
 ---
 

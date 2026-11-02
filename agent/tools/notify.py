@@ -55,7 +55,29 @@ from ..config import RUNTIME
 
 
 # ============================================================
-# 1. payload 组装
+# 1. HTTP 客户端
+# ============================================================
+
+# _CLIENT：复用的 httpx 客户端。
+#
+# 为什么不用 httpx.post(...) 直接发：
+#   那个写法每次调用都新建一个 Client —— 新建 TCP 连接、
+#   新建 TLS 会话、握手完就丢。Agent 每步汇报一次就重连一次，
+#   在多轮任务里是白白的握手开销。
+#
+# httpx.Client 内部维护连接池，httpx 官方说明它可以跨线程共享，
+# 所以模块级建一个就够了。
+#
+# timeout=15：通知是收尾动作，不值得为它长时间挂起。
+#
+# 说明：
+#   Client 只在第一次真正发请求时才建立连接，
+#   导入这个模块本身不会产生任何网络行为。
+_CLIENT = httpx.Client(timeout=15)
+
+
+# ============================================================
+# 2. payload 组装
 # ============================================================
 
 def _format_payload(text: str, title: str) -> dict:
@@ -71,7 +93,7 @@ def _format_payload(text: str, title: str) -> dict:
 
 
 # ============================================================
-# 2. 实际投递
+# 3. 实际投递
 # ============================================================
 
 def _deliver(channel: str, text: str, title: str) -> str:
@@ -100,14 +122,10 @@ def _deliver(channel: str, text: str, title: str) -> str:
 
     # 向 webhook POST。
     #
-    # timeout=15：
-    # 通知是收尾动作，不值得为它长时间挂起。
-    #
-    # 注意：
     # 投递失败会抛异常，不会静默吞掉。
     # 上层（Agent 工具调用）能看到失败，
     # 配合 graph.py 里的工具重试中间件可以重试。
-    resp = httpx.post(RUNTIME.notify_webhook, json=payload, timeout=15)
+    resp = _CLIENT.post(RUNTIME.notify_webhook, json=payload)
 
     # 非 2xx 直接抛异常，
     # 否则 webhook 返回 4xx/5xx 时会被当成投递成功。
@@ -116,10 +134,10 @@ def _deliver(channel: str, text: str, title: str) -> str:
 
 
 # ============================================================
-# 3. 通知工具
+# 4. 通知工具
 # ============================================================
 
-@tool
+@tool(parse_docstring=True)
 def notify(text: str, title: str = "Agent 通知") -> str:
     """把一条消息推送给用户。这是 Agent 汇报结果的主要出口。
 
@@ -137,9 +155,13 @@ def notify(text: str, title: str = "Agent 通知") -> str:
     return _deliver(RUNTIME.notify_channel, text, title)
 
 
-@tool
+@tool(parse_docstring=True)
 def notify_summary(items: str, title: str = "每日汇总") -> str:
-    """推送一条结构化汇总。items 是已经整理好的多行文本。
+    """推送一条结构化汇总。
+
+    Args:
+        items: 已经整理好的多行文本，一次推一整份清单。
+        title: 消息标题，通常是任务名。
 
     与 notify 的区别是本工具不做额外处理，适合批量清单类内容。
     """
@@ -153,7 +175,7 @@ def notify_summary(items: str, title: str = "每日汇总") -> str:
 
 
 # ============================================================
-# 4. 导出通知工具
+# 5. 导出通知工具
 # ============================================================
 
 # NOTIFY_TOOLS 会被 tools/__init__.py 汇总进 ALL_TOOLS，

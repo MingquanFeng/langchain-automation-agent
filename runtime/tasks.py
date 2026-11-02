@@ -124,11 +124,14 @@ TASKS: list[ScheduledTask] = [
             "列出数据目录下的所有文件，把超过 7 天没修改的文件列出来，"
             "用 notify 汇总推送。"
         ),
-        # 注意：
-        # 这里 allow_write=False，但指令里又要 notify 推送。
-        # notify 属于写工具，会被 TaskGateMiddleware 拦掉，
-        # 这是个已知的不一致，需要推送时得改成 True。
-        allow_write=False,
+        # notify 属于写工具，要推送就必须显式开写权限。
+        #
+        # 这里原来写的是 False —— 指令要 notify 推送，
+        # 但只读模式下 notify 会被 TaskGateMiddleware 拦掉，
+        # 定时任务跑完什么也推不出去（结果只在 agent 的回复文本里，
+        # 而定时任务没有接收回复文本的地方）。
+        # 指令的意图明确是要推送，所以这里开成 True。
+        allow_write=True,
     ),
 ]
 

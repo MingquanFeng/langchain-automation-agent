@@ -36,7 +36,7 @@ PY=/opt/miniconda3/envs/langchain1.2/bin/python
 所有命令都在本目录（`automation_agent/`）下执行。
 
 ```bash
-# 跑测试（39 项，全部用假模型，不调真实 API）
+# 跑测试（46 项，全部用假模型，不调真实 API）
 $PY -m pytest tests/ -q
 
 # 跑单个测试
@@ -58,7 +58,7 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 $PY -m runtime chat
 ```
 
-**本项目只有 pytest 一道验证关卡**，没有 lint、type-check、build 步骤（纯 Python 包，无打包产物）。提交前的验证底线就是 `pytest tests/ -q` 39 项全过 + 按实际需求跑一次服务确认能起来。
+**本项目只有 pytest 一道验证关卡**，没有 lint、type-check、build 步骤（纯 Python 包，无打包产物）。提交前的验证底线就是 `pytest tests/ -q` 46 项全过 + 按实际需求跑一次服务确认能起来。
 
 服务起来后的 HTTP 端点：
 
@@ -93,7 +93,8 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 - `config.py` — 唯一的配置出口。`MODEL` 和 `RUNTIME` 两个 frozen dataclass 在模块导入时从环境变量读一次。改配置只改这里 + `.env`。`MEMORY_BACKEND` 决定记忆后端（`sqlite` 落盘到 `data/memory.sqlite`，`memory` 只在内存）。
 - `context.py` — `AgentContext`，每次调用的静态运行时配置（任务名、触发来源、是否允许写）。`trigger` 用 `Literal["schedule", "api", "cli", "lab"]` 限定，新增触发方式要同步改这个类型别名。
 - `graph.py` — **装配中心**。`build_agent()` 是唯一创建 Agent 的地方，模型/工具/记忆后端都从这里注入。中间件栈在这里组装：`LIMITS`（限次）→ `RETRY`（重试）→ `TODO`（任务拆解）→ `CONTEXT_EDITING`（上下文清理）→ `CUSTOM_MIDDLEWARE`（自定义）。
-- `tools/` — L1 能力层。`files.py` 的文件工具被沙箱限制在 `data/` 目录内（`_resolve` 越界抛 `ValueError`）；读文件有 200KB 上限、二进制文件拒绝、记忆库（`memory.sqlite`）禁读 —— 否则 agent 一句「看下这个文件」就能撑爆上下文窗口；`notify.py` 是通知出口，webhook 未配置时降级为终端输出。
+- `tools/` — L1 能力层。`files.py` 的文件工具被沙箱限制在 `data/` 目录内；读文件有 200KB 上限、二进制文件拒绝、记忆库（`memory.sqlite`）禁读 —— 否则 agent 一句「看下这个文件」就能撑爆上下文窗口；`notify.py` 是通知出口，webhook 未配置时降级为终端输出。
+  - **沙箱越界不抛异常，返回一句给模型看的中文说明**（`_resolve_safe`）。`_resolve()` 仍然抛 `ValueError`，但那是给 Python 调用方用的；工具层用它会让 `ToolRetryMiddleware`（默认 `retry_on=(Exception,)`）把同一个错参数重试 3 次、空耗约 3 秒，模型最后收到的还是 `failed after 3 attempts ... Please try again.` 这种没法照做的英文提示。
 - `middleware/custom.py` — L4 守卫层的自定义部分。三个中间件分别负责只读拦截、上下文注入、耗时统计。
 
 ### runtime/ — 运行时外壳
@@ -169,4 +170,4 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
 - **中间件顺序有意义**：`LIMITS` 放最前（先挡住跑飞），`CUSTOM_MIDDLEWARE` 放最后（能看到前面中间件的结果）。
 - **测试会真写 `data/` 目录**（`data/out/report.md` 等），`data/` 已在 `.gitignore` 里，跑测试不必清理。
-- 提交前跑 `pytest tests/ -q`，39 项必须全过。
+- 提交前跑 `pytest tests/ -q`，46 项必须全过。

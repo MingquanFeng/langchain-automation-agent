@@ -322,14 +322,18 @@ rprint(convert_to_openai_tool(get_weather))
 }
 ```
 
-**🧩 项目自己的约定**（`agent/tools/files.py:12-15`）：
+**🧩 项目自己的约定**（`agent/tools/files.py` 模块 docstring）：
 
 > 被 `@tool` 装饰的函数，它的 docstring 会被当作「工具描述」发给模型，相当于提示词的一部分。
 > 所以这些 docstring 只写模型需要知道的功能性说明，深度解释放在周围的 `#` 注释里 —— **改 docstring 等于改模型行为**。
 
 **坑**
 - 📘 05 章：**要用 Google 风格的参数说明，必须显式开 `parse_docstring=True`**。开了之后 `description` 只剩首行，参数说明落到 `properties.<arg>.description`。
-- 🧩 **项目没开 `parse_docstring=True`** —— 所以 `notify` 工具的 `Args:` 段落是整段躺在 `description` 里的，模型看得见，只是没被解析成结构化字段。
+- 🧩 **项目的 8 个工具全部开了 `parse_docstring=True`**（`files.py` 6 个 + `notify.py` 2 个），
+  docstring 一律写成 Google 风格（首行概括 + `Args:` 逐参数说明）。
+  效果实测：`read_file` 的 `offset` 参数在 schema 里带上了
+  `'description': '起始行号，从 0 开始。用来接着上次读到的位置继续读。'` ——
+  模型不用再靠参数名猜。不开的话整段 docstring 会原样进 `description`，参数仍是没说明的白板。
 - 📘 05 章：开了 `parse_docstring=True` 但 docstring 不合法 → `ValueError: Found invalid Google-Style docstring.`；
   docstring 里写了签名里没有的参数 → `ValueError: Arg city in docstring not found in function signature.`。
 - 📘 05 章：docstring 写了参数、但该参数**没有类型注解** → 报错。
@@ -349,9 +353,13 @@ rprint(convert_to_openai_tool(get_weather))
 
 **坑**：📘 05 章 —— 删掉类型注解，schema 里该参数就变成 `'city': {}`，模型完全不知道该传什么。
 
-**🧩 `dict` 这种宽泛类型**：`save_json(path: str, data: dict)` 生成的 schema 是
+**🧩 宽泛类型要慎用**：`save_json` 原来标注 `data: dict`，生成的 schema 是
 `'data': {'additionalProperties': true, 'type': 'object'}` —— 模型只知道是个对象，不知道该放什么键。
-想收紧有两条标准做法（项目都没用）：
+更糟的是**只收对象**：模型想存一个 JSON 数组（极常见的数据形状）会触发 Pydantic 校验失败，
+被 `ToolRetryMiddleware` 重试两次同样的参数后彻底失败。
+现在改成 `data: dict | list`，schema 变成 `anyOf[object, array]`，两种形状都能存。
+
+想进一步收紧（比如枚举、范围限制）有两条标准做法（项目都没用）：
 - Pydantic `args_schema`：`class WeatherInput(BaseModel): unit: Literal["celsius","fahrenheit"] = Field(default="celsius", description="气温单位")` → `@tool(args_schema=WeatherInput)`
 - JSON Schema 字典：`@tool(args_schema={...})` —— 📘 05 章提醒，传的只能是 `parameters` 那一段，**不是整个 `{"type":"function",...}` 外壳**。
 
@@ -407,9 +415,9 @@ ToolMessage(
 ### 4.7 沙箱与上下文保护（🧩 课件未讲，项目自加）
 
 ```python
-SANDBOX = DATA_DIR.resolve()          # agent/tools/files.py:49
+SANDBOX = DATA_DIR.resolve()          # agent/tools/files.py
 
-def _resolve(path: str) -> Path:      # agent/tools/files.py:72
+def _resolve(path: str) -> Path:
     target = (SANDBOX / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
     if not target.is_relative_to(SANDBOX):
         raise ValueError(f"路径超出允许范围（仅允许 {SANDBOX}）：{path}")
@@ -419,19 +427,36 @@ def _resolve(path: str) -> Path:      # agent/tools/files.py:72
 **坑**：🧩 直接判断字符串里有没有 `".."` **是不够的** —— 绝对路径、软链接都能绕出去。
 先 `resolve()` 规范化、再判包含关系才可靠。
 
-另外两层保护（`files.py:51-65`）：
-- **单次读取 200KB 上限** —— 否则 agent 一句「看下这个文件」就能把几十 MB 塞进上下文，直接撑爆模型上下文窗口。
-- **记忆库禁读**（`memory.sqlite` 及其 WAL/SHM）—— 二进制读了也没意义，还触发上面的坑。
+**🧩 越界为什么不抛异常**：工具层走 `_resolve_safe()`，越界时**返回一句给模型看的中文说明**，
+而不是让 `_resolve()` 的 `ValueError` 冒出去。原因是一个实测出来的连锁反应：
+
+> `ToolRetryMiddleware` 的 `retry_on` 默认是 `(Exception,)` —— 所有异常都重试。
+> 越界抛异常 → 同一个错参数被重试 **3 次**、空耗约 **3 秒** →
+> 模型最后收到 `Tool 'write_file' failed after 3 attempts with ValueError: ... Please try again.`
+> —— 英文、没告诉它该怎么改，它很可能再拿同一个错路径试一轮。
+
+返回说明文字后，模型一次就拿到「请改用数据目录内的相对路径，例如 'out/report.md'」。
+这跟 `_read_text` 对二进制、对超大文件的处理是同一套哲学：**给模型一句能照做的说明，而不是把整轮推理打断**。
+（`_resolve()` 仍然抛异常 —— 那是留给 Python 调用方的。）
+
+另外几层保护：
+- **单次读取 200KB 上限 + 默认 200 行上限** —— 否则 agent 一句「看下这个文件」就能把几十 MB 塞进上下文，直接撑爆模型上下文窗口。
+- **按行分段读取**（`read_file(path, offset, limit)`）—— 超限提示写「请分段读取」，就得真有分段读取的手段，
+  而且返回里要报出总行数和下一步该传什么 `offset`。
+- **文件列表带修改时间**（`out/report.md  (21 bytes, 2026-11-02 16:15)`）——
+  模型要回答「哪些文件很久没动」时光有文件名和大小是没有依据的，只能靠猜。
+- **记忆库禁读**（`memory.sqlite` 及其 WAL/SHM）—— 二进制读了也没意义，还触发上面的坑；列表工具也把它滤掉，免得模型去读。
+- **原子写** —— 先写 `xxx.tmp` 再 `os.replace` 覆盖，中断时不会留下半截文件被当成正常内容读进去。
 
 ### 4.8 课件的五条实践经验（📘 05 章 6 节）
 
 | # | 守则 | 项目现状 |
 |---|---|---|
-| 1 | **清晰的描述** —— docstring 要写清功能与参数 | 部分达标：`notify` 有 `Args:`，`files.py` 几个工具没写参数说明 |
+| 1 | **清晰的描述** —— docstring 要写清功能与参数 | ✅ 达标：8 个工具全开 `parse_docstring=True`，docstring 一律 Google 风格，参数说明进了 schema 的 `properties.<arg>.description` |
 | 2 | **功能单一** —— 一个工具只做一件事 | ✅ 达标，8 个工具职责不重叠 |
-| 3 | **如何处理工具失败？三层防护**：① 工具内部处理 → ② Agent 级重试（提示词）→ ③ 调用级重试 | ✅ 三层都有：① `files.py:151` 返回说明文字而非抛异常；② `SYSTEM_PROMPT` 第 5 条；③ `ToolRetryMiddleware` |
-| 4 | **返回字符串** —— 别返回 dict | ✅ 全部返回 `str`，`tests/test_e2e.py:100` 有参数化用例守着 |
-| 5 | **选择同步 vs 异步** —— IO 密集型该用 async | ❌ `notify.py:110` 用的是同步 `httpx.post`，属可改进项 |
+| 3 | **如何处理工具失败？三层防护**：① 工具内部处理 → ② Agent 级重试（提示词）→ ③ 调用级重试 | ✅ 三层都有：① 工具内部返回说明文字而非抛异常；② `SYSTEM_PROMPT` 第 5 条；③ `ToolRetryMiddleware` |
+| 4 | **返回字符串** —— 别返回 dict | ✅ 全部返回 `str`，`tests/test_e2e.py` 有参数化用例守着 |
+| 5 | **选择同步 vs 异步** —— IO 密集型该用 async | ⚠️ `notify.py` 仍是同步调用，但已改成复用 `httpx.Client`（连接池复用，不再每次新建 TCP/TLS）。真正改 async 需要整条调用链异步化 —— `agent.invoke()` 是同步的，async 工具在同步路径下不会被执行 |
 
 > ⚠️ **常见误引**：「工具数量 2-5 个最佳」这句话在 **07 章**（📘 07 章 P21「只给 Agent 需要的工具，工具太多会混淆。一般 2-5 个工具最佳」），**不在 05 章**。
 > 按这条标准，本项目 8 个工具偏多，模型选错工具的概率会上升。
@@ -1290,8 +1315,9 @@ def set_cli_override(name: str, value: str) -> None:
 | `--no-schedule` 不生效，`/health` 仍返回 `scheduler: true` | `.env` 的 `SCHEDULER_ENABLED=1` 顶掉了 `os.environ` | 用 `set_cli_override()` | 🧩 `config.py:49` |
 | `create_agent(response_format=Schema)` 报错 | 1.x 不再支持直接传 schema | `ToolStrategy(Schema)` / `ProviderStrategy(Schema)` | 📘 07 章 P39 |
 | `ValueError: Function must have a docstring if description not provided.` | 工具没写 docstring | 补 docstring | 📘 05 章 |
-| 模型选错工具 | docstring 模糊 / 工具太多 | 写 Google 风格 docstring；工具数收敛到 2-5 个 | 📘 07 章 P21 |
-| 单次任务把上下文撑爆 | 工具返回了超大文件 | 200KB 上限 + 分段读 | 🧩 `files.py:58` |
+| 模型选错工具 / 不知道参数是干什么的 | docstring 模糊 / 参数没说明 | 写 Google 风格 docstring 并开 `parse_docstring=True`；工具数收敛到 2-5 个 | 📘 07 章 P21 |
+| `Tool 'xxx' failed after 3 attempts with ValueError: ... Please try again.` | 工具抛的异常被 `ToolRetryMiddleware` 重试了 3 次（默认 `retry_on=(Exception,)`） | 模型能自己纠正的错误（路径越界、格式不对）改成**返回说明文字**，别抛异常 | 🧩 `files.py` `_resolve_safe` |
+| 单次任务把上下文撑爆 | 工具返回了超大文件 | 200KB 字节上限 + 200 行上限 + `offset`/`limit` 分段读 | 🧩 `files.py` |
 | 工具超时/失败 | 没配重试 | `ToolRetryMiddleware`（注意副作用工具的幂等性） | 📘 08 章 3.5 |
 | `NotImplementedError`（测试里） | 假模型没实现 `bind_tools` | 用 `GenericFakeChatModel` | 🧩 `CLAUDE.md` 陷阱 7 |
 | `GenericFakeChatModel` 报错 | `_generate` 返回了 `AIMessage` | 必须返回 `ChatResult` | 🧩 `CLAUDE.md` 陷阱 8 |

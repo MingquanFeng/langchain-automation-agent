@@ -321,16 +321,62 @@ def test_middleware_tolerates_missing_context():
 
 # ---------- 8. 沙箱边界 ----------
 
-# 文件工具的所有读写都必须落在 data/ 内，
-# 越界要抛错，而不是写到别处去。
+# 文件工具的所有读写都必须落在 data/ 内。
+#
+# 注意这里守的是「不能写到沙箱外」这个安全属性，
+# 而不是「必须抛 ValueError」这个实现细节：
+# 沙箱越界往往是模型自己把路径拼错了，不是系统故障，
+# 所以工具层返回一句能照做的中文说明，而不是抛异常
+# （为什么不抛，见 test_sandbox_violation_is_not_retried 的说明）。
 
 
-def test_file_tools_reject_path_outside_sandbox():
-    """路径越出沙箱要抛 ValueError，而不是写到别处去。"""
+def test_file_tools_refuse_path_outside_sandbox():
+    """路径越出沙箱要被拒绝，且绝不能真的写到沙箱外去。"""
     from agent.tools.files import write_file
 
-    with pytest.raises(ValueError, match="超出允许范围"):
-        write_file.invoke({"path": "../../etc/passwd", "content": "x"})
+    out = write_file.invoke({"path": "../../etc/passwd", "content": "x"})
+
+    # 拒绝要给模型看得懂的说明。
+    assert isinstance(out, str)
+    assert "超出允许范围" in out
+    # 说明里要带可执行的下一步，光说「不允许」模型不知道怎么改。
+    assert "list_files" in out
+
+    # 核心安全属性：沙箱外没有多出文件。
+    outside = SANDBOX.parent.parent / "etc" / "passwd"
+    assert not outside.exists() or outside.read_text(encoding="utf-8") != "x"
+
+
+def test_sandbox_violation_is_not_retried():
+    """沙箱越界不该被当成故障重试 —— 一次就返回中文说明。
+
+    回归防护（实测踩出来的）：
+        ToolRetryMiddleware 的 retry_on 默认是 (Exception,)，
+        也就是所有异常都重试。越界抛 ValueError 时，
+        同一个错参数会被重试 3 次、空耗约 3 秒，
+        模型最后收到的还是
+        「failed after 3 attempts with ValueError: ... Please try again.」
+        —— 英文、没告诉它该怎么改，它很可能再拿同一个错路径试一轮。
+
+        所以越界改成返回说明文字，断言工具消息里没有重试痕迹。
+    """
+    model = make_model(
+        tool_call("write_file", {"path": "../../etc/passwd", "content": "x"}),
+        AIMessage(content="好的。"),
+    )
+    agent = build_agent(model=model, checkpointer=InMemorySaver())
+    result = agent.invoke(
+        {"messages": [HumanMessage(content="写文件")]},
+        {"configurable": {"thread_id": "t-sandbox"}},
+        context=AgentContext(task_name="sandbox", allow_write=True),
+    )
+
+    tool_msgs = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert tool_msgs, "这次调用没有产生工具消息，用例没测到东西"
+
+    content = tool_msgs[0].content
+    assert "超出允许范围" in content
+    assert "after 3 attempts" not in content, f"越界被当故障重试了：{content}"
 
 
 # ---------- 8b. 读取保护：不让 agent 把大文件塞爆上下文 ----------
@@ -373,6 +419,145 @@ def test_read_file_refuses_memory_database():
 
     out = read_file.invoke({"path": "memory.sqlite"})
     assert "记忆库" in out
+
+
+# ---------- 8c. 工具能力补强 ----------
+
+# 这一组守的是工具「真的好用」的几处细节。
+# 每一条都对应一个实测出来的真实缺口 ——
+# 缺了它们，Agent 会因为工具的缺陷而做出错误判断。
+
+
+def test_list_files_recurses_into_subdirectories():
+    """list_files 要能列出嵌套目录里的文件。
+
+    回归防护：
+        原来用 glob 只看顶层，data/out/report.md 这种嵌套文件根本列不出来，
+        模型调 list_files("*.md") 会得到「没有匹配的文件」，
+        于是误以为目录是空的。
+    """
+    from agent.tools.files import list_files
+
+    nested = SANDBOX / "nested_for_test" / "deep"
+    nested.mkdir(parents=True, exist_ok=True)
+    (nested / "inner.md").write_text("内层文件", encoding="utf-8")
+    try:
+        out = list_files.invoke({"pattern": "*.md"})
+        assert "nested_for_test/deep/inner.md" in out, out
+    finally:
+        (nested / "inner.md").unlink()
+        nested.rmdir()
+        (SANDBOX / "nested_for_test").rmdir()
+
+
+def test_list_files_hides_memory_database():
+    """list_files 不该把 11MB 的记忆库列出来误导模型。"""
+    from agent.tools.files import list_files
+
+    out = list_files.invoke({"pattern": "*"})
+    assert "memory.sqlite" not in out
+
+
+def test_list_files_reports_modification_time():
+    """list_files 要带修改时间，模型才能判断哪些文件陈旧。
+
+    回归防护：
+        原来只返回文件名和大小，模型要回答
+        「哪些文件超过 7 天没修改」时根本没有依据，只能猜。
+        runtime/tasks.py 的「数据目录巡检」任务正是干这个的。
+    """
+    import re
+
+    from agent.tools.files import list_files, write_file
+
+    write_file.invoke({"path": "mtime_for_test.txt", "content": "x"})
+    try:
+        out = list_files.invoke({"pattern": "mtime_for_test.txt"})
+        # 形如 "mtime_for_test.txt  (1 bytes, 2026-11-02 16:15)"
+        assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", out), out
+    finally:
+        (SANDBOX / "mtime_for_test.txt").unlink(missing_ok=True)
+
+
+def test_read_file_supports_offset_and_limit():
+    """read_file 能按行分段读，并说清读到哪儿了。
+
+    回归防护：
+        原来超限提示写「需要更多内容请分段读取」，
+        但根本没有分段读取的手段 —— 提示指向了一个不存在的功能。
+        现在有 offset / limit，返回里还会报出总行数和下一步怎么传。
+    """
+    from agent.tools.files import read_file, write_file
+
+    write_file.invoke(
+        {"path": "lines_for_test.txt", "content": "\n".join(f"第{i}行" for i in range(1, 11))}
+    )
+    try:
+        out = read_file.invoke({"path": "lines_for_test.txt", "offset": 0, "limit": 3})
+        assert "第1行" in out and "第3行" in out
+        assert "第4行" not in out, "limit 没生效"
+        # 必须告诉模型总共多少行、下一段从哪开始。
+        assert "共 10 行" in out
+        assert "offset=3" in out
+
+        # 接着读下一段。
+        out2 = read_file.invoke({"path": "lines_for_test.txt", "offset": 3, "limit": 2})
+        assert "第4行" in out2 and "第5行" in out2
+        assert "第6行" not in out2
+    finally:
+        (SANDBOX / "lines_for_test.txt").unlink(missing_ok=True)
+
+
+def test_save_json_accepts_array():
+    """save_json 除了对象也要能存数组。
+
+    回归防护：
+        原来 data 标注成 dict，模型存 JSON 数组（极常见的数据形状）
+        会触发 Pydantic 校验失败，被 ToolRetryMiddleware 重试两次
+        同样的参数后彻底失败。
+    """
+    from agent.tools.files import read_json, save_json
+
+    out = save_json.invoke({"path": "arr_for_test.json", "data": [1, 2, 3]})
+    assert "已保存 JSON" in out
+    try:
+        assert read_json.invoke({"path": "arr_for_test.json"}).strip() == "[\n  1,\n  2,\n  3\n]"
+    finally:
+        (SANDBOX / "arr_for_test.json").unlink(missing_ok=True)
+
+
+def test_read_json_reports_parse_error():
+    """read_json 解析失败要说出错在哪，而不是把原文丢回去让模型自己猜。"""
+    from agent.tools.files import read_json, write_file
+
+    write_file.invoke({"path": "bad_for_test.json", "content": '{"a": 1,,,}'})
+    try:
+        out = read_json.invoke({"path": "bad_for_test.json"})
+        assert "不是合法的 JSON" in out
+        assert "第 1 行" in out, f"没给出行号，模型不知道错在哪：{out}"
+    finally:
+        (SANDBOX / "bad_for_test.json").unlink(missing_ok=True)
+
+
+def test_write_file_leaves_no_temp_file():
+    """原子写完成后不留临时文件，也不留半截文件。
+
+    回归防护：
+        直接 write_text 在写到一半被中断时会留下半截文件，
+        Agent 下次读到会当成正常内容，基于残缺数据往下推理。
+        现在先写 .tmp 再 os.replace，失败时清掉 .tmp。
+    """
+    from agent.tools.files import write_file
+
+    out = write_file.invoke({"path": "atomic_for_test.txt", "content": "完整内容"})
+    assert "已写入" in out
+    try:
+        assert (SANDBOX / "atomic_for_test.txt").read_text(encoding="utf-8") == "完整内容"
+        # 目录里不能有 .tmp 残留。
+        leftovers = [p.name for p in SANDBOX.glob("*.tmp")]
+        assert not leftovers, f"留下临时文件：{leftovers}"
+    finally:
+        (SANDBOX / "atomic_for_test.txt").unlink(missing_ok=True)
 
 
 # ---------- 9. 流式接口的会话隔离 ----------
