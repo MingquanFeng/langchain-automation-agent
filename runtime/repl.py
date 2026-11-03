@@ -276,7 +276,7 @@ class ReplSession:
         self.thread_id = "cli-chat"
 
         # 写权限默认关闭，只读。
-        # 和 /run、/run/stream 的默认值一致。
+        # 和 runner.run_task() 的默认值一致。
         self.allow_write = False
 
         # 默认不显示模型的思考过程。

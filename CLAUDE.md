@@ -74,8 +74,9 @@ $PY -m runtime chat
 | POST | `/tasks` | 动态添加定时任务（cron + 指令） |
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 列出调度器已注册的 job 与下次运行时间 |
-| POST | `/run` | 同步触发一次任务（默认只读，`allow_write=true` 才开写权限） |
-| POST | `/run/stream` | SSE 流式触发（同上，默认只读） |
+
+**HTTP 层不提供触发 Agent 的入口** —— 触发只有三条路：`runtime/runner.py` 的 `run_task()`（Python 调用方）、
+`runtime/repl.py` 的交互终端、`runtime/scheduler.py` 的定时任务。桌面版另加 WebSocket `/ws`。
 
 首次使用需 `cp .env.example .env` 并填 `LLM_API_KEY`。环境变量全清单见 `.env.example`。
 
@@ -108,7 +109,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 - `runner.py` — 唯一的 Agent 调用入口，调度器和 HTTP 服务都走它，保证行为一致。`_AGENT` 单例复用，保留 checkpointer 里的记忆。
 - `scheduler.py` — APScheduler 封装。**LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力），所以定时触发必须自己接 APScheduler。cron 表达式按 `SCHEDULER_TIMEZONE` 解释，用 `CronTrigger.from_crontab`，即标准 5 段格式。
-- `server.py` — FastAPI。`/run` 同步，`/run/stream` 走 SSE 流式。
+- `server.py` — FastAPI。**只管定时任务增删查 + 调度状态 + 探活**，不触发 Agent。原来还有 `/run`（同步）和 `/run/stream`（SSE）两个触发端点，已按桌面版方向删除。
 - `repl.py` — 交互式终端，`python -m runtime chat`。斜杠命令控会话（`/new` `/write` `/think`），其余输入当指令发给 Agent。走 `stream_mode=["messages","values"]`：增量文本从 messages 流取，工具调用从 values 流里的 `tool_calls` 认（messages 模式下非流式模型不吐 `tool_call_chunks`）。
 - `tasks.py` — 定时任务表。改这个文件就改 Agent 每天自动做什么。**注意 `TASKS` 是模块级内存字典，不落盘** —— `POST /tasks` 动态加的任务进程重启即消失，只有改代码里的 `TASKS` 列表才是持久定义。
 - `__main__.py` — CLI 入口，两个子命令：`serve`（默认，起 HTTP 服务 + 可选调度器）和 `chat`（只起交互式终端，不起服务也不起调度器）。`--no-schedule` / `--reload` / `--host` / `--port` 都在这里解析。**它同时是陷阱 10 的落地文件** —— 调度开关必须在 `import runtime.server` 之前生效，顺序不能改。
@@ -192,9 +193,9 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 
 ## 约定
 
-- **记忆隔离靠 `thread_id`**。定时任务用 `cron-{任务名}` 作为 thread_id，保留跨天记忆；`POST /run` 每次生成随机 `task-{uuid}`；`POST /run/stream` 默认生成随机 `stream-{uuid}`，只有显式传 `thread_id` 才复用会话；REPL 例外 —— 固定用 `cli-chat`，重启终端能接着上次聊，`/new` 才换新的。
+- **记忆隔离靠 `thread_id`**。定时任务用 `cron-{任务名}` 作为 thread_id，保留跨天记忆；`runner.run_task()` 不传 thread_id 时生成随机 `task-{uuid}`；REPL 固定用 `cli-chat`，重启终端能接着上次聊，`/new` 才换新的。
 - **新增工具要做两件事**：登记进 `agent/tools/__init__.py` 的 `ALL_TOOLS`（不登记模型根本看不到这个工具），写类工具还要同步 `TaskGateMiddleware.WRITE_TOOLS`（`agent/middleware/custom.py`）。漏第二步，只读闸门就拦不住它。
-- **写操作受 `AgentContext.allow_write` 控制，默认关闭**（只读是默认态，写权限要显式开启：`AgentContext(allow_write=True)` / `/run` 传 `allow_write=true` / `ScheduledTask(allow_write=True)`）。只读模式由 `TaskGateMiddleware` 拦截。注意 `notify` / `notify_summary` 也算写工具，需要推送的任务必须显式开权限。新增写类工具时，要同步更新 `TaskGateMiddleware.WRITE_TOOLS`（见上一条）。
+- **写操作受 `AgentContext.allow_write` 控制，默认关闭**（只读是默认态，写权限要显式开启：`AgentContext(allow_write=True)` / `run_task(allow_write=True)` / `ScheduledTask(allow_write=True)` / REPL 的 `/write on`）。只读模式由 `TaskGateMiddleware` 拦截。注意 `notify` / `notify_summary` 也算写工具，需要推送的任务必须显式开权限。新增写类工具时，要同步更新 `TaskGateMiddleware.WRITE_TOOLS`（见上一条）。
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
 - **中间件顺序有意义**：`LIMITS` 放最前（先挡住跑飞），`CUSTOM_MIDDLEWARE` 放最后（能看到前面中间件的结果）。
 - **测试会真写 `data/` 目录**（`data/out/report.md` 等），`data/` 已在 `.gitignore` 里，跑测试不必清理。

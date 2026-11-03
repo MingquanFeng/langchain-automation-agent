@@ -143,7 +143,7 @@ return init_chat_model(**kwargs)
 | | `.invoke()` | `.stream()` |
 |---|---|---|
 | 返回 | 一次性返回完整 `AIMessage` | 迭代器，逐块返回 |
-| 项目用在 | `runtime/runner.py:165`（同步路径） | `runtime/repl.py:450`、`runtime/server.py:348`（流式路径） |
+| 项目用在 | `runtime/runner.py:165`（同步路径） | `runtime/repl.py:450`（流式路径） |
 
 📘 02 章 31 页签名：
 
@@ -154,7 +154,7 @@ def invoke(self, input, config=None, *, stop=None, **kwargs) -> AIMessage: ...
 **坑**
 - 📘 02 章：流式输出**依赖模型供应商是否支持**。
 - 🧩 `chunk.content` 可能是字符串也可能是内容块列表，项目两处都先 `isinstance(..., str)` 判断再取
-  （`repl.py:494`、`server.py:360`）。
+  （`repl.py:494`）。
 
 ### 3.3 消息四角色
 
@@ -561,7 +561,7 @@ SYSTEM_PROMPT = """你是一个自动化日常事务助手。
 
 | 模式 | 输出内容 | 场景 | 项目用了吗 |
 |---|---|---|---|
-| `values` | 每步执行后输出**完整状态** | 每步要完整状态、状态持久化 | ✅ `server.py:352` |
+| `values` | 每步执行后输出**完整状态** | 每步要完整状态、状态持久化 | ✅ `repl.py:458` |
 | `updates`（默认） | 每步只输出**增量**变化 | 监控执行进度 | ❌ |
 | `messages` | 流式返回 token 及元数据 | 打字机效果、实时交互 | ✅ `repl.py:458` |
 | `tasks` | task 开始/结束时间、结果、错误 | 监控任务生命周期 | ❌ |
@@ -569,22 +569,9 @@ SYSTEM_PROMPT = """你是一个自动化日常事务助手。
 | `checkpoints` | 检查点创建时触发 | 状态持久化、工作流恢复 | ❌ |
 | `custom` | `get_stream_writer()` 自定义数据 | 业务进度、自定义日志 | ❌ |
 
-**🧩 两种用法**：
+**🧩 项目只用了多模式这一种**：
 
 ```python
-# runtime/server.py:348 —— 单模式，拿到的是裸 payload
-for chunk in agent.stream(
-    {"messages": [HumanMessage(content=req.instruction)]},
-    config, context=ctx,
-    stream_mode="values",
-):
-    messages = chunk.get("messages", [])
-    if messages:
-        last = messages[-1]
-        content = getattr(last, "content", "")
-        if content:
-            yield f"data: {content}\n\n"
-
 # runtime/repl.py:450 —— 多模式，拿到的是 (模式名, 载荷) 二元组
 for mode, payload in self.agent.stream(
     {"messages": [HumanMessage(content=instruction)]},
@@ -593,11 +580,14 @@ for mode, payload in self.agent.stream(
 ):
 ```
 
+单模式（`stream_mode="values"`）拿到的是**裸 payload** —— 项目原先的 `/run/stream` SSE 端点就是这么写的，
+该端点已删除。桌面版的 WebSocket 事件流会同时用 `messages` + `custom` 两种模式。
+
 **坑**
 - 📘 07 章 P75-76：**多模式的迭代形式是 `(stream_mode, chunk)` 二元组**，不是裸 payload。
 - 🧩 `messages` 模式的 payload 是 `(chunk, metadata)` 二元组；`chunk` 可能是 `AIMessageChunk`（增量）也可能是整条 `AIMessage`（最终回答、中间件插入的消息）。项目两种都做了分支处理（`repl.py:490-511`）。
 - 🧩 **工具调用只能从 `values` 里认** —— messages 模式下非流式模型不吐 `tool_call_chunks`（`repl.py:433-434`）。
-- 🧩 `values` 每步推整个状态字典，`messages` 列表随轮次线性膨胀。`server.py` 因此只取 `messages[-1]` 外发（客户端要自己处理覆盖式更新）。
+- 🧩 `values` 每步推整个状态字典，`messages` 列表随轮次线性膨胀。多模式调用时要用 `mode` 分流，不能把两种 payload 混着解。
 - 🧩 `meta` 里带 `langgraph_node`，项目用它过滤中间件噪音（`repl.py:505-507`）。
 
 ### 5.6 `invoke` 与 `stream` 的返回值差异
@@ -1050,8 +1040,7 @@ agent.invoke({...}, config)  # 记得！
 | 入口 | thread_id | 效果 |
 |---|---|---|
 | 定时任务 | `cron-{任务名}` | 跨天保留记忆 |
-| `POST /run` | `task-{随机8位}` | 一次性，不留痕 |
-| `POST /run/stream` | `stream-{随机8位}` | 同上 |
+| `runner.run_task()` 不传 | `task-{随机8位}` | 一次性，不留痕 |
 | REPL | `cli-chat`（`/new` 换新） | 交互会话 |
 
 ### 7.7 静态运行时上下文：`context_schema=` 定义，`context=` 传入

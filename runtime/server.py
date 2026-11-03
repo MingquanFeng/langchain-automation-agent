@@ -1,6 +1,6 @@
 
 """
-FastAPI 服务：手动触发 Agent + 查看调度状态 + 流式输出。
+FastAPI 服务：定时任务管理 + 调度状态查询。
 
 课件未涉及部署，本层按 langgraph dev 之外的路径用 FastAPI 实现。
 
@@ -8,9 +8,9 @@ FastAPI 服务：手动触发 Agent + 查看调度状态 + 流式输出。
 课件未覆盖 HTTP 服务，需要自行实现。
 
 主要职责：
-1. 暴露一组 HTTP 端点，让外部程序能触发 Agent。
-2. 在应用启动时拉起调度器，关闭时停掉。
-3. 提供同步触发（/run）和流式触发（/run/stream）两种方式。
+1. 在应用启动时拉起调度器，关闭时停掉。
+2. 暴露定时任务的增删查接口与调度器状态查询。
+3. 健康检查。
 
 注意：
 FastAPI 的 @app.on_event 已废弃，
@@ -22,9 +22,6 @@ from __future__ import annotations
 # logging：标准库的日志模块。
 import logging
 
-# uuid：标准库，用来生成随机会话 ID。
-import uuid
-
 # asynccontextmanager：把生成器包装成异步上下文管理器，
 # 用于定义 FastAPI 的 lifespan。
 from contextlib import asynccontextmanager
@@ -32,18 +29,12 @@ from contextlib import asynccontextmanager
 # FastAPI：Web 框架。
 from fastapi import FastAPI
 
-# StreamingResponse：SSE 流式响应。
-from fastapi.responses import StreamingResponse
-
 # BaseModel / Field：Pydantic 模型与字段声明，
 # FastAPI 用它做请求体校验和 OpenAPI 文档。
 from pydantic import BaseModel, Field
 
-# RUNTIME：应用运行配置，这里取通知渠道和调度开关。
+# RUNTIME：应用运行配置，这里取调度开关。
 from agent.config import RUNTIME
-
-# get_agent / run_task：统一的 Agent 调用入口。
-from .runner import get_agent, run_task
 
 # list_jobs / start_scheduler / stop_scheduler：调度器接口。
 from .scheduler import list_jobs, start_scheduler, stop_scheduler
@@ -101,44 +92,14 @@ app = FastAPI(title="Automation Agent", version="0.1.0", lifespan=lifespan)
 # 2. 请求体模型
 # ============================================================
 
-class TaskRequest(BaseModel):
-    """
-    /run 和 /run/stream 的请求体。
-
-    Field(...) 表示必填；
-    Field(默认值, ...) 表示可选并带默认值。
-
-    注意：
-    allow_write 默认 False，即接口默认只读。
-    要让 Agent 改文件必须显式传 true。
-    """
-
-    # 给 Agent 的自然语言指令。
-    instruction: str = Field(..., description="给 Agent 的自然语言指令")
-
-    # 任务名，出现在通知标题里。
-    # 不传时用指令前 30 个字符兜底。
-    task_name: str | None = Field(None, description="任务名，出现在通知标题里")
-
-    # 会话 ID，相同则共享记忆。
-    #
-    # 注意：
-    # /run 不传就是一次性会话；
-    # /run/stream 不传也是一次性会话，
-    # 两者都要显式传才会复用历史。
-    thread_id: str | None = Field(None, description="会话 ID，相同则共享记忆")
-
-    # 是否允许写操作。
-    allow_write: bool = Field(False, description="是否允许写操作")
-
-
 class ScheduledTaskRequest(BaseModel):
     """
     POST /tasks 的请求体：新增一个定时任务。
 
     注意：
-    这个模型和 TaskRequest 分开，
-    因为一个描述「跑一次」，一个描述「什么时候跑」。
+    这个模型描述的是「什么时候跑」，
+    不是「跑一次」—— 后者由 runner.run_task() 直接接收，
+    不经过 HTTP。
     """
 
     # 任务名。
@@ -267,98 +228,3 @@ def delete_task(name: str) -> dict:
     removed = remove_task(name)
     start_scheduler()
     return {"removed": name, "ok": removed}
-
-
-# ============================================================
-# 5. 触发 Agent
-# ============================================================
-
-@app.post("/run")
-def run(req: TaskRequest) -> dict:
-    """同步执行一次任务。
-
-    返回：
-        runner.run_task() 的结果字典，
-        含 task_name、thread_id、output、messages。
-
-    注意：
-    这是同步接口，
-    客户端要一直等到 Agent 跑完才拿到响应。
-    长任务建议用 /run/stream。
-
-    注意：
-    trigger 固定为 "api"，
-    让 Agent 知道自己是被 HTTP 触发的。
-    """
-    return run_task(
-        instruction=req.instruction,
-        task_name=req.task_name,
-        trigger="api",
-        allow_write=req.allow_write,
-        thread_id=req.thread_id,
-    )
-
-
-@app.post("/run/stream")
-def run_stream(req: TaskRequest) -> StreamingResponse:
-    """流式执行，逐块返回模型输出。
-
-    返回：
-        text/event-stream 类型的响应。
-
-    注意：
-    这里没有复用 runner.run_task()，
-    因为流式需要自己控制 agent.stream() 的迭代，
-    run_task() 只提供了同步封装。
-    但上下文和 thread_id 的构造规则保持一致。
-    """
-    # 延迟导入：
-    # 这两个模块只在真正要流式输出时才用得上，
-    # 放在函数内可以省掉模块级的导入开销。
-    from langchain_core.messages import HumanMessage
-
-    from agent.context import AgentContext
-
-    agent = get_agent()
-    ctx = AgentContext(
-        task_name=req.task_name or req.instruction[:30],
-        trigger="api",
-        allow_write=req.allow_write,
-        notify_channel=RUNTIME.notify_channel,
-    )
-    # 显式传 thread_id 才复用会话；默认每次新会话，避免流式请求互相污染记忆
-    config = {"configurable": {"thread_id": req.thread_id or f"stream-{uuid.uuid4().hex[:8]}"}}
-
-    def generate():
-        """
-        SSE 生成器。
-
-        stream_mode="values" 表示每步产出整个状态字典，
-        里面的 messages 是到目前为止的完整消息列表。
-
-        注意：
-        这里只取最后一条消息的内容往外发，
-        相当于「每次有新内容就把最新的完整答案重发一遍」，
-        客户端需要自己处理覆盖式更新。
-
-        注意：
-        SSE 的数据帧格式是 `data: {内容}`，
-        帧之间用两个换行分隔。
-        """
-        for chunk in agent.stream(
-            {"messages": [HumanMessage(content=req.instruction)]},
-            config,
-            context=ctx,
-            stream_mode="values",
-        ):
-            messages = chunk.get("messages", [])
-            if messages:
-                last = messages[-1]
-
-                # content 可能是字符串，也可能是多模态的内容块列表。
-                # 这里只处理字符串形态，其他形态直接跳过。
-                content = getattr(last, "content", "")
-                if content:
-                    yield f"data: {content}\n\n"
-
-    return StreamingResponse(generate(), media_type="text/event-stream")

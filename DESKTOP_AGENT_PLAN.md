@@ -7,9 +7,8 @@
 
 现在的 agent 调用是**黑盒**：
 
-- `POST /run`（`runtime/server.py:276`）跑完才返回结果，中途发生了什么完全看不见
-- `POST /run/stream`（`runtime/server.py:302`）虽然是 SSE，但用 `stream_mode="values"`，
-  每步推**全量状态字典**，客户端只能取最后一条消息的 content
+- HTTP 层已经不提供触发入口（`/run`、`/run/stream` 已删除），交互只剩 `runtime/repl.py` 的终端
+- 终端是黑盒：跑完才看到结果，中途发生了什么完全看不见
 - 没有任何办法**打断**一次正在跑的 agent
 
 桌面 Agent 的第一个要求是「运行中可见、可打断」。而 UI 的唯一输入是**事件流** ——
@@ -58,7 +57,7 @@
 - `interrupt()` / 暂停等输入 —— 只做「取消」
 - 工具级超时 —— 见 P1 说明，只在事件模型里预留
 - 多任务并发 —— 第一版单连接单任务
-- 不改现有 `/run`、`/run/stream` 的行为 —— 纯新增
+- 不改现有 HTTP 端点的行为 —— 纯新增 `/ws`
 
 ---
 
@@ -232,7 +231,7 @@ loop.call_soon_threadsafe(lambda: asyncio.ensure_future(queue.put(event)))
 ### 关键决策
 
 **D1 · 用同步 `agent.stream()` + 线程桥接，不用 `astream()`**
-现有假模型只在同步路径工作（见上）。走同步路径还有个好处：跟现有 `/run`、`/run/stream`、REPL
+现有假模型只在同步路径工作（见上）。走同步路径还有个好处：跟现有 REPL
 的行为完全一致，**现有 47 项测试一行不用改**。
 
 **D2 · 取消用 `threading.Event` + `break`，不 hack 生成器**
@@ -247,8 +246,9 @@ loop.call_soon_threadsafe(lambda: asyncio.ensure_future(queue.put(event)))
 `get_stream_writer()` 必须 try/except 兜底 —— 万一不在图的执行路径里（比如单测直接调工具），
 拿不到就静默跳过，不能让整个调用崩掉。
 
-**D4 · 现有 SSE 端点不动**
-`/run/stream` 保留。新增 `/ws`。避免破坏现有行为，也避免让已有用户被迫迁移。
+**D4 · 现有 HTTP 端点不动**
+`/health`、`/tasks`、`/jobs` 保留。新增 `/ws`。桌面版只用 `/ws` 做交互，
+HTTP 侧退成探活与定时任务管理。
 
 **D5 · 归一化层独立成 `runtime/events.py`**
 `runtime/repl.py` 现在自己解析 `(mode, payload)`（`repl.py:450-511`）。

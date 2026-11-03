@@ -70,15 +70,18 @@ python -m runtime chat           # 交互式终端（REPL）
 | POST | `/tasks` | 动态添加定时任务 |
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 已注册 job 与下次运行时间 |
-| POST | `/run` | 同步触发一次任务 |
-| POST | `/run/stream` | SSE 流式触发 |
+
+**HTTP 层不触发 Agent** —— 它只管定时任务与状态查询。触发 Agent 有两条路：
 
 ```bash
-# allow_write 默认 false：只读模式，写工具（notify / write_file 等）会被拦截。
-# 需要写权限时显式传 allow_write=true
-curl -X POST http://127.0.0.1:8000/run \
-  -H 'Content-Type: application/json' \
-  -d '{"instruction":"列出数据目录下的文件并汇总通知","allow_write":true}'
+# 1. 交互终端
+python -m runtime chat
+
+# 2. Python API（allow_write 默认 false，即只读，写工具会被闸门拦下）
+python -c "
+from runtime.runner import run_task
+print(run_task(instruction='列出数据目录下的文件', allow_write=True)['output'])
+"
 ```
 
 ## 代码导览
@@ -106,7 +109,7 @@ agent/
 runtime/
   runner.py          唯一 Agent 调用入口，调度器和 HTTP 都走它
   scheduler.py       APScheduler 封装（LangGraph 1.x 本地没有内置 cron）
-  server.py          FastAPI，/run 同步、/run/stream 流式
+  server.py          FastAPI，定时任务增删查 + 状态查询（不触发 Agent）
   repl.py            交互式终端，python -m runtime chat
   tasks.py           定时任务表，改这里就改 Agent 每天自动做什么
 tests/               端到端测试

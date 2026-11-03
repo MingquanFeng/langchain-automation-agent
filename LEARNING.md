@@ -41,7 +41,7 @@
 模型、工具、中间件、记忆全是**注入参数** —— 所以换模型/换工具不用改调用方，这就是 `build_agent()` 存在的意义。
 
 **延伸**：课件 07 章 8.2 讲了 7 种 `stream_mode`（values / updates / messages / tasks / debug / checkpoints / custom）。
-项目只用了 `values`（`runtime/server.py:352`）和 `messages`（`runtime/repl.py:458`）。
+项目只用了 `values` 和 `messages` 两种流模式（都在 `runtime/repl.py:458`，HTTP 侧的 SSE 端点已删除）。
 
 ---
 
@@ -138,7 +138,7 @@
 |---|---|
 | `runtime/runner.py:58` `get_agent()` | `_AGENT` 单例，保留 checkpointer 里的记忆。调度器和 HTTP 都走 `run_task()`，保证行为一致 |
 | `runtime/scheduler.py:141` | `CronTrigger.from_crontab` —— 5 段 cron，按 `SCHEDULER_TIMEZONE` 解释。**LangGraph 1.x 本地没有内置 cron**，`langgraph_sdk` 也没导出，那是云端 Platform 的能力 |
-| `runtime/server.py:302` `/run/stream` | SSE 流式。`stream_mode="values"` 每步给全量状态 |
+| `runtime/server.py:123` `/health` | 探活 + 调度器开关状态。**HTTP 层现在只管定时任务与状态查询，不再提供触发 Agent 的入口** —— 触发走 REPL / 定时任务 / 桌面壳 |
 | `runtime/tasks.py:109` `TASKS` | 改这个文件就改 Agent 每天自动做什么。注意它是**内存字典，不落盘** |
 
 ---

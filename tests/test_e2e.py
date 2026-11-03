@@ -19,8 +19,7 @@ FakeListChatModel 不支持 tool_calls（bind_tools 未实现），
 
 from __future__ import annotations
 
-# 标准库：asyncio 跑异步端点，sys / pathlib 处理导入路径。
-import asyncio
+# 标准库：sys / pathlib 处理导入路径。
 import sys
 from pathlib import Path
 
@@ -560,37 +559,39 @@ def test_write_file_leaves_no_temp_file():
         (SANDBOX / "atomic_for_test.txt").unlink(missing_ok=True)
 
 
-# ---------- 9. 流式接口的会话隔离 ----------
+# ---------- 9. 会话隔离 ----------
 
-# /run/stream 默认每次都是新会话（thread_id 随机生成），
-# 只有显式传 thread_id 才复用 —— 否则所有流式请求共享同一份记忆。
+# run_task 不传 thread_id 时每次都是新会话（task-{随机}），
+# 只有显式传 thread_id 才复用 —— 否则不同任务会串记忆。
+#
+# 注意：
+# 这条守的是 runner.run_task() 的行为，
+# 不是某个 HTTP 端点的行为 ——
+# 触发 Agent 的入口在变（HTTP → REPL → 桌面壳），
+# 但 thread_id 的隔离规则一直在。
 
 
-def test_stream_endpoint_isolates_threads(monkeypatch):
-    """流式接口默认每次新会话；显式传 thread_id 才复用。
+def test_run_task_isolates_threads(monkeypatch):
+    """run_task 默认每次新会话；显式传 thread_id 才复用。
 
-    回归防护：曾经硬编码成 "stream-session"，导致所有流式请求共享同一份记忆。
+    回归防护：曾经硬编码成固定会话 ID，导致所有任务共享同一份记忆。
     """
-    from runtime import server
-    from runtime.server import TaskRequest
+    from runtime import runner
 
     seen: list[str] = []
 
     class FakeAgent:
-        def stream(self, messages, config, context=None, stream_mode=None):
+        def invoke(self, messages, config, context=None):
             seen.append(config["configurable"]["thread_id"])
-            yield {"messages": [AIMessage(content="ok")]}
+            return {"messages": [AIMessage(content="ok")]}
 
-    monkeypatch.setattr(server, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(runner, "get_agent", lambda: FakeAgent())
 
-    async def drain(resp):
-        return [chunk async for chunk in resp.body_iterator]
-
-    asyncio.run(drain(server.run_stream(TaskRequest(instruction="第一次"))))
-    asyncio.run(drain(server.run_stream(TaskRequest(instruction="第二次"))))
-    asyncio.run(drain(server.run_stream(TaskRequest(instruction="第三次", thread_id="fixed"))))
+    runner.run_task(instruction="第一次")
+    runner.run_task(instruction="第二次")
+    runner.run_task(instruction="第三次", thread_id="fixed")
 
     assert seen[0] != seen[1], "默认不该共享会话"
-    assert seen[0].startswith("stream-")
-    assert seen[1].startswith("stream-")
+    assert seen[0].startswith("task-")
+    assert seen[1].startswith("task-")
     assert seen[2] == "fixed", "显式传的 thread_id 要被尊重"
