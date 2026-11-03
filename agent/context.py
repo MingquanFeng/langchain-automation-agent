@@ -45,8 +45,9 @@ Trigger = Literal["schedule", "api", "cli", "lab"]
 # 各取值的含义：
 #
 # schedule：定时调度器触发（runtime/scheduler.py）。
-# api：HTTP 接口触发（runtime/server.py）。
-# cli：命令行或直接调用触发（runtime/runner.py、runtime/repl.py）。
+# api：HTTP 层触发（runtime/server.py）。目前没有调用方 ——
+#      /run 与 /run/stream 端点已删，桌面版的 WebSocket 端点会用这个值。
+# cli：命令行或直接调用触发（runtime/runner.py）。
 # lab：学习实验脚本触发（自己写的实验脚本）。
 
 
