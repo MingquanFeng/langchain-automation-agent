@@ -15,7 +15,7 @@
 比通读课件更快定位到自己要用的那部分。
 
 课件原文就在本仓库的 `courseware/` 目录（尚硅谷 LangChain 1.x 的 10 章 PDF 原件），
-文件名的数字即章号 —— `courseware/尚硅谷-05-Tools.pdf` 就是课件 05 章。
+文件名的数字即章号 —— `courseware/langChain/尚硅谷-05-Tools.pdf` 就是课件 05 章。
 章节与源码的对应索引见 `courseware/README.md`。
 
 另外 `courseware/langGraph/` 是一套 **LangGraph 专项课件**（6 篇 Markdown，章节号 1-13 连续），

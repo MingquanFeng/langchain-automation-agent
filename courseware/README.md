@@ -4,7 +4,7 @@
 
 | 目录 | 内容 | 格式 |
 |---|---|---|
-| 根目录 | **尚硅谷 LangChain 1.x 课程讲义**（10 章） | PDF 原件 |
+| `langChain/` | **尚硅谷 LangChain 1.x 课程讲义**（10 章） | PDF 原件 |
 | `langGraph/` | **LangGraph 专项课件**（6 篇，章节号 1-13 连续） | Markdown + 图片 |
 
 源码注释里的「对应课件 XX 章 X.X 节」标注指向的就是这里 —— 改代码前先翻对应章节，
@@ -25,22 +25,22 @@
 
 ## 章节索引
 
-文件名里的数字就是章号 —— `尚硅谷-05-Tools.pdf` 即课件 05 章。
+文件名里的数字就是章号 —— `langChain/尚硅谷-05-Tools.pdf` 即课件 05 章。
 
 | 章 | 文件 | 内容 | 在本项目里的位置 |
 |---|---|---|---|
-| 01 | `尚硅谷-01-LangChain概述.pdf` | 课程总览、1.x 的架构与生态定位 | 背景概念，代码里没有直接对应 |
-| 02 | `尚硅谷-02-模型的创建与调用.pdf` | 模型接入、`init_chat_model` | 主线 1 —— `agent/config.py` 的 `ModelConfig.build()` |
-| 03 | `尚硅谷-03-LangSmith的使用.pdf` | LangSmith 追踪 | 本项目未使用 |
-| 04 | `尚硅谷-04-Message与提示词模板.pdf` | 消息类型、提示词模板 | 主线 1 —— `HumanMessage` 输入构造 |
-| 05 | `尚硅谷-05-Tools.pdf` | `@tool`、工具描述、沙箱、function calling | 主线 2 —— `agent/tools/` |
-| 06 | `尚硅谷-06-结构化输出.pdf` | `with_structured_output` 的四种模式 | `agent/tools/files.py` 的 `save_json` 是手写版，可对照改造 |
-| 07 | `尚硅谷-07-智能体.pdf` | `create_agent`、Agent 循环、`stream_mode` | 主线 1 —— `agent/graph.py` 的 `build_agent()` |
-| 08 | `尚硅谷-08-中间件.pdf` | 中间件机制、钩子、执行顺序 | 主线 3 —— `agent/middleware/custom.py`（本项目精华） |
-| 09 | `尚硅谷-09-上下文与记忆.pdf` | 静态运行时上下文、checkpointer、记忆治理 | 主线 4 —— `agent/context.py` |
-| 10 | `尚硅谷-10-RAG.pdf` | RAG | 本项目不覆盖 RAG |
+| 01 | `langChain/尚硅谷-01-LangChain概述.pdf` | 课程总览、1.x 的架构与生态定位 | 背景概念，代码里没有直接对应 |
+| 02 | `langChain/尚硅谷-02-模型的创建与调用.pdf` | 模型接入、`init_chat_model` | 主线 1 —— `agent/config.py` 的 `ModelConfig.build()` |
+| 03 | `langChain/尚硅谷-03-LangSmith的使用.pdf` | LangSmith 追踪 | 本项目未使用 |
+| 04 | `langChain/尚硅谷-04-Message与提示词模板.pdf` | 消息类型、提示词模板 | 主线 1 —— `HumanMessage` 输入构造 |
+| 05 | `langChain/尚硅谷-05-Tools.pdf` | `@tool`、工具描述、沙箱、function calling | 主线 2 —— `agent/tools/` |
+| 06 | `langChain/尚硅谷-06-结构化输出.pdf` | `with_structured_output` 的四种模式 | `agent/tools/files.py` 的 `save_json` 是手写版，可对照改造 |
+| 07 | `langChain/尚硅谷-07-智能体.pdf` | `create_agent`、Agent 循环、`stream_mode` | 主线 1 —— `agent/graph.py` 的 `build_agent()` |
+| 08 | `langChain/尚硅谷-08-中间件.pdf` | 中间件机制、钩子、执行顺序 | 主线 3 —— `agent/middleware/custom.py`（本项目精华） |
+| 09 | `langChain/尚硅谷-09-上下文与记忆.pdf` | 静态运行时上下文、checkpointer、记忆治理 | 主线 4 —— `agent/context.py` |
+| 10 | `langChain/尚硅谷-10-RAG.pdf` | RAG | 本项目不覆盖 RAG |
 
-第 10 章（RAG）在 `requirements.txt` 里也是注释掉的 —— 这个骨架停在「Agent 怎么做」，
+第 10 章（RAG）在 `langChain/requirements.txt` 里也是注释掉的 —— 这个骨架停在「Agent 怎么做」，
 没往「Agent 查什么」走。
 
 ## LangGraph 专项课件（`langGraph/`）

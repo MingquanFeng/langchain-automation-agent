@@ -26,7 +26,7 @@
 | 中间件 `wrap_tool_call` 里能拿到 `get_stream_writer()` | 在 `wrap_tool_call` 里发 custom 事件 | ✅ 拿到，`custom` 模式收到了 `{'type': 'tool.start', 'name': 'list_files', 'args': {}, 'id': 'c1'}` |
 | `stream_mode` 传列表时产出 `(mode, payload)` 二元组 | `stream_mode=["messages","custom"]` | ✅ 与 `runtime/repl.py:450` 现有用法一致 |
 | 事件顺序正确 | 观察完整流 | ✅ `tool.start` → `tool.end` → `ToolMessage` → 最终回答 |
-| FastAPI WebSocket + uvicorn 在本环境可用 | 起了个最小 ws 端点并用 `websockets` 客户端连 | ✅ 收到全部事件。`websockets` 16.0 已装（`courseware/requirements.txt:81`），uvicorn 的 `auto` 后端会自动选 `websockets_impl` |
+| FastAPI WebSocket + uvicorn 在本环境可用 | 起了个最小 ws 端点并用 `websockets` 客户端连 | ✅ 收到全部事件。`websockets` 16.0 已装（`courseware/langChain/requirements.txt:81`），uvicorn 的 `auto` 后端会自动选 `websockets_impl` |
 | 跨线程推事件可行 | `asyncio.to_thread` 里跑同步代码 + `loop.call_soon_threadsafe` | ✅ 事件按顺序送达客户端 |
 
 **另外查清了两个约束**（会直接影响实现方式）：

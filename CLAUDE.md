@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目性质
 
-这是一个**学习驱动**的项目，不是生产系统。`automation_agent/` 是边学边搭的自动化 Agent 骨架，课件在仓库内的 `courseware/` —— 两套讲义：尚硅谷 LangChain 1.x 的 10 章 PDF（根目录），和 **LangGraph 专项课件 6 篇 Markdown**（`courseware/langGraph/`，章节号 1-13 连续），见 `courseware/README.md` 的来源说明与章节索引。
+这是一个**学习驱动**的项目，不是生产系统。`automation_agent/` 是边学边搭的自动化 Agent 骨架，课件在仓库内的 `courseware/` —— 两套讲义：尚硅谷 LangChain 1.x 的 10 章 PDF（`courseware/langChain/`），和 **LangGraph 专项课件 6 篇 Markdown**（`courseware/langGraph/`，章节号 1-13 连续），见 `courseware/README.md` 的来源说明与章节索引。
 
 课件对每个知识点都有对应章节，源码注释里用「对应课件 XX 章 X.X 节」标注了出处。**改代码前先看对应课件章节**，保持实现与课件 API 一致；只有当课件 API 与 langchain 1.2 实际行为冲突时，才按实际行为写并在注释里说明差异。
 
@@ -84,7 +84,7 @@ $PY -m runtime chat
 
 - `LEARNING.md` — **源码索引**：课件章节 ↔ 源码位置的对照表。想学这个项目先看它。共 6 条主线，第 6 条是 LangGraph 底层。
 - `KNOWLEDGE.md` — **知识点总结**：只讲本项目实际用到的 API 是什么、怎么写、坑在哪。当速查手册用。
-- `courseware/` — 课件原文：LangChain 1.x 的 10 章 PDF（根目录）+ LangGraph 专项课件 6 篇 Markdown（`langGraph/`）。索引见 `courseware/README.md`。
+- `courseware/` — 课件原文，两个子目录：`langChain/`（LangChain 1.x 的 10 章 PDF）+ `langGraph/`（LangGraph 专项课件 6 篇 Markdown）。索引见 `courseware/README.md`。
 - `DESKTOP_AGENT_PLAN.md` — 把本项目改造成桌面 Agent 的路线图，第一步（事件流后端）要用到 LangGraph 的中断与流式。
 
 ## 架构

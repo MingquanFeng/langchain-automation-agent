@@ -159,7 +159,7 @@ python -m runtime chat
 
 源码注释里的「对应课件 XX 章 X.X 节」指向一套 LangChain 1.x 中文课程（PDF 共 10 章：概述 / 模型调用 / LangSmith / Message 与提示词 / Tools / 结构化输出 / 智能体 / 中间件 / 上下文与记忆 / RAG）。
 
-课件 PDF 原件就在本仓库的 `courseware/` 目录（10 章），章节索引见 `courseware/README.md`。
+课件 PDF 原件就在本仓库的 `courseware/langChain/` 目录（10 章），章节索引见 `courseware/README.md`。
 
 ## 说明
 
