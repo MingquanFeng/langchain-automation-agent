@@ -41,7 +41,7 @@
 模型、工具、中间件、记忆全是**注入参数** —— 所以换模型/换工具不用改调用方，这就是 `build_agent()` 存在的意义。
 
 **延伸**：课件 07 章 8.2 讲了 7 种 `stream_mode`（values / updates / messages / tasks / debug / checkpoints / custom）。
-项目只用了 `values` 和 `messages` 两种流模式（都在 `runtime/repl.py:458`，HTTP 侧的 SSE 端点已删除）。
+交互终端与 HTTP 的 SSE 端点都已删除，**项目目前没有流式消费者** —— 桌面版做事件流时会重新用起 `values` + `messages` + `custom`（见主线 6）。
 
 ---
 
@@ -145,7 +145,7 @@
 
 ## 主线 6：LangGraph 底层（`courseware/langGraph/`，6 篇）
 
-**读源码**：`agent/graph.py`（checkpointer / store 注入）→ `agent/middleware/custom.py`（Runtime）→ `runtime/repl.py`（流式元数据）
+**读源码**：`agent/graph.py`（checkpointer / store 注入）→ `agent/middleware/custom.py`（Runtime）→ `runtime/events.py`（流式元数据处理）
 
 LangChain 课件讲的是「怎么用 `create_agent`」，这套课件讲的是「`create_agent` 底下跑的是什么」。
 本项目每个 Agent 都是一张 **LangGraph 状态图**，只是图是 `create_agent` 替你画的。
@@ -157,8 +157,8 @@ LangChain 课件讲的是「怎么用 `create_agent`」，这套课件讲的是�
 | `agent/graph.py:102` `InMemoryStore` | 长期记忆：跨 thread 的键值存储。**目前只挂了没用**（全项目没有 `store.put`/`get`/`search` 调用） | 03 章 7.2「长期记忆」 |
 | `agent/middleware/custom.py:38` `Runtime` | `runtime.context` 就是 LangGraph 的运行时上下文 | 03 章 7.3「运行时上下文」 |
 | `agent/middleware/custom.py:98` `after_model` | 钩子插在 `model` 与 `tools` **两个节点之间**，所以它能拦下写工具 | 02 章 4.2「分支结构」 |
-| `runtime/repl.py:458` | `stream_mode=["messages","values"]` —— LangGraph 的流模式 | 05 章 11.2 `stream`/`astream` |
-| `runtime/repl.py:505` | 流式元数据里的 `langgraph_node`，用来滤掉中间件噪音 | 05 章 11.2 |
+| `runtime/events.py` `ThinkFilter` | 滤掉模型混在正文里的 `<think>` 思考块（MiniMax 这类推理模型） | 05 章 11.2 `stream`/`astream` |
+| `runtime/events.py` `is_hint_node` | 流式元数据里的 `langgraph_node`，用来滤掉中间件插入的例行提示 | 05 章 11.2 |
 
 **关键认知 —— 项目跑的那张图长这样**（实测 `agent.get_graph()`）：
 

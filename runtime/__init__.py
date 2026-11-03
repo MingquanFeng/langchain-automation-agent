@@ -1,6 +1,6 @@
 
 """
-运行时外壳：调度器、HTTP 服务、交互式终端、任务定义。
+运行时外壳：调度器、HTTP 服务、事件归一化、任务定义。
 
 对应课件：
 课件未覆盖 runtime 层，需要自行实现。
@@ -12,7 +12,7 @@
 
 注意：
 本文件只做导入转发，不含任何业务逻辑。
-具体实现分散在 runner.py、tasks.py、scheduler.py、server.py、repl.py。
+具体实现分散在 runner.py、tasks.py、scheduler.py、server.py、events.py。
 """
 
 # ============================================================

@@ -143,7 +143,7 @@ return init_chat_model(**kwargs)
 | | `.invoke()` | `.stream()` |
 |---|---|---|
 | 返回 | 一次性返回完整 `AIMessage` | 迭代器，逐块返回 |
-| 项目用在 | `runtime/runner.py:165`（同步路径） | `runtime/repl.py:450`（流式路径） |
+| 项目用在 | `runtime/runner.py:165`（同步路径） | 流式路径项目还没接（交互终端与 SSE 端点已删，桌面版事件流待做） |
 
 📘 02 章 31 页签名：
 
@@ -154,7 +154,7 @@ def invoke(self, input, config=None, *, stop=None, **kwargs) -> AIMessage: ...
 **坑**
 - 📘 02 章：流式输出**依赖模型供应商是否支持**。
 - 🧩 `chunk.content` 可能是字符串也可能是内容块列表，项目两处都先 `isinstance(..., str)` 判断再取
-  （`repl.py:494`）。
+  （过滤逻辑现在在 `runtime/events.py` 的 `ThinkFilter`）。
 
 ### 3.3 消息四角色
 
@@ -180,7 +180,7 @@ def invoke(self, input, config=None, *, stop=None, **kwargs) -> AIMessage: ...
 
 | 属性 | 含义 | 项目用在哪 |
 |---|---|---|
-| `.content` | 内容字段，**弱类型**：字符串或内容块列表 | `runner.py:178` 取最终答案；`repl.py:494` 取流式增量 |
+| `.content` | 内容字段，**弱类型**：字符串或内容块列表 | `runner.py:178` 取最终答案；流式增量取法见 `runtime/events.py` |
 | `.text` | 纯文本形态的内容 | `custom.py:206` 取 `SystemMessage` 文本 |
 | `.content_blocks` | 1.x 新增的**跨供应商标准化多模态结构**（推理 / 文本 / 工具调用统一对象） | **项目未使用** |
 
@@ -561,34 +561,30 @@ SYSTEM_PROMPT = """你是一个自动化日常事务助手。
 
 | 模式 | 输出内容 | 场景 | 项目用了吗 |
 |---|---|---|---|
-| `values` | 每步执行后输出**完整状态** | 每步要完整状态、状态持久化 | ✅ `repl.py:458` |
+| `values` | 每步执行后输出**完整状态** | 每步要完整状态、状态持久化 | ❌ 暂无消费者 |
 | `updates`（默认） | 每步只输出**增量**变化 | 监控执行进度 | ❌ |
-| `messages` | 流式返回 token 及元数据 | 打字机效果、实时交互 | ✅ `repl.py:458` |
+| `messages` | 流式返回 token 及元数据 | 打字机效果、实时交互 | ❌ 暂无消费者 |
 | `tasks` | task 开始/结束时间、结果、错误 | 监控任务生命周期 | ❌ |
 | `debug` | 类似 tasks，多时间戳与 task 类型 | 调试、监控 | ❌ |
 | `checkpoints` | 检查点创建时触发 | 状态持久化、工作流恢复 | ❌ |
 | `custom` | `get_stream_writer()` 自定义数据 | 业务进度、自定义日志 | ❌ |
 
-**🧩 项目只用了多模式这一种**：
+**🧩 项目当前没有流式消费者** —— 交互终端（`runtime/repl.py`）与 SSE 端点都已按桌面版方向删除，
+所以七种模式现在一个都没在用。
 
-```python
-# runtime/repl.py:450 —— 多模式，拿到的是 (模式名, 载荷) 二元组
-for mode, payload in self.agent.stream(
-    {"messages": [HumanMessage(content=instruction)]},
-    config, context=ctx,
-    stream_mode=["messages", "values"],
-):
-```
+留下的只有流式**处理**逻辑，搬到了 `runtime/events.py`：
+- `ThinkFilter`：滤掉模型混在正文里的 `<think>` 思考块；
+- `is_hint_node`：按 `langgraph_node` 滤掉中间件插入的例行提示。
 
-单模式（`stream_mode="values"`）拿到的是**裸 payload** —— 项目原先的 `/run/stream` SSE 端点就是这么写的，
-该端点已删除。桌面版的 WebSocket 事件流会同时用 `messages` + `custom` 两种模式。
+桌面版做 WebSocket 事件流时会重新用起 `messages` + `custom` 两种模式，
+多模式的迭代形式仍是 `(stream_mode, chunk)` 二元组。
 
 **坑**
 - 📘 07 章 P75-76：**多模式的迭代形式是 `(stream_mode, chunk)` 二元组**，不是裸 payload。
-- 🧩 `messages` 模式的 payload 是 `(chunk, metadata)` 二元组；`chunk` 可能是 `AIMessageChunk`（增量）也可能是整条 `AIMessage`（最终回答、中间件插入的消息）。项目两种都做了分支处理（`repl.py:490-511`）。
-- 🧩 **工具调用只能从 `values` 里认** —— messages 模式下非流式模型不吐 `tool_call_chunks`（`repl.py:433-434`）。
+- 🧩 `messages` 模式的 payload 是 `(chunk, metadata)` 二元组；`chunk` 可能是 `AIMessageChunk`（增量）也可能是整条 `AIMessage`（最终回答、中间件插入的消息）。桌面版事件流要同时处理这两种形态。
+- 🧩 **工具调用只能从 `values` 里认** —— messages 模式下非流式模型不吐 `tool_call_chunks`。
 - 🧩 `values` 每步推整个状态字典，`messages` 列表随轮次线性膨胀。多模式调用时要用 `mode` 分流，不能把两种 payload 混着解。
-- 🧩 `meta` 里带 `langgraph_node`，项目用它过滤中间件噪音（`repl.py:505-507`）。
+- 🧩 `meta` 里带 `langgraph_node`，用它过滤中间件噪音 —— 判定逻辑在 `runtime/events.py` 的 `is_hint_node`。
 
 ### 5.6 `invoke` 与 `stream` 的返回值差异
 
@@ -1041,7 +1037,7 @@ agent.invoke({...}, config)  # 记得！
 |---|---|---|
 | 定时任务 | `cron-{任务名}` | 跨天保留记忆 |
 | `runner.run_task()` 不传 | `task-{随机8位}` | 一次性，不留痕 |
-| REPL | `cli-chat`（`/new` 换新） | 交互会话 |
+| 显式传 thread_id | 调用方自己给 | 同值即共享记忆 |
 
 ### 7.7 静态运行时上下文：`context_schema=` 定义，`context=` 传入
 

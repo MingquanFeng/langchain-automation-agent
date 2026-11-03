@@ -7,24 +7,22 @@
 
 主要职责：
 1. 解析命令行参数（子命令 + 监听地址 + 端口 + 调度开关）。
-2. 决定启动 HTTP 服务还是交互式终端。
-3. 在导入服务模块之前把调度开关生效到配置上。
+2. 在导入服务模块之前把调度开关生效到配置上。
 
-两个子命令的区别：
+唯一的子命令：
     serve（默认）：
         启动 FastAPI 服务，同时按需带上定时调度器。
-        无界面，通过 HTTP 接口触发 Agent。
+        HTTP 层只管定时任务与状态查询，不触发 Agent。
         对应 runtime/server.py。
 
-    chat：
-        启动交互式终端，直接在命令行里像聊天一样给 Agent 下指令。
-        对应 runtime/repl.py。
-        不起 HTTP 服务，也不启动调度器。
+    注意：
+    原本还有 chat 子命令（交互式终端 runtime/repl.py），
+    已随桌面版改造删除 —— 终端界面由 Textual TUI 承担，
+    桌面壳走 WebSocket 事件流。
 
 用法：
     python -m runtime              # 起服务（含定时任务）
     python -m runtime --no-schedule # 只起服务
-    python -m runtime chat         # 交互式终端
 """
 
 from __future__ import annotations
@@ -53,7 +51,7 @@ def main() -> None:
     1. 解析参数。
     2. 配置日志。
     3. 让调度开关在服务模块被导入前生效。
-    4. 分派到 chat 或 serve 两条路径。
+    4. 启动 HTTP 服务。
 
     注意：
     这里的执行顺序有强依赖，不要随意调整。
@@ -70,12 +68,17 @@ def main() -> None:
     #
     # choices 限定取值范围，
     # 传了别的值 argparse 会直接报错退出。
+    #
+    # 注意：
+    # 原本还有 chat 子命令（交互式终端），
+    # 已随 runtime/repl.py 一起删除 ——
+    # 桌面版改用 WebSocket 事件流，终端界面由 Textual TUI 承担。
     parser.add_argument(
         "command",
         nargs="?",
         default="serve",
-        choices=["serve", "chat"],
-        help="serve=起 HTTP 服务（默认），chat=交互式终端",
+        choices=["serve"],
+        help="serve=起 HTTP 服务（默认）",
     )
 
     # --------------------------------------------------------
@@ -163,25 +166,7 @@ def main() -> None:
     # --------------------------------------------------------
 
     # --------------------------------------------------------
-    # 3.1 chat：交互式终端
-    # --------------------------------------------------------
-
-    # 延迟导入：只有真的走 chat 分支时才加载 repl 及其依赖。
-    #
-    # 注意：
-    # chat 分支在 return 之前就结束了，
-    # 所以既不会起 HTTP 服务，也不会起调度器。
-    #
-    # 它和 serve 唯一的交集是共用了
-    # runtime/runner.py 里的 Agent 单例逻辑。
-    if args.command == "chat":
-        from runtime.repl import run_repl
-
-        run_repl()
-        return
-
-    # --------------------------------------------------------
-    # 3.2 serve：HTTP 服务
+    # 3.1 serve：HTTP 服务
     # --------------------------------------------------------
 
     # 同样延迟导入。

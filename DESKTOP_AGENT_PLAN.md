@@ -1,13 +1,13 @@
 # 桌面 Agent 改造计划
 
-> 这是把本项目从「HTTP 服务 + 终端 REPL」改造成「桌面 Agent」的路线图。
+> 这是把本项目从「HTTP 服务 + Python API」改造成「桌面 Agent」的路线图。
 > 本文只写**第一步**（事件流后端）的完整设计；后面的步骤列到里程碑级别。
 
 ## Context：为什么要做这一步
 
 现在的 agent 调用是**黑盒**：
 
-- HTTP 层已经不提供触发入口（`/run`、`/run/stream` 已删除），交互只剩 `runtime/repl.py` 的终端
+- HTTP 层已经不提供触发入口（`/run`、`/run/stream` 已删除），交互终端 `runtime/repl.py` 也已删除
 - 终端是黑盒：跑完才看到结果，中途发生了什么完全看不见
 - 没有任何办法**打断**一次正在跑的 agent
 
@@ -24,7 +24,7 @@
 | 前提 | 验证方式 | 结论 |
 |---|---|---|
 | 中间件 `wrap_tool_call` 里能拿到 `get_stream_writer()` | 在 `wrap_tool_call` 里发 custom 事件 | ✅ 拿到，`custom` 模式收到了 `{'type': 'tool.start', 'name': 'list_files', 'args': {}, 'id': 'c1'}` |
-| `stream_mode` 传列表时产出 `(mode, payload)` 二元组 | `stream_mode=["messages","custom"]` | ✅ 与 `runtime/repl.py:450` 现有用法一致 |
+| `stream_mode` 传列表时产出 `(mode, payload)` 二元组 | `stream_mode=["messages","custom"]` | ✅ 已实测（原交互终端用过同样形态，该实现随终端删除） |
 | 事件顺序正确 | 观察完整流 | ✅ `tool.start` → `tool.end` → `ToolMessage` → 最终回答 |
 | FastAPI WebSocket + uvicorn 在本环境可用 | 起了个最小 ws 端点并用 `websockets` 客户端连 | ✅ 收到全部事件。`websockets` 16.0 已装（`courseware/langChain/requirements.txt:81`），uvicorn 的 `auto` 后端会自动选 `websockets_impl` |
 | 跨线程推事件可行 | `asyncio.to_thread` 里跑同步代码 + `loop.call_soon_threadsafe` | ✅ 事件按顺序送达客户端 |
@@ -33,7 +33,7 @@
 
 - ⚠️ **`GenericFakeChatModel`（`tests/test_e2e.py` 在用）不能配 `agent.stream()`** ——
   它没实现 `_stream` 的 chunk 格式，流式路径会报 `ValueError: No generations found in stream`。
-  `tests/test_repl.py:58` 的 `FakeModel` 实现了 `_stream`，**是流式路径唯一可用的假模型**。
+  `tests/fakes.py` 的 `FakeModel` 实现了 `_stream`，**是流式路径唯一可用的假模型**。
 - ⚠️ **`astream()` 异步路径对现有假模型不友好**（`_agenerate_with_cache` → fake stream 为空）。
   所以第一步走**同步 `agent.stream()` + 线程桥接**，不引入异步调用路径。
 
@@ -145,7 +145,7 @@ class BaseEvent(BaseModel):
 | （消费循环结束） | — | `run.end` |
 
 **content 类型兼容**：content 可能是字符串，也可能是内容块列表（多模态）。
-只取字符串形态，跟 `runtime/repl.py:494` 的现有处理一致；非字符串形态直接跳过。
+只取字符串形态，非字符串形态直接跳过 —— 多模态内容块列表是已知的坑，别把它当文本发出去。
 
 **ToolMessage 要滤掉** —— 它是工具结果不是模型输出，否则模型的一句话会被当成两段发出去。
 
@@ -231,8 +231,7 @@ loop.call_soon_threadsafe(lambda: asyncio.ensure_future(queue.put(event)))
 ### 关键决策
 
 **D1 · 用同步 `agent.stream()` + 线程桥接，不用 `astream()`**
-现有假模型只在同步路径工作（见上）。走同步路径还有个好处：跟现有 REPL
-的行为完全一致，**现有 47 项测试一行不用改**。
+现有假模型只在同步路径工作（见上）。走同步路径还有个好处：**现有 38 项测试一行不用改**。
 
 **D2 · 取消用 `threading.Event` + `break`，不 hack 生成器**
 在消费循环里检查标志位，命中就 `break`。生成器随之被关闭，LangGraph 自行清理。
@@ -251,8 +250,9 @@ loop.call_soon_threadsafe(lambda: asyncio.ensure_future(queue.put(event)))
 HTTP 侧退成探活与定时任务管理。
 
 **D5 · 归一化层独立成 `runtime/events.py`**
-`runtime/repl.py` 现在自己解析 `(mode, payload)`（`repl.py:450-511`）。
-归一化层独立出来之后，REPL 后续也能切过来复用，但**这一步不动 REPL**，避免一次改两处。
+原来解析 `(mode, payload)` 的是交互终端 `runtime/repl.py`，它已随桌面版改造删除。
+现在归一化层是 `runtime/events.py`（目前只有 `ThinkFilter` 与 `is_hint_node` 两个过滤器，
+事件模型与流式解析在这一步长出来）。
 
 ### 复用与新增
 
@@ -261,8 +261,8 @@ HTTP 侧退成探活与定时任务管理。
 | `_AGENT` 单例 | `runtime/runner.py:58` `get_agent()` |
 | `AgentContext` 构造规则 | `runtime/runner.py:132-137` |
 | `config` 与 thread_id 规则 | `runtime/runner.py:148` |
-| 流式假模型 | `tests/test_repl.py:58` `FakeModel` |
-| 端点测试写法 | `tests/test_runtime.py`、`tests/test_repl.py:109` 的 `build_agent(model=..., checkpointer=InMemorySaver())` |
+| 流式假模型 | `tests/fakes.py` 的 `FakeModel` |
+| 端点测试写法 | `tests/test_runtime.py`、`tests/fakes.py` 的 `build_agent(model=..., checkpointer=InMemorySaver())` |
 
 新增：
 
@@ -362,6 +362,6 @@ asyncio.run(main())
 | 6. 长期记忆 | `store` 真用起来；SQLite 持久化、项目级记忆、跨会话上下文 | 4 |
 
 **TUI 排在 GUI 前面**：Claude Code 本身是终端应用，真正的分界线是「能不能展示结构化信息」——
-纯 REPL 只能打印文本流，TUI 能渲染工具卡片和 diff。GUI 是包装，不是能力。
+纯文本终端只能打印文本流，TUI 能渲染工具卡片和 diff。GUI 是包装，不是能力。
 
 **开发原则**：先保证 Agent Runtime 稳定，再做 TUI，最后做 GUI。
