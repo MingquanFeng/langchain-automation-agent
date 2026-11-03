@@ -18,6 +18,9 @@
 文件名的数字即章号 —— `courseware/尚硅谷-05-Tools.pdf` 就是课件 05 章。
 章节与源码的对应索引见 `courseware/README.md`。
 
+另外 `courseware/langGraph/` 是一套 **LangGraph 专项课件**（6 篇 Markdown，章节号 1-13 连续），
+讲的是 `create_agent` 底下那层图运行时 —— 对应关系见下面「主线 6」。
+
 > **不想通读 10 章课件、只想拿结论**：直接看 `KNOWLEDGE.md` —— 那是把课件里与本项目相关的部分
 > 压缩后的知识本体（API 签名 + 项目用法 + 坑），按「一次调用发生了什么」组织，不是章节摘抄。
 
@@ -140,6 +143,50 @@
 
 ---
 
+## 主线 6：LangGraph 底层（`courseware/langGraph/`，6 篇）
+
+**读源码**：`agent/graph.py`（checkpointer / store 注入）→ `agent/middleware/custom.py`（Runtime）→ `runtime/repl.py`（流式元数据）
+
+LangChain 课件讲的是「怎么用 `create_agent`」，这套课件讲的是「`create_agent` 底下跑的是什么」。
+本项目每个 Agent 都是一张 **LangGraph 状态图**，只是图是 `create_agent` 替你画的。
+
+| 位置 | 看什么 | 对应课件 |
+|---|---|---|
+| `agent/graph.py:422` `build_agent()` | `create_agent()` 返回 `CompiledStateGraph`（底层 Pregel）。项目用的每一张图都是它画的 | 01 章 2.2「编译状态图」 |
+| `agent/graph.py:290` `_build_checkpointer()` | 短期记忆：`SqliteSaver` / `InMemorySaver` 二选一 | 03 章 6.2「启用可恢复执行」/ 7.1 |
+| `agent/graph.py:102` `InMemoryStore` | 长期记忆：跨 thread 的键值存储。**目前只挂了没用**（全项目没有 `store.put`/`get`/`search` 调用） | 03 章 7.2「长期记忆」 |
+| `agent/middleware/custom.py:38` `Runtime` | `runtime.context` 就是 LangGraph 的运行时上下文 | 03 章 7.3「运行时上下文」 |
+| `agent/middleware/custom.py:98` `after_model` | 钩子插在 `model` 与 `tools` **两个节点之间**，所以它能拦下写工具 | 02 章 4.2「分支结构」 |
+| `runtime/repl.py:458` | `stream_mode=["messages","values"]` —— LangGraph 的流模式 | 05 章 11.2 `stream`/`astream` |
+| `runtime/repl.py:505` | 流式元数据里的 `langgraph_node`，用来滤掉中间件噪音 | 05 章 11.2 |
+
+**关键认知 —— 项目跑的那张图长这样**（实测 `agent.get_graph()`）：
+
+```
+__start__ → model → tools → model → … → __end__
+              │        └──── 条件边：model 这轮有 tool_calls 就走 tools
+              └───────────── 条件边：model 给了最终答案就走 __end__
+```
+
+顺序、分支、循环三件事 `create_agent` 全替你办了 —— 这正是课件 01 章「图的构建」和 02 章「控制流」讲的，
+只是项目没手写 `StateGraph`。想看节点和边，直接 `agent.get_graph().draw_mermaid()`。
+
+**学习顺序建议**（先补原理，再补没做过的）：
+
+1. **03 章 6.1-6.3 + 7.1-7.3** —— 与项目重合度最高。读完能把 CLAUDE.md 陷阱 3/6/14 的成因讲清楚。
+   *跳过附录 A（PostgreSQL）*，项目用 SQLite。
+2. **01 章 2.1-2.4 + 3.2 reducer** —— 自己手写一张最小 `StateGraph`（放 scratch，别改项目），
+   再用 `get_graph()` 把项目这张图画出来对比。**跳过 00 章**：项目已有 `langchain1.2` 环境，模型走 `.env` 的 `LLM_API_KEY`。
+3. **04 章中断 + 05 章流式** —— 正好是 `DESKTOP_AGENT_PLAN.md` 第一步要的东西（事件流 + 取消）。
+
+**这套课件里项目还没碰的**：02 章的 `RetryPolicy` / 节点超时 / 节点缓存（项目重试走中间件）、
+04 章的 `interrupt()` 中断与 `langgraph dev` 部署、05 章的子图与设计模式。
+
+**抄代码注意**：课件手写 `StateGraph`、项目用 `create_agent` 封装，概念相通但 API 不同。
+别抄 `create_react_agent` —— 那会绕开项目现有的中间件栈。
+
+---
+
 ## 课件里有、这个项目还没接入的
 
 | 课件章 | 项目现状 | 怎么接 |
@@ -149,6 +196,16 @@
 | 07 章 7.3 `ToolStrategy` | 没用 `response_format` | 让 Agent 直接返回结构化对象。注意 1.x **必须显式** `ToolStrategy(Schema)`，直接传 `Schema` 会报错 |
 | 09 章 3 长期记忆 | store 只挂了 `InMemoryStore` 没实际用 | 用 `store.put(namespace, key, value)` / `store.search()` 实现跨会话记忆 |
 | 10 RAG | requirements 里被注释掉了 | 需要向量库 + 切分，最后再碰 |
+
+LangGraph 专项课件（`courseware/langGraph/`）里还没接入的：
+
+| 课件小节 | 项目现状 | 怎么接 |
+|---|---|---|
+| 02 章 5.2 重试 / 5.3 超时 / 5.5 节点缓存 | 失败重试走 `ModelRetryMiddleware` / `ToolRetryMiddleware`（中间件层），没用图节点级的 `RetryPolicy` | 节点级重试更细（可按节点配），但中间件已够用；想换就改 `graph.py` 的 `RETRY` |
+| 04 章 8.1 动态中断 / 8.2 静态断点 | 没有任何 `interrupt()` 调用 | `DESKTOP_AGENT_PLAN.md` 第一步的「取消」要么用 `interrupt()` 做暂停点，要么走独立的取消通道 |
+| 04 章 9.1 本地部署（`langgraph dev` / AgentChatUI） | 用 FastAPI 自建服务（`runtime/server.py`） | `langgraph dev` 需要模块导出图对象，本项目导出的是 FastAPI `app`，套不上 |
+| 05 章 12 子图 | 单张图，没有子图 | 现在没必要；等任务表长出多步骤工作流再拆 |
+| 05 章 13 运行图设计模式（路由 / 编排者-工人 / 评估者-优化者） | 单一 ReAct 循环 | 同一个 `create_agent` 循环就是「路由」模式；编排者-工人需要手写 `StateGraph` |
 
 ---
 

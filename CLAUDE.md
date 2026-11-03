@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目性质
 
-这是一个**学习驱动**的项目，不是生产系统。`automation_agent/` 是边学边搭的自动化 Agent 骨架，课件在仓库内的 `courseware/`（尚硅谷 LangChain 1.x 的 10 章 PDF 原件，见 `courseware/README.md` 的来源说明与章节索引）。
+这是一个**学习驱动**的项目，不是生产系统。`automation_agent/` 是边学边搭的自动化 Agent 骨架，课件在仓库内的 `courseware/` —— 两套讲义：尚硅谷 LangChain 1.x 的 10 章 PDF（根目录），和 **LangGraph 专项课件 6 篇 Markdown**（`courseware/langGraph/`，章节号 1-13 连续），见 `courseware/README.md` 的来源说明与章节索引。
 
 课件对每个知识点都有对应章节，源码注释里用「对应课件 XX 章 X.X 节」标注了出处。**改代码前先看对应课件章节**，保持实现与课件 API 一致；只有当课件 API 与 langchain 1.2 实际行为冲突时，才按实际行为写并在注释里说明差异。
 
@@ -81,8 +81,10 @@ $PY -m runtime chat
 
 ## 学习材料
 
-- `LEARNING.md` — **源码索引**：课件章节 ↔ 源码位置的对照表。想学这个项目先看它。
+- `LEARNING.md` — **源码索引**：课件章节 ↔ 源码位置的对照表。想学这个项目先看它。共 6 条主线，第 6 条是 LangGraph 底层。
 - `KNOWLEDGE.md` — **知识点总结**：只讲本项目实际用到的 API 是什么、怎么写、坑在哪。当速查手册用。
+- `courseware/` — 课件原文：LangChain 1.x 的 10 章 PDF（根目录）+ LangGraph 专项课件 6 篇 Markdown（`langGraph/`）。索引见 `courseware/README.md`。
+- `DESKTOP_AGENT_PLAN.md` — 把本项目改造成桌面 Agent 的路线图，第一步（事件流后端）要用到 LangGraph 的中断与流式。
 
 ## 架构
 
@@ -110,6 +112,26 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 - `repl.py` — 交互式终端，`python -m runtime chat`。斜杠命令控会话（`/new` `/write` `/think`），其余输入当指令发给 Agent。走 `stream_mode=["messages","values"]`：增量文本从 messages 流取，工具调用从 values 流里的 `tool_calls` 认（messages 模式下非流式模型不吐 `tool_call_chunks`）。
 - `tasks.py` — 定时任务表。改这个文件就改 Agent 每天自动做什么。**注意 `TASKS` 是模块级内存字典，不落盘** —— `POST /tasks` 动态加的任务进程重启即消失，只有改代码里的 `TASKS` 列表才是持久定义。
 - `__main__.py` — CLI 入口，两个子命令：`serve`（默认，起 HTTP 服务 + 可选调度器）和 `chat`（只起交互式终端，不起服务也不起调度器）。`--no-schedule` / `--reload` / `--host` / `--port` 都在这里解析。**它同时是陷阱 10 的落地文件** —— 调度开关必须在 `import runtime.server` 之前生效，顺序不能改。
+
+### LangGraph 依赖面
+
+项目只用 LangGraph 的这几个面，改代码时别越界：
+
+| API | 位置 | 用途 |
+|---|---|---|
+| `create_agent()` | `agent/graph.py` | 返回 `CompiledStateGraph`（底层 Pregel）。**项目不手写 `StateGraph`** |
+| `InMemorySaver` / `SqliteSaver` | `agent/graph.py` | checkpointer（短期记忆），二选一 |
+| `InMemoryStore` | `agent/graph.py` | store（长期记忆）。**目前只挂了没用** —— 全项目没有 `store.put`/`get`/`search` 调用 |
+| `Runtime` | `agent/middleware/custom.py` | 运行时上下文，`runtime.context` |
+| `stream_mode` | `runtime/server.py`、`runtime/repl.py` | `values` / `["messages","values"]` |
+| `langgraph_node` 元数据 | `runtime/repl.py` | 过滤中间件噪音 |
+| `thread_id` | `runtime/runner.py` | checkpointer 的会话键 |
+
+**别做的事**：
+
+- 别改成 `create_react_agent` 或手写 `StateGraph` —— 会绕开现有中间件栈（限次 / 重试 / 只读闸门 / 上下文注入）。
+- 别指望 `langgraph_sdk` 提供 cron —— 本地没有内置 cron（实测 `langgraph_sdk 0.3.9` 未导出 cron），定时靠 APScheduler。
+- `interrupt()` / `Command` / `Send` / `RetryPolicy` 这些高级 API 项目**当前一个都没用**，引入前先看 `DESKTOP_AGENT_PLAN.md` 的设计。
 
 ## 关键 API 陷阱
 
