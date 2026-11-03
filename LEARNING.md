@@ -1,6 +1,6 @@
 # 学习地图
 
-这个项目只有 1100 行，但它把 **langchain 1.x agent 开发的每个知识点都落到了可运行的代码上**。
+这个项目只有 4200 行（去掉空行和纯注释约 1900 行），但它把 **langchain 1.x agent 开发的每个知识点都落到了可运行的代码上**。
 它的价值不在业务功能，而在于「每段代码都标了对应课件章节，每个知识点都有对应的实现」。
 
 ## 怎么用这张地图
@@ -29,16 +29,16 @@
 
 | 位置 | 看什么 | 对应课件 |
 |---|---|---|
-| `graph.py:65` `build_agent()` | 唯一创建 Agent 的地方。`create_agent(model, tools, system_prompt, middleware, checkpointer, store, context_schema, name)` | 07 章 1.4.2「全新的调用」 |
-| `graph.py:93` `SYSTEM_PROMPT` | 系统提示词就是普通字符串，Agent 的一切行为从它开始 | 07 章 6 |
-| `config.py:32` `ModelConfig.build()` | `init_chat_model(model=..., model_provider=...)` | 02 章 2.2「兼容用法」 |
-| `runtime/runner.py:46` | `HumanMessage` 构造输入 | 04 章 1.5.2 |
+| `agent/graph.py:422` `build_agent()` | 唯一创建 Agent 的地方。`create_agent(model, tools, system_prompt, middleware, checkpointer, store, context_schema, name)` | 07 章 1.4.2「全新的调用」 |
+| `agent/graph.py:634` `SYSTEM_PROMPT` | 系统提示词就是普通字符串，Agent 的一切行为从它开始 | 07 章 6 |
+| `agent/config.py:187` `ModelConfig.build()` | `init_chat_model(model=..., model_provider=...)` | 02 章 2.2「兼容用法」 |
+| `runtime/runner.py:166` | `HumanMessage` 构造输入 | 04 章 1.5.2 |
 
 **关键认知**：「Agent」不是一个需要实例化的类，而是一次 `create_agent()` 调用返回的**编译好的图**。
 模型、工具、中间件、记忆全是**注入参数** —— 所以换模型/换工具不用改调用方，这就是 `build_agent()` 存在的意义。
 
 **延伸**：课件 07 章 8.2 讲了 7 种 `stream_mode`（values / updates / messages / tasks / debug / checkpoints / custom）。
-项目只用了 `values`（`server.py:113`）和 `messages`（`repl.py:458`）。
+项目只用了 `values`（`runtime/server.py:352`）和 `messages`（`runtime/repl.py:458`）。
 
 ---
 
@@ -48,10 +48,10 @@
 
 | 位置 | 看什么 | 对应课件 |
 |---|---|---|
-| `files.py` `@tool(parse_docstring=True)` | 装饰器把函数变成工具。**docstring 就是给模型看的工具说明**；开了 `parse_docstring` 后 `Args:` 段会进 schema 的参数说明 | 05 章 2.2「工具描述的各部分」/ 3.1 |
-| `files.py` `_resolve()` / `_resolve_safe()` | 沙箱。越界时工具层返回中文说明（不抛异常，避免被重试 3 次） | 05 章 1.3「工具调用的整体流程」 |
-| `files.py` `save_json` | 参数标了 `dict | list`，langchain 自动转成 JSON schema | 05 章 2.2.4「参数类型」 |
-| `notify.py:23` `_deliver()` | 通知有 webhook 和终端两条路，未配置时降级 | — |
+| `agent/tools/files.py:307` `@tool(parse_docstring=True)` | 装饰器把函数变成工具。**docstring 就是给模型看的工具说明**；开了 `parse_docstring` 后 `Args:` 段会进 schema 的参数说明 | 05 章 2.2「工具描述的各部分」/ 3.1 |
+| `agent/tools/files.py:105` `_resolve()` / `:126` `_resolve_safe()` | 沙箱。越界时工具层返回中文说明（不抛异常，避免被重试 3 次） | 05 章 1.3「工具调用的整体流程」 |
+| `agent/tools/files.py:418` `save_json` | 参数标了 `dict | list`，langchain 自动转成 JSON schema | 05 章 2.2.4「参数类型」 |
+| `agent/tools/notify.py:99` `_deliver()` | 通知有 webhook 和终端两条路，未配置时降级 | — |
 
 **关键认知**：模型**不执行你的 Python 函数**。它只输出一段结构化的 `tool_calls`（名字 + JSON 参数 + id），
 由框架代为执行，再把返回值包成 `ToolMessage` 回灌进对话 —— 这个来回就是 agent 循环。
@@ -64,17 +64,17 @@
 
 ## 主线 3：中间件（课件 08 章）—— 本项目精华
 
-**读源码**：`agent/graph.py:32-47`（内置栈）→ `agent/middleware/custom.py`（三个自定义）
+**读源码**：`agent/graph.py:470-491`（内置栈的组装处）→ `agent/middleware/custom.py`（三个自定义）
 
 内置中间件栈：
 
 | 位置 | 中间件 | 作用 | 对应课件 |
 |---|---|---|---|
-| `graph.py:43` `LIMITS` | `ModelCallLimitMiddleware` / `ToolCallLimitMiddleware` | **最前**，先挡住跑飞，防止无人值守时烧钱 | 08 章 3.1 / 3.2 |
-| `graph.py:37` `RETRY` | `ModelRetryMiddleware` / `ToolRetryMiddleware` | 模型/工具失败时重试 | 08 章 3.6 / 3.5 |
-| `graph.py:91` `TODO` | `TodoListMiddleware` | 注入 `write_todos` 工具，让模型拆解多步任务 | 08 章 2.4 |
-| `graph.py:32` `CONTEXT_EDITING` | `ContextEditingMiddleware(edits=[ClearToolUsesEdit(trigger=120_000, keep=3)])` | 上下文超限时清理旧工具结果 | 08 章 3.8 |
-| `custom.py:116` `CUSTOM_MIDDLEWARE` | TaskGate / ContextInjection / Timing | **最后**，能看到前面所有中间件的结果 | 08 章 5 |
+| `agent/graph.py:249` `LIMITS` | `ModelCallLimitMiddleware` / `ToolCallLimitMiddleware` | **最前**，先挡住跑飞，防止无人值守时烧钱 | 08 章 3.1 / 3.2 |
+| `agent/graph.py:192` `RETRY` | `ModelRetryMiddleware` / `ToolRetryMiddleware` | 模型/工具失败时重试 | 08 章 3.6 / 3.5 |
+| `agent/graph.py:619` `TODO` | `TodoListMiddleware` | 注入 `write_todos` 工具，让模型拆解多步任务 | 08 章 2.4 |
+| `agent/graph.py:153` `CONTEXT_EDITING` | `ContextEditingMiddleware(edits=[ClearToolUsesEdit(trigger=120_000, keep=3)])` | 上下文超限时清理旧工具结果 | 08 章 3.8 |
+| `agent/middleware/custom.py:271` `CUSTOM_MIDDLEWARE` | TaskGate / ContextInjection / Timing | **最后**，能看到前面所有中间件的结果 | 08 章 5 |
 
 自定义中间件覆盖了课件 08 章第 5 节的两种写法：
 
@@ -99,14 +99,14 @@
 
 ## 主线 4：上下文与记忆（课件 09 章）
 
-**读源码**：`agent/context.py` → `agent/graph.py:49` `_build_checkpointer()` → `runtime/runner.py:43`
+**读源码**：`agent/context.py` → `agent/graph.py:290` `_build_checkpointer()` → `runtime/runner.py:148`
 
 | 位置 | 看什么 | 对应课件 |
 |---|---|---|
 | `context.py` `AgentContext` | 每次调用的**静态**运行时配置 | 09 章 4「Static runtime Context」 |
-| `graph.py:49` | 记忆后端二选一：`sqlite`（`data/memory.sqlite`，进程级持久）或 `memory`（重启即失） | 09 章 2.1 / 2.2 / 2.3 |
-| `runner.py:43` | thread_id 决定记忆隔离 | 09 章 2.1.4「工作原理」 |
-| `custom.py:21` `_ctx()` | `runtime.context` **可能是 None**，所有钩子都要兜底 | 09 章 4.1 |
+| `agent/graph.py:290` | 记忆后端二选一：`sqlite`（`data/memory.sqlite`，进程级持久）或 `memory`（重启即失） | 09 章 2.1 / 2.2 / 2.3 |
+| `runtime/runner.py:148` | thread_id 决定记忆隔离 | 09 章 2.1.4「工作原理」 |
+| `agent/middleware/custom.py:48` `_ctx()` | `runtime.context` **可能是 None**，所有钩子都要兜底 | 09 章 4.1 |
 
 **关键认知 —— 三个层次别混淆（课件 09 章 1.2.2）**：
 
@@ -133,10 +133,10 @@
 
 | 位置 | 看什么 |
 |---|---|
-| `runner.py:18` `get_agent()` | `_AGENT` 单例，保留 checkpointer 里的记忆。调度器和 HTTP 都走 `run_task()`，保证行为一致 |
-| `scheduler.py:52` | `CronTrigger.from_crontab` —— 5 段 cron，按 `SCHEDULER_TIMEZONE` 解释。**LangGraph 1.x 本地没有内置 cron**，`langgraph_sdk` 也没导出，那是云端 Platform 的能力 |
-| `server.py:113` `/run/stream` | SSE 流式。`stream_mode="values"` 每步给全量状态 |
-| `tasks.py:22` `TASKS` | 改这个文件就改 Agent 每天自动做什么。注意它是**内存字典，不落盘** |
+| `runtime/runner.py:58` `get_agent()` | `_AGENT` 单例，保留 checkpointer 里的记忆。调度器和 HTTP 都走 `run_task()`，保证行为一致 |
+| `runtime/scheduler.py:141` | `CronTrigger.from_crontab` —— 5 段 cron，按 `SCHEDULER_TIMEZONE` 解释。**LangGraph 1.x 本地没有内置 cron**，`langgraph_sdk` 也没导出，那是云端 Platform 的能力 |
+| `runtime/server.py:302` `/run/stream` | SSE 流式。`stream_mode="values"` 每步给全量状态 |
+| `runtime/tasks.py:109` `TASKS` | 改这个文件就改 Agent 每天自动做什么。注意它是**内存字典，不落盘** |
 
 ---
 
