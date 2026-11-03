@@ -150,6 +150,8 @@
 LangChain 课件讲的是「怎么用 `create_agent`」，这套课件讲的是「`create_agent` 底下跑的是什么」。
 本项目每个 Agent 都是一张 **LangGraph 状态图**，只是图是 `create_agent` 替你画的。
 
+> 概念细节（State/Reducer、条件边、checkpointer、节点容错）见 `KNOWLEDGE.md` 第八章「LangGraph 图运行时」。
+
 | 位置 | 看什么 | 对应课件 |
 |---|---|---|
 | `agent/graph.py:422` `build_agent()` | `create_agent()` 返回 `CompiledStateGraph`（底层 Pregel）。项目用的每一张图都是它画的 | 01 章 2.2「编译状态图」 |

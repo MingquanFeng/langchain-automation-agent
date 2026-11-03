@@ -1,14 +1,16 @@
 # 知识点总结 —— 本项目用到的 LangChain 1.x 知识
 
 > **这份文档只讲项目代码里真实用到的知识点。**
-> 课件原文在 `courseware/`，共 10 章 500+ 页；本文把它们压缩成「一次调用到底发生了什么」这一条主线。
+> 课件原文在 `courseware/`，两套讲义：LangChain 1.x 的 10 章 PDF（`courseware/langChain/`）+
+> LangGraph 专项 6 篇 Markdown（`courseware/langGraph/`）；本文把它们压缩成「一次调用到底发生了什么」这一条主线。
 >
 > 与 [`LEARNING.md`](LEARNING.md) 的分工：
 > - `LEARNING.md` 是**索引** —— 告诉你每个知识点在哪一章、对应哪些源码文件。
 > - 本文是**知识本体** —— API 是什么、怎么写、坑在哪。可以当速查手册用。
 >
 > 标注说明：
-> - 📘 = 课件原文出处（章节号 / 小节号）
+> - 📘 = 课件原文出处（章节号 / 小节号）。`LG XX 章` 指 LangGraph 专项课件
+>   （`courseware/langGraph/`，章节号 1-13），不带前缀的指 LangChain PDF 课件（01-10 章）
 > - 🧩 = 项目自己的做法或踩出来的坑（课件没讲或讲得不准）
 
 ---
@@ -24,9 +26,10 @@
 | [五](#五agent07-章) | Agent | 07 章 |
 | [六](#六中间件08-章-本项目精华) | 中间件（本项目精华） | 08 章 |
 | [七](#七上下文与记忆09-章) | 上下文与记忆 | 09 章 |
-| [八](#八项目自研的运行时外壳课件未覆盖) | 运行时外壳（课件未覆盖） | — |
-| [九](#九课件里有项目还没用的) | 课件里有、项目还没用的 | 03 / 06 / 10 章 |
-| [十](#十踩坑速查按症状索引) | 踩坑速查（按症状索引） | — |
+| [八](#八langgraph-图运行时coursewarelanggraph) | LangGraph 图运行时 | LG 01-05 章 |
+| [九](#九项目自研的运行时外壳课件未覆盖) | 运行时外壳（课件未覆盖） | — |
+| [十](#十课件里有项目还没用的) | 课件里有、项目还没用的 | 03 / 06 / 10 章 + LG |
+| [十一](#十一踩坑速查按症状索引) | 踩坑速查（按症状索引） | — |
 
 ---
 
@@ -1177,11 +1180,181 @@ store.put(namespace, key, value)
 
 ---
 
-## 八、项目自研的运行时外壳（课件未覆盖）
+## 八、LangGraph 图运行时（`courseware/langGraph/`）
+
+前七章讲「LangChain 的 API 怎么用」，这一章讲**底下那层图运行时** ——
+项目每个 Agent 都是一张 LangGraph 状态图，只是图是 `create_agent` 替你画的。
+
+> 📘 标注约定：本章的 `LG XX 章` 指 `courseware/langGraph/` 里的专项课件
+> （6 篇 Markdown，章节号 1-13 连续），与前面 LangChain PDF 课件的 01-10 章**不是同一套编号**。
+
+### 8.1 项目跑的那张图长什么样（实测）
+
+`create_agent()` 返回的 `CompiledStateGraph` 底层就是 `StateGraph` 编译出的 Pregel 图。
+实测 `agent.get_graph()`：
+
+| 节点 | 是什么 |
+|---|---|
+| `__start__` | 入口 |
+| `model` | 模型节点 |
+| `tools` | `ToolNode` —— 框架自带的工具执行节点 |
+| `__end__` | 出口 |
+
+| 边 | 条件边？ | 含义 |
+|---|---|---|
+| `__start__ → model` | 否 | 固定 |
+| `model → tools` | **是** | 模型这轮有 `tool_calls` 就走工具 |
+| `model → __end__` | **是** | 模型给了最终答案就结束 |
+| `tools → model` | **是** | 工具结果回灌给模型 |
+
+```python
+print(agent.get_graph().draw_mermaid())   # 直接把这张图画出来
+```
+
+**🧩 这张图解释了本项目最难的那个坑**（见 4.6）：
+「只补 ToolMessage、不补收尾消息」—— agent 图的路由看的是**最后一条 AIMessage 的 `tool_calls`
+是否都已被回应**。补了 ToolMessage → 全部已回应 → 判定为「人工注入的工具消息」→ 从 `model` 节点重新跑一轮；
+顺手补一条 AIMessage → 路由变成走 `tools` → 模型不再重新回答。
+
+### 8.2 State 与 Reducer
+
+📘 LG 01 章 3.1-3.5（状态定义、Reducer、节点访问 State、预定义状态）
+
+`AgentState` 实际只有三个键（实测注解）：
+
+| 键 | 类型 | reducer | 说明 |
+|---|---|---|---|
+| `messages` | `list[BaseMessage]` | `add_messages`（编译后是 `BinaryOperatorAggregate` 通道） | 消息历史 |
+| `jump_to` | `Literal["tools","model","end"] \| None` | `EphemeralValue` | 控制流跳转，**不持久化** |
+| `structured_response` | `ResponseT` | `LastValue` | 结构化输出 |
+
+**Reducer 是状态图的核心概念**（📘 LG 01 章 3.2）：签名 `(Value, Value) -> Value`，
+通过 `Annotated[Type, reducer_function]` 给状态键指定；**没指定 reducer 的键默认覆盖（Last-Write-Wins）**。
+
+- `messages` 的 schema 声明的是 `add_messages`（`AgentState.messages: Annotated[list[AnyMessage], add_messages]`），
+  编译后通道类型显示为 `BinaryOperatorAggregate`。实测语义 = **追加 + 按 id 替换** ——
+  两条 `id` 相同的消息只留后一条（`add_messages` 的 docstring 原话：append-only，unless the new message has the same ID）。
+- `jump_to` 是 `EphemeralValue` —— **只在本轮有效，不写进检查点**
+- `structured_response` 是 `LastValue` —— 后写覆盖先写
+
+📘 LG 01 章 3.3：`Overwrite` 可以绕过 reducer 直接覆盖某个键。
+
+**🧩 项目怎么改 state**：不直接写节点，全靠中间件的返回值 ——
+Node-style 钩子返回 `dict` 就是一次 state 更新（见 6.6）。
+`TaskGateMiddleware` 返回的 `{"messages": [ToolMessage(...)]}` 走的就是 `messages` 这个 channel。
+
+### 8.3 可恢复执行：检查点存的是「每一步的快照」
+
+📘 LG 03 章 6.1-6.5
+
+启用 checkpointer 后，LangGraph 在每个**超步（super-step）**结束时存一份检查点。实测 API：
+
+```python
+agent.get_state(config)                # → StateSnapshot：当前快照（values / next / config）
+list(agent.get_state_history(config)) # → 历史快照列表
+```
+
+实测一次**不带工具**的简单调用（`InMemorySaver` + 一次 `invoke`）产生了 **3 个检查点**，
+每个的 `metadata` 里有 `step` / `source` / `parents`。
+
+**持久化模式**（📘 LG 03 章 6.3）—— 三档取舍：
+
+| 模式 | 写入时机 | 容灾能力 |
+|---|---|---|
+| `exit` | 运行退出时 | 最弱（扛不住进程崩溃） |
+| `async`（默认） | 每个超步末尾写主检查点，后台异步写 | 较强 |
+| `sync` | 进下一个超步之前等写完 | 最强，响应延迟最大 |
+
+**🧩 项目没显式设模式**，用默认的 `async` + `SqliteSaver`（`graph.py:290`）。
+
+### 8.4 节点容错：LangGraph 的 RetryPolicy vs 项目的中间件重试
+
+📘 LG 02 章 5.1-5.7
+
+LangGraph 在**节点层**提供三种异常处理机制，执行顺序是：
+超时/异常 → `RetryPolicy` 判断是否重试 → 重试直到次数耗尽 → `error_handler` → 都没配就向外抛。
+
+**🧩 但当前版本有天花板**：实测 `langgraph 1.1.2` 的 `RetryPolicy` 只有重试字段
+（`initial_interval` / `backoff_factor` / `max_interval` / `max_attempts` / `jitter` / `retry_on`），
+**没有 `timeout`、没有 `error_handler`** —— 这两个要 langgraph ≥ 1.2 才有
+（📘 LG 02 章 5.1 原注：「本课程当前环境为 langgraph==1.1.2，因此重点讲解重试机制和节点缓存」）。
+
+**🧩 项目压根没用节点级 `RetryPolicy`**，走的是中间件层：
+
+| | 节点级 `RetryPolicy` | 项目的中间件重试 |
+|---|---|---|
+| 粒度 | 单个节点 | 整个模型调用 / 整个工具调用 |
+| 生效时机 | 节点抛异常时 | 同样，但由中间件包住 |
+| 错误消息 | 框架生成 | `ModelRetryMiddleware` / `ToolRetryMiddleware` 可定制 |
+| 项目用了吗 | ❌ | ✅ `graph.py:192` 的 `RETRY` |
+
+选中间件而不是节点策略，是因为**错误消息可控** —— 工具失败时给模型一句能照做的中文说明，
+而不是 `failed after 3 attempts ... Please try again.`（见 4.7）。
+
+### 8.5 图里的运行时上下文
+
+📘 LG 03 章 7.3
+
+`context_schema=` 声明的 dataclass 会在运行时通过 `runtime.context` 暴露给每个节点与钩子。
+它是**静态**的 —— 一次运行内不变、不持久化（详见 7.7）。
+
+**🧩 项目对应**：`agent/context.py` 的 `AgentContext`，
+`agent/graph.py:590` 声明、`runtime/runner.py:165` 传入。
+`runtime.context` 可能为 `None` 是因为 context 是可选参数（见 6.9）。
+
+### 8.6 中断与部署（项目未接）
+
+📘 LG 04 章 8-10
+
+- **动态中断** `interrupt()`：节点里调 `interrupt(payload)` 抛起，图暂停，payload 暴露给调用方；
+  恢复时用 `graph.invoke(Command(resume=...))`，**`resume` 的值会成为 `interrupt()` 的返回值**，
+  参与后续计算。`langgraph.types.interrupt` 在 1.1.2 里可用。
+- **静态断点**：`compile(interrupt_before=["tools"])`，编译时就指定在哪停。
+- **工具节点** `ToolNode`：项目用的就是它（见 8.1），课件 10.1 讲的是手写版。
+- **部署**：`langgraph dev` 起本地 Agent Server + Studio，AgentChatUI 接前端。
+
+**🧩 项目为什么套不上 `langgraph dev`**：那个命令要模块导出一个**图对象**，
+而项目 `runtime/server.py` 导出的是 FastAPI `app`。要用得再导一个 `graph = build_agent()`。
+
+**🧩 中断 ≠ 桌面版的「取消」**：桌面版第一步做的是**协作式取消**
+（消费循环每轮检查标志位后 `break`），不是 `interrupt()`。
+后者要设计暂停点并处理检查点恢复，是另一件事（见 `DESKTOP_AGENT_PLAN.md`）。
+
+### 8.7 子图与设计模式（项目未接）
+
+📘 LG 05 章 12-13
+
+- **子图**：把编译好的图当节点塞进父图。两种嵌入方式 —— `compile()`（每次调用独立状态）
+  与 `compile(checkpointer=True)`（按 thread 共享状态）。
+- **设计模式**：路由（routing）、编排者-工人（orchestrator-workers）、评估者-优化者（evaluator-optimizer）。
+
+**🧩 项目现状**：单张 ReAct 循环图（`model ⇄ tools`）。路由模式天然具备
+（模型决定调不调工具），编排者-工人要手写 `StateGraph`。
+
+### 8.8 一张表看清用到的 / 没用到
+
+| LangGraph 能力 | 项目 |
+|---|---|
+| `StateGraph` 与编译 | 间接 —— `create_agent` 编译出来的 |
+| 状态与 Reducer | ✅ `AgentState.messages` |
+| 条件边 | ✅ `model ⇄ tools` |
+| checkpointer | ✅ `SqliteSaver` / `InMemorySaver` |
+| store | ⚠️ 挂了 `InMemoryStore`，没实际用 |
+| 运行时上下文 | ✅ `AgentContext` |
+| 节点级 `RetryPolicy` | ❌ 走中间件重试 |
+| 显式设置持久化模式 | ❌ 用默认 `async` |
+| `interrupt()` | ❌ 桌面版用协作式取消 |
+| 子图 | ❌ |
+| `langgraph dev` 部署 | ❌ 自建 FastAPI |
+| `astream_events` | ❌ 事件流还没做 |
+
+---
+
+## 九、项目自研的运行时外壳（课件未覆盖）
 
 这一层没有课件对应，是项目自己实现的部分。
 
-### 8.1 单一入口 `runtime/runner.py`
+### 9.1 单一入口 `runtime/runner.py`
 
 **设计要点**：只有这一个入口能调用 Agent。调度器、HTTP 服务、REPL 都从这里走，
 这样三者触发出来的行为（上下文构造、thread_id 规则、写权限默认值）完全一致，
@@ -1200,7 +1373,7 @@ def get_agent():
 **为什么必须复用**：每次 `build_agent()` 会多开一条 SQLite 连接、多建一套中间件，
 而且不同 Agent 的 thread_id 记忆是隔离的，换 Agent 等于把之前的会话记忆丢掉。
 
-### 8.2 定时必须自己接 APScheduler
+### 9.2 定时必须自己接 APScheduler
 
 **LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力）。
 
@@ -1208,7 +1381,7 @@ def get_agent():
 CronTrigger.from_crontab(cron_expr, timezone=RUNTIME.timezone)   # 标准 5 段格式
 ```
 
-### 8.3 FastAPI 用 `lifespan` 而不是 `@app.on_event`
+### 9.3 FastAPI 用 `lifespan` 而不是 `@app.on_event`
 
 📘 课件未覆盖。FastAPI 0.135 已废弃 `@app.on_event`（🧩 记在 `CLAUDE.md` 陷阱 11）：
 
@@ -1220,7 +1393,7 @@ async def lifespan(app):
     # 清理逻辑放 yield 后
 ```
 
-### 8.4 配置层：`.env` 覆盖环境变量，所以命令行开关要走独立通道
+### 9.4 配置层：`.env` 覆盖环境变量，所以命令行开关要走独立通道
 
 🧩 `agent/config.py` 的 `set_cli_override()`：
 
@@ -1240,14 +1413,14 @@ def set_cli_override(name: str, value: str) -> None:
 `server.py` 在模块导入时就读了 `RUNTIME.scheduler_enabled` 做启动钩子，
 所以 `__main__.py` 里 `--no-schedule` 要先写覆盖再 `importlib.reload(agent.config)` 和 `reload(server)`。
 
-### 8.5 通知出口只有 `notify` / `notify_summary`
+### 9.5 通知出口只有 `notify` / `notify_summary`
 
 🧩 项目约定：通知一律走工具，不直接 `print`。
 `print` 只在 `notify.py` 内部做降级输出使用 —— 直接 print 会绕过渠道配置（webhook 地址、投递格式），消息就散落在日志里。
 
 ---
 
-## 九、课件里有、项目还没用的
+## 十、课件里有、项目还没用的
 
 | 课件章 | 内容 | 项目现状 | 建议 |
 |---|---|---|---|
@@ -1259,10 +1432,16 @@ def set_cli_override(name: str, value: str) -> None:
 | 09 章 2.4 | 消息裁剪 / 删除 / 摘要 | 只做了工具结果清理 | 见 7.9 |
 | 09 章 4.1 | `dynamic_prompt` | 未实现 | 值得练一次 |
 | 10 RAG | 检索增强生成 | requirements 里被注释掉了 | 需要向量库 + 切分，最后再碰 |
+| LG 02 章 5.3-5.4 节点超时 / 错误处理 | 当前 `langgraph 1.1.2` 不支持 | 升级到 langgraph ≥ 1.2 后，`RetryPolicy` 才有 `timeout` 与 `error_handler` |
+| LG 04 章 8 中断 | 没用 `interrupt()` | 桌面版做「取消」时可能要设计暂停点；当前用协作式取消 |
+| LG 04 章 9.1 `langgraph dev` 部署 | 自建 FastAPI | 要用得让模块导出一个图对象（现在导出的是 FastAPI `app`） |
+| LG 05 章 11.3 `astream_events` | 没用 | 桌面版事件流可能用得上 |
+| LG 05 章 12 子图 | 单张图 | 等任务表长出多步骤工作流再拆 |
+| LG 05 章 13 设计模式 | 单一 ReAct 循环 | 编排者-工人 / 评估者-优化者要手写 `StateGraph` |
 
 ---
 
-## 十、踩坑速查（按症状索引）
+## 十一、踩坑速查（按症状索引）
 
 | 症状 | 原因 | 修法 | 出处 |
 |---|---|---|---|
@@ -1284,6 +1463,9 @@ def set_cli_override(name: str, value: str) -> None:
 | 工具超时/失败 | 没配重试 | `ToolRetryMiddleware`（注意副作用工具的幂等性） | 📘 08 章 3.5 |
 | `NotImplementedError`（测试里） | 假模型没实现 `bind_tools` | 用 `GenericFakeChatModel` | 🧩 `CLAUDE.md` 陷阱 7 |
 | `GenericFakeChatModel` 报错 | `_generate` 返回了 `AIMessage` | 必须返回 `ChatResult` | 🧩 `CLAUDE.md` 陷阱 8 |
+| `RetryPolicy(timeout=...)` 报 TypeError | 当前 `langgraph 1.1.2` 的 `RetryPolicy` 只有重试字段 | 升级到 langgraph ≥ 1.2 | 📘 LG 02 章 5.1 |
+| agent 改用文字回答了，不再调工具 | 闸门拦截后补了收尾 AIMessage，改变了条件边判定 | 只补 `ToolMessage`，别补收尾消息 | 🧩 `custom.py:80-86` |
+| 不知道 agent 的图长什么样 | —— | `agent.get_graph().draw_mermaid()` | 🧩 实测 |
 
 ---
 
