@@ -1,6 +1,6 @@
 
 """
-Agent 调用封装。调度器和 HTTP 服务都走这里，保证行为一致。
+Agent 调用封装。调度器和 Python 调用方都走这里，保证行为一致。
 
 对应课件第 09 章（courseware/langChain/尚硅谷-09-上下文与记忆.pdf）：记忆与状态持久化。
 
@@ -11,8 +11,8 @@ Agent 调用封装。调度器和 HTTP 服务都走这里，保证行为一致�
 
 设计要点：
 只有这一个入口能调用 Agent。
-调度器、HTTP 服务、REPL 都从这里走，
-这样三者触发出来的行为（上下文构造、thread_id 规则、
+调度器和 Python 调用方都从这里走，
+这样触发出来的行为（上下文构造、thread_id 规则、
 写权限默认值）完全一致，不会出现「某个入口忘了传 context」的情况。
 """
 
@@ -101,7 +101,7 @@ def run_task(
 
         trigger：
             触发来源，见 agent/context.py 的 Trigger 定义。
-            调度器传 schedule，HTTP 传 api，命令行传 cli。
+            调度器传 schedule，Python 调用方一般用默认的 cli。
 
         allow_write：
             是否允许写操作。

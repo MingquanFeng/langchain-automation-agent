@@ -16,8 +16,7 @@
         对应 runtime/server.py。
 
     注意：
-    原本还有 chat 子命令（交互式终端 runtime/repl.py），
-    已随桌面版改造删除 —— 终端界面由 Textual TUI 承担，
+    终端界面由 Textual TUI 承担，
     桌面壳走 WebSocket 事件流。
 
 用法：
@@ -32,9 +31,6 @@ import argparse
 
 # logging：标准库的日志模块。
 import logging
-
-# os：标准库，用来改写环境变量。
-import os
 
 # uvicorn：ASGI 服务器，用来承载 FastAPI 应用。
 import uvicorn
@@ -70,8 +66,6 @@ def main() -> None:
     # 传了别的值 argparse 会直接报错退出。
     #
     # 注意：
-    # 原本还有 chat 子命令（交互式终端），
-    # 已随 runtime/repl.py 一起删除 ——
     # 桌面版改用 WebSocket 事件流，终端界面由 Textual TUI 承担。
     parser.add_argument(
         "command",

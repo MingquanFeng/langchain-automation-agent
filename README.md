@@ -106,7 +106,7 @@ agent/
   tools/             L1 能力层：文件工具（沙箱限制在 data/）+ 通知出口
   middleware/        自定义中间件：只读闸门、上下文注入、耗时统计
 runtime/
-  runner.py          唯一 Agent 调用入口，调度器和 HTTP 都走它
+  runner.py          唯一 Agent 调用入口，调度器和 Python 调用方都走它
   scheduler.py       APScheduler 封装（LangGraph 1.x 本地没有内置 cron）
   server.py          FastAPI，定时任务增删查 + 状态查询（不触发 Agent）
   events.py          事件归一化层，桌面版事件流的落点

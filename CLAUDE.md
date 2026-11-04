@@ -72,7 +72,7 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 列出调度器已注册的 job 与下次运行时间 |
 
-**HTTP 层不提供触发 Agent 的入口** —— 触发只有三条路：`runtime/runner.py` 的 `run_task()`（Python 调用方）、
+**HTTP 层不提供触发 Agent 的入口** —— 触发只有两条路：`runtime/runner.py` 的 `run_task()`（Python 调用方）、
 `runtime/scheduler.py` 的定时任务。交互入口（终端 / 桌面壳）按桌面版路线重做，见 `DESKTOP_AGENT_PLAN.md`。
 
 首次使用需 `cp .env.example .env` 并填 `LLM_API_KEY`。环境变量全清单见 `.env.example`。
@@ -104,9 +104,9 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 ### runtime/ — 运行时外壳
 
-- `runner.py` — 唯一的 Agent 调用入口，调度器和 HTTP 服务都走它，保证行为一致。`_AGENT` 单例复用，保留 checkpointer 里的记忆。
+- `runner.py` — 唯一的 Agent 调用入口，调度器和 Python 调用方都走它，保证行为一致。`_AGENT` 单例复用，保留 checkpointer 里的记忆。
 - `scheduler.py` — APScheduler 封装。**LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力），所以定时触发必须自己接 APScheduler。cron 表达式按 `SCHEDULER_TIMEZONE` 解释，用 `CronTrigger.from_crontab`，即标准 5 段格式。
-- `server.py` — FastAPI。**只管定时任务增删查 + 调度状态 + 探活**，不触发 Agent。原来还有 `/run`（同步）和 `/run/stream`（SSE）两个触发端点，已按桌面版方向删除。
+- `server.py` — FastAPI。**只管定时任务增删查 + 调度状态 + 探活**，不触发 Agent。
 - `events.py` — 事件归一化层。桌面版事件流的落点，目前只有 `ThinkFilter`（滤 `<think>` 思考块）与 `is_hint_node`（滤中间件插入的例行提示）。**项目现在没有任何流式消费者**，事件模型与流式解析会随桌面版第一步长出来。
 - `tasks.py` — 定时任务表。改这个文件就改 Agent 每天自动做什么。**注意 `TASKS` 是模块级内存字典，不落盘** —— `POST /tasks` 动态加的任务进程重启即消失，只有改代码里的 `TASKS` 列表才是持久定义。
 - `__main__.py` — CLI 入口，唯一子命令 `serve`（默认，起 HTTP 服务 + 可选调度器）。`--no-schedule` / `--reload` / `--host` / `--port` 都在这里解析。**它同时是陷阱 10 的落地文件** —— 调度开关必须在 `import runtime.server` 之前生效，顺序不能改。

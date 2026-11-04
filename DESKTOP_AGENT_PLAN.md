@@ -7,8 +7,8 @@
 
 现在的 agent 调用是**黑盒**：
 
-- HTTP 层已经不提供触发入口（`/run`、`/run/stream` 已删除），交互终端 `runtime/repl.py` 也已删除
-- 终端是黑盒：跑完才看到结果，中途发生了什么完全看不见
+- HTTP 层不提供触发入口，交互终端也不存在 —— 只能调 `runner.run_task()` 跑一次等最终结果
+- 中途发生了什么完全看不见
 - 没有任何办法**打断**一次正在跑的 agent
 
 桌面 Agent 的第一个要求是「运行中可见、可打断」。而 UI 的唯一输入是**事件流** ——
@@ -24,7 +24,7 @@
 | 前提 | 验证方式 | 结论 |
 |---|---|---|
 | 中间件 `wrap_tool_call` 里能拿到 `get_stream_writer()` | 在 `wrap_tool_call` 里发 custom 事件 | ✅ 拿到，`custom` 模式收到了 `{'type': 'tool.start', 'name': 'list_files', 'args': {}, 'id': 'c1'}` |
-| `stream_mode` 传列表时产出 `(mode, payload)` 二元组 | `stream_mode=["messages","custom"]` | ✅ 已实测（原交互终端用过同样形态，该实现随终端删除） |
+| `stream_mode` 传列表时产出 `(mode, payload)` 二元组 | `stream_mode=["messages","custom"]` | ✅ 已实测 |
 | 事件顺序正确 | 观察完整流 | ✅ `tool.start` → `tool.end` → `ToolMessage` → 最终回答 |
 | FastAPI WebSocket + uvicorn 在本环境可用 | 起了个最小 ws 端点并用 `websockets` 客户端连 | ✅ 收到全部事件。`websockets` 16.0 已装（`courseware/langChain/requirements.txt:81`），uvicorn 的 `auto` 后端会自动选 `websockets_impl` |
 | 跨线程推事件可行 | `asyncio.to_thread` 里跑同步代码 + `loop.call_soon_threadsafe` | ✅ 事件按顺序送达客户端 |
@@ -250,8 +250,7 @@ loop.call_soon_threadsafe(lambda: asyncio.ensure_future(queue.put(event)))
 HTTP 侧退成探活与定时任务管理。
 
 **D5 · 归一化层独立成 `runtime/events.py`**
-原来解析 `(mode, payload)` 的是交互终端 `runtime/repl.py`，它已随桌面版改造删除。
-现在归一化层是 `runtime/events.py`（目前只有 `ThinkFilter` 与 `is_hint_node` 两个过滤器，
+归一化层是 `runtime/events.py`（目前只有 `ThinkFilter` 与 `is_hint_node` 两个过滤器，
 事件模型与流式解析在这一步长出来）。
 
 ### 复用与新增

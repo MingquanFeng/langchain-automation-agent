@@ -51,7 +51,7 @@ from .tasks import ScheduledTask, add_task, all_tasks, remove_task
 # 它不会禁止其他代码显式导入未列出的公开对象。
 #
 # 注意：
-# 调度器、HTTP 服务、REPL 的入口故意不放进来。
+# 调度器、HTTP 服务的入口故意不放进来。
 # 避免 `import runtime` 就把 FastAPI、APScheduler 一并拉起来，
 # 只想要任务表或调用入口时不必承担这些依赖的初始化开销。
 __all__ = [
