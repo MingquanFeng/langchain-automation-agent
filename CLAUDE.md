@@ -97,6 +97,12 @@ LANGSMITH_PROJECT=automation-agent
 - 🧩 **追踪失败不会让调用失败** —— 所以「代码跑通了」不等于「追踪通了」。
   验证方法：跑一次，日志里没有 `Failed to multipart ingest runs` 就说明通了；
   然后去 LangSmith 网站按项目名找最新的 run。
+- 🧩 **追踪开着会改变模型的调用路径** —— 追踪要记录增量 token，
+  于是 LangChain 让模型走流式路径而不是非流式路径。**这会打破测试**：
+  假模型给的响应是一次性的有限资源，流式路径消耗得更快，消息不够就 `StopIteration`
+  （表现为「Model call failed after 4 attempts」）。
+  `tests/conftest.py` 里有个 autouse fixture 在测试期间关掉追踪 —— 实测同一组用例
+  开着 6.5 秒、关掉 0.18 秒。**改测试替身或中间件时留意这条。**
 - 🧩 **只能改 `.env`，`export` 不管用**。项目用 `load_dotenv(override=True)`，
   `.env` 里的值会盖掉 shell 里的同名环境变量（见陷阱 10）。
   `set_cli_override()` 同样无效 —— 它写的是 `__CLI_LANGSMITH_TRACING__` 这种独立前缀的键，

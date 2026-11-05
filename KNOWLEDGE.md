@@ -1509,6 +1509,13 @@ LANGSMITH_PROJECT=automation-agent
   项目只暴露后者。
 - 🧩 **追踪失败 ≠ 调用失败**。「代码跑通」不等于「追踪通了」——
   验证看日志里有没有 `Failed to multipart ingest runs`，再去 LangSmith 网站按项目名找最新 run。
+- 🧩 **追踪开着会改变模型的调用路径**（流式 vs 非流式），
+  **这会打破用假模型的测试** —— 假消息被加速消耗，不够就 `StopIteration`。
+  `tests/conftest.py` 的 autouse fixture 在测试期间关掉追踪：
+  实测同一组用例开着 6.5 秒、关掉 0.18 秒。
+  判定入口是 `langsmith.utils.tracing_is_enabled()`，
+  `langchain_core.tracers.context` 通过模块属性调用它，所以 monkeypatch 属性即可
+  —— 不能用环境变量，因为项目的 `.env` 是 `load_dotenv(override=True)`，会盖掉它。
 - 🧩 **只能改 `.env`，`export` 不管用**。项目用 `load_dotenv(override=True)`，
   `.env` 里的值盖掉 shell 里的同名环境变量。`set_cli_override()` 也不行 ——
   它写的是 `__CLI_LANGSMITH_TRACING__` 这种独立前缀的键，框架只认 `LANGSMITH_TRACING`。
