@@ -31,7 +31,7 @@
 |---|---|---|---|
 | 01 | `langChain/尚硅谷-01-LangChain概述.pdf` | 课程总览、1.x 的架构与生态定位 | 背景概念，代码里没有直接对应 |
 | 02 | `langChain/尚硅谷-02-模型的创建与调用.pdf` | 模型接入、`init_chat_model` | 主线 1 —— `agent/config.py` 的 `ModelConfig.build()` |
-| 03 | `langChain/尚硅谷-03-LangSmith的使用.pdf` | LangSmith 追踪 | 本项目未使用 |
+| 03 | `langChain/尚硅谷-03-LangSmith的使用.pdf` | LangSmith 追踪 | 已接入，默认关 —— 用法见 `CLAUDE.md` 的「调试：LangSmith 追踪」 |
 | 04 | `langChain/尚硅谷-04-Message与提示词模板.pdf` | 消息类型、提示词模板 | 主线 1 —— `HumanMessage` 输入构造 |
 | 05 | `langChain/尚硅谷-05-Tools.pdf` | `@tool`、工具描述、沙箱、function calling | 主线 2 —— `agent/tools/` |
 | 06 | `langChain/尚硅谷-06-结构化输出.pdf` | `with_structured_output` 的四种模式 | `agent/tools/files.py` 的 `save_json` 是手写版，可对照改造 |

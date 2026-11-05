@@ -223,7 +223,11 @@ class ModelConfig:
         # 等价于：
         # init_chat_model(model="deepseek-chat")
         #
-        # 注意：部分模型或供应商可能不支持 temperature。
+        # 注意：部分模型不接受 temperature。
+        #
+        # langchain_openai 自己有兜底（validate_temperature 校验器：
+        # gpt-5 把非 1 的值直接丢掉，o1 没传时自动设 1），
+        # 但非 OpenAI 兼容的原生集成不一定有这层保护。
         return init_chat_model(**kwargs)
 
 

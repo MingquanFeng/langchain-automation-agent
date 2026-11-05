@@ -134,11 +134,16 @@ if self.base_url:
 return init_chat_model(**kwargs)
 ```
 
+**换模型只改 `.env` 三行**（`LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL`），代码不用动。
+五个前提与已实测的模型组合见 `CLAUDE.md` 的「换模型须知」。
+
 **坑**
 - 🧩 `api_key` / `base_url` 是「配了才传」。不传 `base_url` 时由供应商集成决定默认地址。
 - 📘 02 章：**并非所有模型名都支持自动推断**（如 `qwen-plus` 会报错）。所以项目把 provider 单独做成必填配置项，不靠推断。
 - 📘 02 章：阿里 `dashscope` 尚未纳入统一注册体系，只能用 `model_provider="openai"` + OpenAI 兼容地址。
-- 🧩 `config.py:226` 自注：**部分模型或供应商可能不支持 `temperature`**。
+- 🧩 `config.py` 自注：**部分模型不接受 `temperature`**。
+  实测 `langchain_openai` 有兜底（`validate_temperature` 校验器：gpt-5 把非 1 的值丢掉，
+  o1 没传时自动设 1），但非 OpenAI 兼容的原生集成不一定有这层保护。
 - 📘 02 章的 temperature 分档：`0.0-0.3` 用于要一致性/准确性的任务（数据提取、分类、代码生成）；`0.5-0.7` 平衡；`0.8-1.5` 创造性。项目取 0.3。
 
 ### 3.2 `.invoke()` 与 `.stream()`
@@ -1417,13 +1422,57 @@ def set_cli_override(name: str, value: str) -> None:
 🧩 项目约定：通知一律走工具，不直接 `print`。
 `print` 只在 `notify.py` 内部做降级输出使用 —— 直接 print 会绕过渠道配置（webhook 地址、投递格式），消息就散落在日志里。
 
+### 9.6 事件模型与归一化层（`runtime/events.py`）
+
+🧩 项目自研，课件未覆盖。是桌面版的事件协议。
+
+**事件模型**：`BaseEvent` 加 9 种事件。公共字段四个 —— `version`（协议版本）、
+`run_id`（归属哪次执行）、`timestamp`（秒级浮点）、`type`（判别字段）。
+
+| 事件 | 什么时候发 | 关键字段 |
+|---|---|---|
+| `run.start` | 收到启动命令、分配好 run_id 后 | `task_name` / `thread_id` / `instruction` |
+| `model.text` | `"messages"` 模式里的增量文本 | `text` |
+| `tool.start` | 工具开始执行 | `name` / `call_id` / `args` |
+| `tool.end` | 工具执行完成 | `name` / `call_id` / `ok` / `duration_ms` / `result_preview` |
+| `tool.error` | 工具执行失败 | `name` / `call_id` / `message` |
+| `run.progress` | **只定义不发出**（留给 TodoList 进度） | `note` |
+| `run.end` | 消费循环跑完 | `output` / `messages` / `duration_ms` |
+| `run.cancelled` | 收到取消或连接断开 | `reason` |
+| `run.error` | 消费循环抛异常 | `message` / `recoverable` |
+
+`run.cancelled` 与 `run.end` 是**互斥**的 —— 取消时发前者，客户端据此把界面从「运行中」改到「已取消」。
+
+**归一化层** `StreamNormalizer`：把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件列表。
+
+| stream_mode | 载荷 | 归一化成 |
+|---|---|---|
+| `"messages"` | `(chunk, metadata)` | `model.text` |
+| `"custom"` | 中间件发的 dict | 按 `type` 分发成 `tool.*` |
+
+**🧩 `messages` 模式里有三种消息，只留一种**（实测 `agent.stream(stream_mode=["messages"])` 的产出）：
+
+| chunk 类型 | 来自 | 处理 |
+|---|---|---|
+| `AIMessageChunk` | 模型增量 | → `model.text`（过一遍 `ThinkFilter` 滤掉 `<think>` 块） |
+| `AIMessage`（整条） | 中间件插入的提示 | 命中例行提示节点就丢掉，其余 → `model.text` |
+| `ToolMessage` | 工具结果 | **丢掉** —— 它不是模型输出 |
+
+**坑**
+- 🧩 `ToolMessage` 漏掉过滤，模型的一句话会被当成两段发出去。
+- 🧩 中间件提示的 `langgraph_node` 实测是 `"ContextInjectionMiddleware.before_model"` ——
+  带后缀，所以判定要用**前缀匹配**（`is_hint_node` 用 `startswith`），精确相等会漏。
+- 🧩 模型最终答案只以 `AIMessageChunk` 形式出现，**不会**再以整条 `AIMessage` 重复一次；
+  整条 `AIMessage` 只来自中间件。
+- 🧩 `AIMessageChunk` 的 `content` 可能是内容块列表（多模态），非字符串形态要直接跳过。
+- 🧩 一次 run 一个 `StreamNormalizer` 实例 —— `ThinkFilter` 的缓冲跨 chunk 累积，换实例等于清零。
+
 ---
 
 ## 十、课件里有、项目还没用的
 
 | 课件章 | 内容 | 项目现状 | 建议 |
 |---|---|---|---|
-| 03 LangSmith | 追踪与调试平台 | 没配追踪 | 加 `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` + `LANGSMITH_PROJECT`（**1.x 是 `LANGSMITH_` 前缀，不是老版本的 `LANGCHAIN_TRACING_V2`**） |
 | 06 结构化输出 | `with_structured_output()` 的四种模式（Pydantic / TypedDict / JSON Schema / dataclass） | 只有手写的 `save_json` | 用 `model.with_structured_output(PydanticModel)` 让模型直接返回结构化对象，比「输出 JSON 字符串再解析」可靠得多 |
 | 07 章 7.3 | `ToolStrategy` / `ProviderStrategy` / `AutoStrategy` | 没用 `response_format` | 让 Agent 直接返回结构化对象。注意 1.x **必须显式** `ToolStrategy(Schema)` |
 | 08 章 2.x | `PIIMiddleware` / `SummarizationMiddleware` / `HumanInTheLoopMiddleware` / `ModelFallbackMiddleware` | 均未启用 | 见 6.11 |
@@ -1437,6 +1486,33 @@ def set_cli_override(name: str, value: str) -> None:
 | LG 05 章 11.3 `astream_events` | 没用 | 桌面版事件流可能用得上 |
 | LG 05 章 12 子图 | 单张图 | 等任务表长出多步骤工作流再拆 |
 | LG 05 章 13 设计模式 | 单一 ReAct 循环 | 编排者-工人 / 评估者-优化者要手写 `StateGraph` |
+
+### 10.1 LangSmith 追踪（已接入，默认关）
+
+📘 LangChain 03 章 / LangGraph 04 章 9.1。看每次 invoke 的完整 trace：每一步的输入输出、耗时、token 用量。
+
+**开启** —— 只改 `.env` 三行，**代码零改动**（langchain 自动读环境变量）：
+
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2-...
+LANGSMITH_PROJECT=automation-agent
+```
+
+**坑**
+- 🧩 **值必须是精确的小写 `true`**。框架的判定是
+  `get_env_var("TRACING_V2", default=get_env_var("TRACING", default="")) == "true"`
+  —— 精确匹配，写成 `1` 或 `True` 都不生效。
+- 🧩 **只看开关、不看 API key**。没填 key 就开着，每次调用刷一条 `401 Unauthorized`，
+  但**不影响运行** —— 追踪失败被 langchain 吞掉，只打一条日志。
+- 🧩 **`LANGSMITH_TRACING_V2` 优先于 `LANGSMITH_TRACING`**（旧变量仍被认）。
+  项目只暴露后者。
+- 🧩 **追踪失败 ≠ 调用失败**。「代码跑通」不等于「追踪通了」——
+  验证看日志里有没有 `Failed to multipart ingest runs`，再去 LangSmith 网站按项目名找最新 run。
+- 🧩 **只能改 `.env`，`export` 不管用**。项目用 `load_dotenv(override=True)`，
+  `.env` 里的值盖掉 shell 里的同名环境变量。`set_cli_override()` 也不行 ——
+  它写的是 `__CLI_LANGSMITH_TRACING__` 这种独立前缀的键，框架只认 `LANGSMITH_TRACING`。
+- 🧩 **隐私**：提示词与模型输出会发到 LangSmith 云端。
 
 ---
 

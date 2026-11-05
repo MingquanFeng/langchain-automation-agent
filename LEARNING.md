@@ -34,7 +34,7 @@
 |---|---|---|
 | `agent/graph.py:422` `build_agent()` | 唯一创建 Agent 的地方。`create_agent(model, tools, system_prompt, middleware, checkpointer, store, context_schema, name)` | 07 章 1.4.2「全新的调用」 |
 | `agent/graph.py:634` `SYSTEM_PROMPT` | 系统提示词就是普通字符串，Agent 的一切行为从它开始 | 07 章 6 |
-| `agent/config.py:187` `ModelConfig.build()` | `init_chat_model(model=..., model_provider=...)` | 02 章 2.2「兼容用法」 |
+| `agent/config.py:187` `ModelConfig.build()` | `init_chat_model(model=..., model_provider=...)`。换模型只改 `.env` 三行，见 `CLAUDE.md` 的「换模型须知」 | 02 章 2.2「兼容用法」 |
 | `runtime/runner.py:166` | `HumanMessage` 构造输入 | 04 章 1.5.2 |
 
 **关键认知**：「Agent」不是一个需要实例化的类，而是一次 `create_agent()` 调用返回的**编译好的图**。
@@ -193,7 +193,6 @@ __start__ → model → tools → model → … → __end__
 
 | 课件章 | 项目现状 | 怎么接 |
 |---|---|---|
-| 03 LangSmith | 没配追踪 | 加 `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` + `LANGSMITH_PROJECT`（**1.x 是 `LANGSMITH_` 前缀，不是老版本的 `LANGCHAIN_TRACING_V2`**）。看每次 invoke 的完整 trace，这是最快的调试利器 |
 | 06 结构化输出 | 只有手写的 `save_json` | 用 `model.with_structured_output(PydanticModel)` 让模型直接返回结构化对象，比让模型「输出 JSON 字符串再解析」可靠得多。四种模式见课件 06 章 2.1-2.4（Pydantic / TypedDict / JSON Schema / dataclass） |
 | 07 章 7.3 `ToolStrategy` | 没用 `response_format` | 让 Agent 直接返回结构化对象。注意 1.x **必须显式** `ToolStrategy(Schema)`，直接传 `Schema` 会报错 |
 | 09 章 3 长期记忆 | store 只挂了 `InMemoryStore` 没实际用 | 用 `store.put(namespace, key, value)` / `store.search()` 实现跨会话记忆 |
@@ -208,6 +207,9 @@ LangGraph 专项课件（`courseware/langGraph/`）里还没接入的：
 | 04 章 9.1 本地部署（`langgraph dev` / AgentChatUI） | 用 FastAPI 自建服务（`runtime/server.py`） | `langgraph dev` 需要模块导出图对象，本项目导出的是 FastAPI `app`，套不上 |
 | 05 章 12 子图 | 单张图，没有子图 | 现在没必要；等任务表长出多步骤工作流再拆 |
 | 05 章 13 运行图设计模式（路由 / 编排者-工人 / 评估者-优化者） | 单一 ReAct 循环 | 同一个 `create_agent` 循环就是「路由」模式；编排者-工人需要手写 `StateGraph` |
+
+LangSmith 追踪（LangChain 03 章 / LangGraph 04 章 9.1）**已经接入，默认关** —— 改 `.env` 三行即可开启，
+用法见 `CLAUDE.md` 的「调试：LangSmith 追踪」。
 
 ---
 

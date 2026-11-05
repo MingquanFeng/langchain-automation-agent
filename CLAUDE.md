@@ -77,6 +77,34 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 
 首次使用需 `cp .env.example .env` 并填 `LLM_API_KEY`。环境变量全清单见 `.env.example`。
 
+## 调试：LangSmith 追踪
+
+LangSmith 能看到每次 invoke 的**完整 trace** —— 每一步的输入输出、耗时、token 用量、工具调用。
+代码里 print 的信息远没有它全，是调试 agent 最快的利器。
+
+**开启：只改 `.env` 三行，代码零改动**（langchain 自动读环境变量）：
+
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=lsv2-...     # 到 https://smith.langchain.com 申请
+LANGSMITH_PROJECT=automation-agent
+```
+
+**坑**
+- 🧩 **值必须是精确的小写 `true`** —— 框架做的是 `== "true"` 精确匹配，写成 `1` 或 `True` 都不生效。
+- 🧩 **默认关是有原因的**：判定**只看开关、不看有没有 API key**。没填 key 就开着，
+  每次调用都会刷一条 `401 Unauthorized`，但**不影响运行**（追踪失败被 langchain 吞掉，只打日志）。
+- 🧩 **追踪失败不会让调用失败** —— 所以「代码跑通了」不等于「追踪通了」。
+  验证方法：跑一次，日志里没有 `Failed to multipart ingest runs` 就说明通了；
+  然后去 LangSmith 网站按项目名找最新的 run。
+- 🧩 **只能改 `.env`，`export` 不管用**。项目用 `load_dotenv(override=True)`，
+  `.env` 里的值会盖掉 shell 里的同名环境变量（见陷阱 10）。
+  `set_cli_override()` 同样无效 —— 它写的是 `__CLI_LANGSMITH_TRACING__` 这种独立前缀的键，
+  而框架只认 `LANGSMITH_TRACING`。**追踪开关只有 `.env` 一个入口。**
+- 🧩 **隐私**：追踪会把提示词与模型输出发到 LangSmith 云端。涉及敏感内容先想清楚，
+  或用 `PIIMiddleware` 脱敏（见「可选增强」）。
+- 📘 03 章是 LangChain 侧的讲法，LangGraph 课件 04 章 9.1 也有（顺带讲了 `langgraph dev` 与 Studio）。
+
 ## 学习材料
 
 - `LEARNING.md` — **源码索引**：课件章节 ↔ 源码位置的对照表。想学这个项目先看它。共 6 条主线，第 6 条是 LangGraph 底层。
@@ -107,7 +135,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 - `runner.py` — 唯一的 Agent 调用入口，调度器和 Python 调用方都走它，保证行为一致。`_AGENT` 单例复用，保留 checkpointer 里的记忆。
 - `scheduler.py` — APScheduler 封装。**LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力），所以定时触发必须自己接 APScheduler。cron 表达式按 `SCHEDULER_TIMEZONE` 解释，用 `CronTrigger.from_crontab`，即标准 5 段格式。
 - `server.py` — FastAPI。**只管定时任务增删查 + 调度状态 + 探活**，不触发 Agent。
-- `events.py` — 事件归一化层。桌面版事件流的落点，目前只有 `ThinkFilter`（滤 `<think>` 思考块）与 `is_hint_node`（滤中间件插入的例行提示）。**项目现在没有任何流式消费者**，事件模型与流式解析会随桌面版第一步长出来。
+- `events.py` — 事件模型 + 归一化层。`BaseEvent` 加 9 种事件构成桌面版的事件协议；`StreamNormalizer` 把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件。**项目现在还没有流式消费者** —— 阶段 3 的消费器会驱动它。
 - `tasks.py` — 定时任务表。改这个文件就改 Agent 每天自动做什么。**注意 `TASKS` 是模块级内存字典，不落盘** —— `POST /tasks` 动态加的任务进程重启即消失，只有改代码里的 `TASKS` 列表才是持久定义。
 - `__main__.py` — CLI 入口，唯一子命令 `serve`（默认，起 HTTP 服务 + 可选调度器）。`--no-schedule` / `--reload` / `--host` / `--port` 都在这里解析。**它同时是陷阱 10 的落地文件** —— 调度开关必须在 `import runtime.server` 之前生效，顺序不能改。
 
@@ -129,6 +157,43 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 - 别改成 `create_react_agent` 或手写 `StateGraph` —— 会绕开现有中间件栈（限次 / 重试 / 只读闸门 / 上下文注入）。
 - 别指望 `langgraph_sdk` 提供 cron —— 本地没有内置 cron（实测 `langgraph_sdk 0.3.9` 未导出 cron），定时靠 APScheduler。
 - `interrupt()` / `Command` / `Send` / `RetryPolicy` 这些高级 API 项目**当前一个都没用**，引入前先看 `DESKTOP_AGENT_PLAN.md` 的设计。
+
+## 换模型须知
+
+换模型只改 `.env` 三行，不用碰代码：
+
+```bash
+LLM_PROVIDER=deepseek      # provider 名
+LLM_MODEL=deepseek-chat    # 模型名
+LLM_BASE_URL=              # 自带端点留空；走兼容端点时填地址
+```
+
+**五个前提**（踩到才会坏）：
+
+| 前提 | 说明 |
+|---|---|
+| **必须支持 function calling** | 硬门槛。没有 `tool_calls`，agent 循环第一步就断了，模型只能当聊天机器人 |
+| **provider 包要装** | `init_chat_model` 内置 24 个 provider，但每个要装对应的 `langchain-xxx`。当前环境装好的只有 5 个：deepseek / openai / anthropic / ollama / openrouter |
+| **模型名要跟 provider 一起给** | provider 做成必填配置项，不靠自动推断 —— 有些模型名（如 `qwen-plus`）推断会直接报错 |
+| **自带端点走 `LLM_BASE_URL`** | OpenAI 兼容的自建端点都走这条 |
+| **思考块形态因模型而异** | MiniMax 混在 `content` 里（`runtime/events.py` 的 `ThinkFilter` 处理）；DeepSeek 放 `additional_kwargs.reasoning_content`（content 干净）。换模型后 ThinkFilter 可能变成空转 —— 无害 |
+
+**已实测跑通的组合**：
+
+| 模型 | provider | 备注 |
+|---|---|---|
+| deepseek-chat | deepseek | 默认配置 |
+| MiniMax-M3 | openai + `LLM_BASE_URL=https://api.minimaxi.com/v1` | 走 OpenAI 兼容端点 |
+| qwen3.5:9b-mlx | ollama | 本地离线 |
+
+**坑**
+
+- 🧩 **流式响应可能不返回 `usage_metadata`**（MiniMax 就是）。`TimingMiddleware` 有 fallback ——
+  打「token 用量不可用（供应商未返回）」而不是假的 0。
+- 🧩 **SYSTEM_PROMPT 的服从度因模型而异**。「先用 TodoList 拆解」「每步做完就 notify」
+  是靠模型自觉的，不是代码强制的。弱模型可能只回一句话就完事 —— 代码层看不出异常，
+  界面体验却差很多。换模型后第一件事就是看它听不听话。
+- 🧩 **没有 fallback 模型**。`ModelFallbackMiddleware` 没启用（见「可选增强」），主模型挂了就直接失败。
 
 ## 关键 API 陷阱
 
@@ -193,6 +258,9 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 - **新增工具要做两件事**：登记进 `agent/tools/__init__.py` 的 `ALL_TOOLS`（不登记模型根本看不到这个工具），写类工具还要同步 `TaskGateMiddleware.WRITE_TOOLS`（`agent/middleware/custom.py`）。漏第二步，只读闸门就拦不住它。
 - **写操作受 `AgentContext.allow_write` 控制，默认关闭**（只读是默认态，写权限要显式开启：`AgentContext(allow_write=True)` / `run_task(allow_write=True)` / `ScheduledTask(allow_write=True)`）。只读模式由 `TaskGateMiddleware` 拦截。注意 `notify` / `notify_summary` 也算写工具，需要推送的任务必须显式开权限。新增写类工具时，要同步更新 `TaskGateMiddleware.WRITE_TOOLS`（见上一条）。
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
+- **事件协议在 `runtime/events.py`** —— 桌面版的事件协议。新增事件类型要同时改三处：
+  事件类、`EVENT_CLASSES` 注册表、`StreamNormalizer` 的分派规则。
+  `version` 是协议版本，改事件结构时要动它 —— 客户端靠它识别新旧格式。
 - **中间件顺序有意义**：`LIMITS` 放最前（先挡住跑飞），`CUSTOM_MIDDLEWARE` 放最后（能看到前面中间件的结果）。
 - **测试会真写 `data/` 目录**（`data/out/report.md` 等），`data/` 已在 `.gitignore` 里，跑测试不必清理。
 - 提交前跑 `pytest tests/ -q`，38 项必须全过。
