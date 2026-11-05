@@ -104,7 +104,7 @@ agent/
   context.py         AgentContext，本次调用的静态运行时配置
   graph.py           装配中心，build_agent() 是唯一创建 Agent 的地方
   tools/             L1 能力层：文件工具（沙箱限制在 data/）+ 通知出口
-  middleware/        自定义中间件：只读闸门、上下文注入、耗时统计
+  middleware/        中间件：只读闸门、上下文注入、耗时统计 + PII 脱敏
 runtime/
   runner.py          唯一 Agent 调用入口，调度器和 Python 调用方都走它
   scheduler.py       APScheduler 封装（LangGraph 1.x 本地没有内置 cron）

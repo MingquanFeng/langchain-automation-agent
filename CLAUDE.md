@@ -135,6 +135,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 - `tools/` — L1 能力层。`files.py` 的文件工具被沙箱限制在 `data/` 目录内；读文件有 **200,000 字节硬上限**（`MAX_READ_BYTES`，超出即截断并把「还有多少行、传什么 offset」告诉模型），默认每次返回 200 行（`limit` 参数模型可传大，但字节上限始终生效）；二进制文件拒绝；记忆库（`memory.sqlite` 及其 WAL/SHM）禁读 —— 否则 agent 一句「看下这个文件」就能撑爆上下文窗口；`notify.py` 是通知出口，webhook 未配置时降级为终端输出。
   - **沙箱越界不抛异常，返回一句给模型看的中文说明**（`_resolve_safe`）。`_resolve()` 仍然抛 `ValueError`，但那是给 Python 调用方用的；工具层用它会让 `ToolRetryMiddleware`（默认 `retry_on=(Exception,)`）把同一个错参数重试 3 次、空耗约 3 秒，模型最后收到的还是 `failed after 3 attempts ... Please try again.` 这种没法照做的英文提示。
 - `middleware/custom.py` — L4 守卫层的自定义部分。三个中间件分别负责只读拦截、上下文注入、耗时统计。
+- `middleware/pii.py` — PII 脱敏。配置 langchain 内置的 `PIIMiddleware`，脱敏四种类型：邮箱、信用卡、手机号、身份证号。开关是 `.env` 的 `PII_MASKING`（默认开）。
 
 ### runtime/ — 运行时外壳
 
@@ -249,12 +250,12 @@ LLM_BASE_URL=              # 自带端点留空；走兼容端点时填地址
 
 ## 可选增强
 
-langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopMiddleware`（人工审批）、`SummarizationMiddleware`（摘要压缩）、`PIIMiddleware`（敏感信息脱敏）都可用，但当前**没有启用**：
+langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopMiddleware`（人工审批）、`SummarizationMiddleware`（摘要压缩）都可用，但当前**没有启用**：
 
 - 降级需要显式给 fallback 模型（`ModelFallbackMiddleware("openai:gpt-4o-mini")`），要先决定备用供应商和 key 从哪来，属于配置决策。
 - 人工审批适合交互式场景，与"无人值守定时任务"的项目定位冲突。
 - 摘要压缩与已有的 `ContextEditingMiddleware`（`ClearToolUsesEdit`）功能部分重叠。
-- `PIIMiddleware(pii_type="email", strategy="mask")` 值得加 —— 防止手机号、邮箱这类个人信息被发到模型供应商那边。
+- ~~`PIIMiddleware`~~ —— **已启用**，见 `agent/middleware/pii.py`。用 `redact` 而不是 `mask`：mask 只保留末尾几位（手机号是 `****5678`），那几位仍是真实个人信息，照样会进供应商和 LangSmith。
 
 要启用时在 `agent/graph.py` 的中间件栈里加，不要直接改 `RETRY` 列表的语义。
 
@@ -264,6 +265,11 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 - **新增工具要做两件事**：登记进 `agent/tools/__init__.py` 的 `ALL_TOOLS`（不登记模型根本看不到这个工具），写类工具还要同步 `TaskGateMiddleware.WRITE_TOOLS`（`agent/middleware/custom.py`）。漏第二步，只读闸门就拦不住它。
 - **写操作受 `AgentContext.allow_write` 控制，默认关闭**（只读是默认态，写权限要显式开启：`AgentContext(allow_write=True)` / `run_task(allow_write=True)` / `ScheduledTask(allow_write=True)`）。只读模式由 `TaskGateMiddleware` 拦截。注意 `notify` / `notify_summary` 也算写工具，需要推送的任务必须显式开权限。新增写类工具时，要同步更新 `TaskGateMiddleware.WRITE_TOOLS`（见上一条）。
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
+- **PII 脱敏默认开着**（`.env` 的 `PII_MASKING=1`）。它脱敏**用户指令**与**工具结果**
+  （文件工具读出来的内容走后者，是最主要的泄露通道），但**不脱敏模型输出** ——
+  模型输出多半来自用户自己的输入，用户自己知道那是什么，
+  脱敏输出会让「提醒我邮箱是多少」这种场景失效。脱敏是全局的，
+  想让 agent 处理一份本来就该被它看到的通讯录时把开关关掉。
 - **事件协议在 `runtime/events.py`** —— 桌面版的事件协议。新增事件类型要同时改三处：
   事件类、`EVENT_CLASSES` 注册表、`StreamNormalizer` 的分派规则。
   `version` 是协议版本，改事件结构时要动它 —— 客户端靠它识别新旧格式。

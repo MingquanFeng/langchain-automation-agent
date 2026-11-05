@@ -213,7 +213,7 @@ prompt = chat_template.invoke({"name": "小明", "user_input": "你叫什么名�
 ```
 
 **项目里怎么用**：**完全没用**。全项目零 `ChatPromptTemplate` / `PromptTemplate` 引用。
-系统的提示词是纯字符串常量 `agent/graph.py:634`，需要随运行时变化的内容由中间件在调用前改写请求（见 6.8）。
+系统的提示词是纯字符串常量 `agent/graph.py:642`，需要随运行时变化的内容由中间件在调用前改写请求（见 6.8）。
 
 **为什么这样可行**：📘 04 章说纯字符串拼接的缺点是「可读性差、不易维护、无变量校验」——
 但项目的提示词里**根本没有变量**（任务名、触发方式、写权限是运行时动态追加的，不是模板占位符）。
@@ -249,7 +249,7 @@ checkpointer 自动完成「读历史 → 追加 → 调模型 → 存历史」�
 4. 把结果包成 ToolMessage 回灌，模型据此生成最终回答
 ```
 
-**项目里怎么用**：项目不手写这个循环，交给 `create_agent`（`agent/graph.py:497`）。
+**项目里怎么用**：项目不手写这个循环，交给 `create_agent`（`agent/graph.py:505`）。
 只在**闸门拦截**这一处手工构造 ToolMessage（`custom.py:134`）。
 
 ### 4.2 `@tool` 装饰器
@@ -447,7 +447,7 @@ def _resolve(path: str) -> Path:
 > ⚠️ **常见误引**：「工具数量 2-5 个最佳」这句话在 **07 章**（📘 07 章 P21「只给 Agent 需要的工具，工具太多会混淆。一般 2-5 个工具最佳」），**不在 05 章**。
 > 按这条标准，本项目 8 个工具偏多，模型选错工具的概率会上升。
 
-**🧩 项目自注的补充**（`graph.py:223-232`），课件没讲但很重要：
+**🧩 项目自注的补充**（`graph.py:224-233`），课件没讲但很重要：
 > 对发送消息、修改文件、写入数据库等**有副作用的工具，自动重试可能造成重复操作**。
 > 第一次发送消息实际上成功，但网络超时导致客户端认为失败，重试后可能再发一次。
 
@@ -486,7 +486,7 @@ print(type(agent))
 # <class 'langgraph.graph.state.CompiledStateGraph'>
 ```
 
-**🧩 项目实际用到 8 个参数**（`agent/graph.py:497-599`，全项目唯一的 `create_agent` 调用点）：
+**🧩 项目实际用到 8 个参数**（`agent/graph.py:505-607`，全项目唯一的 `create_agent` 调用点）：
 
 ```python
 return create_agent(
@@ -536,7 +536,7 @@ return create_agent(
 
 📘 07 章 P28-30：可以传字符串，也可以传 `SystemMessage` 对象。三条建议：明确角色、定义输出格式、说明何时使用工具。
 
-🧩 项目（`graph.py:634-643`）：
+🧩 项目（`graph.py:642-651`）：
 
 ```python
 SYSTEM_PROMPT = """你是一个自动化日常事务助手。
@@ -551,7 +551,7 @@ SYSTEM_PROMPT = """你是一个自动化日常事务助手。
 """
 ```
 
-**🧩 项目自己写明的局限**（`graph.py:645-661`）：
+**🧩 项目自己写明的局限**（`graph.py:653-669`）：
 > 提示词属于模型行为约束，**不能代替程序级权限控制和错误处理**。
 > 路径约束要在文件工具实现、`allow_write` 要在写工具里检查。
 
@@ -731,7 +731,7 @@ Ai Message:    你好啊！   -> wrap_model-after-3 <-  -> wrap_model-after-2 <-
                  -> after_model-3 <-  -> after_model-2 <-  -> after_model-1 <-
 ```
 
-**🧩 项目的中间件栈**（`graph.py:470-491`）：
+**🧩 项目的中间件栈**（`graph.py:471-499`）：
 
 ```python
 middleware = [
@@ -749,7 +749,7 @@ middleware = [
 （比如只读闸门拦截后，统计中间件统计到的就是被拦之后的结果）。
 
 **坑**
-- 🧩 `graph.py:275-283` 自注：**中间件的排列顺序可能影响重试与调用次数统计之间的关系** —— 重试会额外产生模型/工具调用。
+- 🧩 `graph.py:276-284` 自注：**中间件的排列顺序可能影响重试与调用次数统计之间的关系** —— 重试会额外产生模型/工具调用。
 - 🧩 `middleware` 必须是**扁平列表**，项目用 `*LIMITS` / `*RETRY` 解包。写 `middleware=[LIMITS, RETRY]` 会塞进两个列表对象。
 
 ### 6.4 Node-style vs Wrap-style 怎么选
@@ -919,22 +919,70 @@ def _ctx(runtime: Runtime) -> AgentContext:      # agent/middleware/custom.py:48
 - 📘 08 章 3.2：`exit_behavior` 三种：`error` / `end` / `continue`（**默认**）。🧩 项目没显式设，靠 `thread_limit=50` 兜底 ——
   默认 `continue` 在模型能力不足时**可能死循环**。
 - 📘 08 章 3.5：**`max_retries` 不含首次调用** —— 课件注释写明「一共最多调 1 + 6 = 7 次」。
-- 🧩 `graph.py:215-219`：`on_failure="continue"` **不保证模型一定会向用户报告失败**。
+- 🧩 `graph.py:216-220`：`on_failure="continue"` **不保证模型一定会向用户报告失败**。
 - 📘 08 章 2.4：`TodoListMiddleware` **只是提供工具，不保证模型一定先拆解任务**（课件 2.4.2 给了决策树）。
 - 📘 08 章 3.8：`ContextEditingMiddleware` **不会更改持久化的消息列表**，所以验证效果要看 `usage_metadata` 而不是看 messages。
   🧩 `clear_tool_inputs` 这个参数课件未列出，是项目自用的扩展项。
 
-### 6.11 未启用但值得加的四个内置中间件
+### 6.11 未启用但值得加的三个内置中间件
 
 | 中间件 | 签名 | 为什么加 / 为什么不加 |
 |---|---|---|
-| `PIIMiddleware` | `PIIMiddleware("email", strategy="mask", apply_to_input=True)`，strategy 支持 `redact`/`mask`/`hash`/`block` | ✅ **值得加** —— 防止手机号、邮箱这类个人信息发给模型供应商 |
 | `SummarizationMiddleware` | `SummarizationMiddleware(model=..., trigger=[("tokens",100)], keep=("messages",2))` | ⚠️ 与已有 `ContextEditingMiddleware` 功能部分重叠 |
 | `HumanInTheLoopMiddleware` | `HumanInTheLoopMiddleware(interrupt_on={"send_email_tool": {"allowed_decisions": ["approve","reject"]}})` | ⚠️ 人工审批与「无人值守定时任务」定位冲突 |
 | `ModelFallbackMiddleware` | `ModelFallbackMiddleware("openai:gpt-4o-mini")` | ⚠️ 需要先决定备用供应商和 key 从哪来，属于配置决策 |
 
 📘 08 章 2.3 补充：`SummarizationMiddleware` 的摘要阈值经验值（4k 窗口设 3000、8k 设 6000、16k 设 12000），
 要给工具调用和系统提示留余量。
+
+### 6.12 PII 脱敏（已启用，`agent/middleware/pii.py`）
+
+📘 08 章 2.3 提到的内置中间件，课件没展开。
+
+**为什么需要**：提示词与工具结果都会发给模型供应商，还可能因 LangSmith 追踪上云。
+用户指令、文件内容里的手机号 / 邮箱 / 身份证号不该原样出去。
+
+**挂法** —— `PIIMiddleware` 的构造函数一次只接一种 `pii_type`，所以要脱敏几种就挂几个实例：
+
+```python
+PIIMiddleware("email",       strategy="redact", apply_to_input=True, apply_to_tool_results=True)
+PIIMiddleware("credit_card", strategy="redact", apply_to_input=True, apply_to_tool_results=True)
+PIIMiddleware("phone_cn",    strategy="redact", detector=PHONE_CN_PATTERN, ...)
+PIIMiddleware("id_card_cn",  strategy="redact", detector=ID_CARD_CN_PATTERN, ...)
+```
+
+**内置的 5 种类型**：`email` / `credit_card` / `ip` / `mac_address` / `url`。
+项目只用前两种 —— `url` 和 `ip` 脱敏会破坏正常信息（用户让 agent 查某个 URL 就废了）。
+
+**自定义类型要自己给 detector**（正则字符串或 callable），否则构造时直接 `ValueError`。
+
+| 类型 | 正则 | 占位符 |
+|---|---|---|
+| 手机号 | `(?<!\d)1[3-9]\d{9}(?!\d)` | `[REDACTED_PHONE_CN]` |
+| 身份证 | `(?<!\d)\d{17}[\dXx](?!\d)` | `[REDACTED_ID_CARD_CN]` |
+
+边界断言 `(?<!\d)` / `(?!\d)` 不能省 —— 否则更长数字串里的一段会被当手机号。
+实测「订单 20261103 共 1234567890 元」不会被误伤。
+
+**脱敏哪些内容**（`before_model` 钩子）：
+
+| 内容 | 处理 | 说明 |
+|---|---|---|
+| 用户指令 | 只处理**最后一条** HumanMessage | 历史里的旧指令已经进过模型了 |
+| 工具结果 | 最后一条 AIMessage 之后的**全部** ToolMessage | **文件工具读出来的内容走这条**，是主要泄露通道 |
+| 模型输出 | **不脱敏**（`apply_to_output=False`） | 模型输出多半来自用户自己的输入，用户自己知道那是什么 |
+
+**strategy 选 `redact` 不选 `mask`**：mask 只保留末尾几位（手机号是 `****5678`）——
+那几位仍是真实个人信息，照样会进供应商和 LangSmith。redact 整个替换成 `[REDACTED_EMAIL]`。
+
+**坑**
+- 🧩 **脱敏改写的是 state 里的消息**，所以落进 checkpointer 的也是脱敏后的版本 ——
+  原始 PII 不入库。这是好事，但也意味着**改脱敏策略不会回溯已存的历史**。
+- 🧩 **没检测到 PII 时中间件返回 `None`**，不改 state —— 所以它不会干扰
+  `TaskGateMiddleware` 等其他中间件对消息列表的判断。
+- 🧩 脱敏是**全局**的。四种类型一起开关，没法只脱敏手机号不脱敏邮箱。
+- 🧩 开关是 `.env` 的 `PII_MASKING`（默认 `1`）。
+  想让 agent 处理一份本来就该被它看到的通讯录时改成 `0`。
 
 ---
 
@@ -990,7 +1038,7 @@ Thread ID  ：用于唯一标识 State，LangChain 运行时会按照 thread_id 
 > This method creates the necessary tables ... and runs database migrations.
 > **It MUST be called directly by the user the first time checkpointer is used.**
 
-🧩 项目（`graph.py:290-415`）：
+🧩 项目（`graph.py:291-416`）：
 
 ```python
 conn = sqlite3.connect(path, check_same_thread=False)
@@ -1001,7 +1049,7 @@ saver.setup()          # 建表，重复执行不会重建（Create If Not Exist
 **坑**
 - 📘 09 章 24 页：`InMemorySaver()` 进程结束**或重建 Saver()** 则历史状态丢失。
 - 📘 09 章 14 页：**`InMemorySaver` 没有提供删除 API** —— 想清空某会话历史只能换 thread_id。
-- 🧩 `graph.py:402-403` 自注：「当前实现没有显式关闭 `conn` 的逻辑，长期运行时应由应用管理连接生命周期」。
+- 🧩 `graph.py:403-404` 自注：「当前实现没有显式关闭 `conn` 的逻辑，长期运行时应由应用管理连接生命周期」。
 
 ### 7.5 `SqliteSaver.from_conn_string()` 是上下文管理器（🧩 项目踩过）
 
@@ -1082,7 +1130,7 @@ class AgentContext:
     allow_write: bool = True
     notify_channel: str = "terminal"
 
-# 2. 声明：agent/graph.py:590
+# 2. 声明：agent/graph.py:598
 context_schema=AgentContext,
 
 # 3. 传入：runtime/runner.py:165
@@ -1171,7 +1219,7 @@ store.put(namespace, key, value)
 
 三个基础 API：`store.put(namespace, key, value)` / `store.get(namespace, key)` / `store.search(namespace_prefix, query=..., filter=..., limit=10)`。
 
-🧩 项目注入了 `InMemoryStore()`（`graph.py:565-569`）但**没有任何工具或中间件读写它**。
+🧩 项目注入了 `InMemoryStore()`（`graph.py:573-577`）但**没有任何工具或中间件读写它**。
 
 **坑**
 - 📘 09 章 43 页：`InMemoryStore` 每次 `put` 都创建**新 Item**（`created_at` 与 `updated_at` 始终一致）；
@@ -1269,7 +1317,7 @@ list(agent.get_state_history(config)) # → 历史快照列表
 | `async`（默认） | 每个超步末尾写主检查点，后台异步写 | 较强 |
 | `sync` | 进下一个超步之前等写完 | 最强，响应延迟最大 |
 
-**🧩 项目没显式设模式**，用默认的 `async` + `SqliteSaver`（`graph.py:290`）。
+**🧩 项目没显式设模式**，用默认的 `async` + `SqliteSaver`（`graph.py:291`）。
 
 ### 8.4 节点容错：LangGraph 的 RetryPolicy vs 项目的中间件重试
 
@@ -1290,7 +1338,7 @@ LangGraph 在**节点层**提供三种异常处理机制，执行顺序是：
 | 粒度 | 单个节点 | 整个模型调用 / 整个工具调用 |
 | 生效时机 | 节点抛异常时 | 同样，但由中间件包住 |
 | 错误消息 | 框架生成 | `ModelRetryMiddleware` / `ToolRetryMiddleware` 可定制 |
-| 项目用了吗 | ❌ | ✅ `graph.py:192` 的 `RETRY` |
+| 项目用了吗 | ❌ | ✅ `graph.py:193` 的 `RETRY` |
 
 选中间件而不是节点策略，是因为**错误消息可控** —— 工具失败时给模型一句能照做的中文说明，
 而不是 `failed after 3 attempts ... Please try again.`（见 4.7）。
@@ -1303,7 +1351,7 @@ LangGraph 在**节点层**提供三种异常处理机制，执行顺序是：
 它是**静态**的 —— 一次运行内不变、不持久化（详见 7.7）。
 
 **🧩 项目对应**：`agent/context.py` 的 `AgentContext`，
-`agent/graph.py:590` 声明、`runtime/runner.py:165` 传入。
+`agent/graph.py:598` 声明、`runtime/runner.py:165` 传入。
 `runtime.context` 可能为 `None` 是因为 context 是可选参数（见 6.9）。
 
 ### 8.6 中断与部署（项目未接）
@@ -1475,7 +1523,7 @@ def set_cli_override(name: str, value: str) -> None:
 |---|---|---|---|
 | 06 结构化输出 | `with_structured_output()` 的四种模式（Pydantic / TypedDict / JSON Schema / dataclass） | 只有手写的 `save_json` | 用 `model.with_structured_output(PydanticModel)` 让模型直接返回结构化对象，比「输出 JSON 字符串再解析」可靠得多 |
 | 07 章 7.3 | `ToolStrategy` / `ProviderStrategy` / `AutoStrategy` | 没用 `response_format` | 让 Agent 直接返回结构化对象。注意 1.x **必须显式** `ToolStrategy(Schema)` |
-| 08 章 2.x | `PIIMiddleware` / `SummarizationMiddleware` / `HumanInTheLoopMiddleware` / `ModelFallbackMiddleware` | 均未启用 | 见 6.11 |
+| 08 章 2.x | `SummarizationMiddleware` / `HumanInTheLoopMiddleware` / `ModelFallbackMiddleware` | 均未启用 | 见 6.11 |
 | 09 章 3 | 长期记忆 store | 只挂了 `InMemoryStore` 没实际用 | `store.put(namespace, key, value)` / `store.search()` |
 | 09 章 2.4 | 消息裁剪 / 删除 / 摘要 | 只做了工具结果清理 | 见 7.9 |
 | 09 章 4.1 | `dynamic_prompt` | 未实现 | 值得练一次 |
@@ -1530,8 +1578,8 @@ LANGSMITH_PROJECT=automation-agent
 | `runtime.context` 是 `None`，任务名和写权限丢了 | 把 `context` 写进了 `config` | `agent.invoke(msgs, config, context=ctx)` | 🧩 `runner.py:154` |
 | `AttributeError: 'NoneType' object has no attribute ...` | 钩子里直接访问 `runtime.context` | 用 `_ctx(runtime)` | 🧩 `custom.py:48` |
 | HTTP 400 `tool call result does not follow tool call` | 拦下工具后没补 `ToolMessage` | 逐个补 `ToolMessage(tool_call_id=tc["id"])` | 🧩 `custom.py:80` |
-| `Invalid checkpointer` | 用了 `SqliteSaver.from_conn_string()`（上下文管理器，连接会被关） | 自持 `sqlite3` 连接 | 🧩 `graph.py:352` |
-| 测试会话落进 `data/memory.sqlite` 跨次累积 | `build_agent(checkpointer=None)` 不是「不要记忆」是「用默认的」 | 测试显式传 `InMemorySaver()` | 🧩 `graph.py:547` |
+| `Invalid checkpointer` | 用了 `SqliteSaver.from_conn_string()`（上下文管理器，连接会被关） | 自持 `sqlite3` 连接 | 🧩 `graph.py:353` |
+| 测试会话落进 `data/memory.sqlite` 跨次累积 | `build_agent(checkpointer=None)` 不是「不要记忆」是「用默认的」 | 测试显式传 `InMemorySaver()` | 🧩 `graph.py:555` |
 | `DeprecationWarning` / 系统提示词改不动 | `system_prompt` 是只读 property | `request.override(system_message=...)` | 🧩 `custom.py:190` |
 | 改了提示词但模型还是原样 | `override()` 是**替换**语义 | 把原提示词拼回去 | 🧩 `custom.py:208` |
 | 中间件钩子静默不触发 | `middleware` 里传了类不是实例 | 传 `TaskGateMiddleware()` | 🧩 `custom.py:17` |
