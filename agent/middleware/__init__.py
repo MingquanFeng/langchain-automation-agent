@@ -43,6 +43,12 @@ from .custom import (
     TimingMiddleware,
 )
 
+# build_pii_middleware：
+#   按配置构造 PII 脱敏中间件列表（关闭脱敏时是空列表）。
+#
+# from .pii import build_pii_middleware
+from .pii import build_pii_middleware
+
 
 # ============================================================
 # 2. 定义通配符导出列表
@@ -65,6 +71,7 @@ __all__ = [
     "ContextInjectionMiddleware",
     "TaskGateMiddleware",
     "TimingMiddleware",
+    "build_pii_middleware",
 ]
 
 

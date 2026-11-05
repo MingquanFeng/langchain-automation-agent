@@ -124,6 +124,7 @@ from .context import AgentContext
 # 用于扩展日志、权限检查、通知等功能。
 # 具体功能取决于 custom.py 的实现。
 from .middleware.custom import CUSTOM_MIDDLEWARE
+from .middleware.pii import build_pii_middleware
 
 # Agent 可以调用的工具集合。
 # 例如文件操作、查询、通知等工具。
@@ -485,6 +486,13 @@ def build_agent(
 
         # 加入上下文清理中间件。
         CONTEXT_EDITING,
+
+        # 加入 PII 脱敏中间件。
+        #
+        # 放在自定义中间件之前 ——
+        # 先把 PII 去掉，后面几个中间件看到的就是干净内容。
+        # 脱敏开关关闭时这是空列表，展开后什么都不加。
+        *build_pii_middleware(),
 
         # 加入项目自定义中间件。
         *CUSTOM_MIDDLEWARE,
