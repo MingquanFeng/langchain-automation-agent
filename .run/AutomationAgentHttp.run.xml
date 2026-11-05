@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Chat REPL" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="Automation Agent (HTTP only)" type="PythonConfigurationType" factoryName="Python">
     <module name="automation_agent" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
@@ -13,7 +13,7 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <option name="SCRIPT_NAME" value="runtime" />
-    <option name="PARAMETERS" value="chat" />
+    <option name="PARAMETERS" value="--no-schedule" />
     <option name="MODULE_MODE" value="true" />
     <option name="REDIRECT_INPUT" value="false" />
     <option name="INPUT_FILE" value="" />
