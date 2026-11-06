@@ -280,7 +280,7 @@ HTTP 侧退成探活与定时任务管理。
 | 1 | 事件模型（`BaseEvent` + 9 种事件）+ 归一化层 | P0 | ✅ 已完成（`runtime/events.py`） |
 | 2 | `EventBridgeMiddleware`（`wrap_tool_call` 发 tool.start/end/error） | P0 | ✅ 已完成（`agent/middleware/events.py`） |
 | 3 | 同步流消费器 + 线程桥接 + 有界队列背压 | P0 | ✅ 已完成（`runtime/consumer.py`） |
-| 4 | Run Manager（run_id / cancel_event / start / cancel / finish） | P0 | |
+| 4 | Run Manager（run_id / cancel_event / start / cancel / finish） | P0 | ✅ 已完成（`runtime/runs.py`） |
 | 5 | WebSocket 端点 `/ws`（收 run.start / cancel，单连接单任务） | P0 | |
 | 6 | 异常处理 + 连接断开清理 | P0 | |
 | 7 | 单元测试 + 集成测试 | P0 | |

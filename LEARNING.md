@@ -142,6 +142,7 @@
 | `runtime/server.py:123` `/health` | 探活 + 调度器开关状态。**HTTP 层现在只管定时任务与状态查询，不提供触发 Agent 的入口** —— 触发走定时任务 / Python API / 桌面壳 |
 | `runtime/tasks.py:109` `TASKS` | 改这个文件就改 Agent 每天自动做什么。注意它是**内存字典，不落盘** |
 | `runtime/consumer.py` `StreamConsumer` | 桌面版阶段 3。在工作线程里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压 | — |
+| `runtime/runs.py` `RunManager` | 桌面版阶段 4。run 的生命周期。**run_id 是一次执行的身份，thread_id 是会话的记忆隔离键** | — |
 
 ---
 

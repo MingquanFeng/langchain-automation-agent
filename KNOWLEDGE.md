@@ -1608,6 +1608,50 @@ consumer.run(instruction, ctx, thread_id)   # 阻塞，在工作线程里跑
 **取消是协作式的**：置位 `cancel_event` 后，消费循环在**下一次迭代**时检查到并 break ——
 正在跑的那一步（模型调用或工具执行）会做完。
 
+### 9.7 Run Manager（`runtime/runs.py`）
+
+🧩 项目自研，桌面版改造计划的阶段 4。职责单一：**run 的生命周期**，不碰 agent、不碰事件格式。
+
+**🧩 run_id 与 thread_id 是两回事，混了记忆隔离就出错**：
+
+| | 含义 | 生命周期 | 生成规则 |
+|---|---|---|---|
+| `run_id` | 一次执行的标识 | 只在本次执行内有效，结束即注销 | `run-{uuid8}` |
+| `thread_id` | 会话标识，记忆的隔离键 | 跨多次执行复用 | 客户端指定；不指定则一次性（`task-{uuid8}`） |
+
+一个会话里可以连续跑多个 run —— 各自独立的 run_id 和取消标志，共享同一份记忆。
+这是桌面 Agent 的常态：用户在同一个对话里连问三件事。
+
+**单连接单任务**：每个连接（owner）同时只允许一个活跃 run。
+第二次 `start` 抛 `RunBusyError`，由调用方回一条 `run.error` 说明「上一轮还在运行」——
+**不静默取消旧的**，因为静默取消会让用户以为自己看到的是新一轮的结果。
+
+**接口**：
+
+| 方法 | 做什么 |
+|---|---|
+| `start(...)` | 分配 run_id、建 cancel_event、登记、起后台任务 |
+| `get(run_id)` | 查活跃的 run |
+| `cancel(run_id)` | 置位 cancel_event，返回是否命中 |
+| `finish(run_id)` | 注销（幂等） |
+| `active()` / `active_for(owner)` | 列活跃的 run |
+
+**🧩 取消是协作式的**：
+置位 `cancel_event` 后，消费循环在**下一次迭代**时检查到并 break ——
+正在跑的那一步（模型调用或工具执行）**会做完**。
+取消信号最终体现为一条 `run.cancelled` 事件（不是 `run.end`），
+客户端据此把界面从「运行中」改到「已取消」。
+
+**这跟 `interrupt()`（暂停等输入再恢复）是两件事** —— 后者要设计暂停点并处理检查点恢复。
+桌面版的「取消」不需要它。
+
+**坑**
+- 🧩 `start()` 里的后台任务是 `loop.create_task(asyncio.to_thread(consumer.run, ...))` ——
+  消费器是同步的，要放在工作线程里，不能占住事件循环。
+- 🧩 任务跑完会**自动注销**（done callback 调 `finish`），不用手动调。
+- 🧩 `RunBusyError` 要由调用方捕获并转成 `run.error` 事件 ——
+  Run Manager 自己不发事件，它不碰事件格式。
+
 ---
 
 ## 十、课件里有、项目还没用的
