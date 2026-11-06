@@ -157,6 +157,11 @@ class ToolError(BaseEvent):
     # 错误信息。
     message: str
 
+    # 执行耗时，毫秒。
+    #
+    # 失败时也要给 —— 用户关心的是「等了多久才失败」。
+    duration_ms: int | None = None
+
 
 class RunProgress(BaseEvent):
     """任务进度。

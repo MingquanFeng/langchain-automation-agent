@@ -124,6 +124,7 @@ from .context import AgentContext
 # 用于扩展日志、权限检查、通知等功能。
 # 具体功能取决于 custom.py 的实现。
 from .middleware.custom import CUSTOM_MIDDLEWARE
+from .middleware.events import EventBridgeMiddleware
 from .middleware.pii import build_pii_middleware
 
 # Agent 可以调用的工具集合。
@@ -469,6 +470,16 @@ def build_agent(
     # --------------------------------------------------------
 
     middleware = [
+        # 事件桥接放最外层 ——
+        # 它要包住整个「工具调用 + 重试」过程，
+        # 这样客户端看到的是「一次工具调用」而不是「一次重试」。
+        #
+        # wrap-style 钩子是洋葱结构：第一个定义的最外层。
+        # 放在 ToolRetryMiddleware 里面的话，
+        # 一个失败的工具会重试 3 次、发 3 条 tool.error —— 客户端看到的是噪音。
+        # 放在外面则只有一对事件，duration_ms 也是用户真正等待的时间。
+        EventBridgeMiddleware(),
+
         # *LIMITS：
         # 使用 * 解包列表中的元素。
         #

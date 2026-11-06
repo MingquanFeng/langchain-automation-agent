@@ -268,6 +268,9 @@ class TimingMiddleware(AgentMiddleware):
 #   中间件栈是 LIMITS → RETRY → TODO → CONTEXT_EDITING → CUSTOM_MIDDLEWARE。
 #   放在最后意味着它能看到前面所有中间件处理过的状态，
 #   比如只读闸门拦截后，统计中间件统计到的就是被拦之后的结果。
+#
+# 注意：EventBridgeMiddleware 不在这个列表里 ——
+#   它要放在重试中间件的外层，所以单独在 graph.py 的栈首装配。
 CUSTOM_MIDDLEWARE = [
     TaskGateMiddleware(),
     ContextInjectionMiddleware(),

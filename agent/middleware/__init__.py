@@ -43,6 +43,12 @@ from .custom import (
     TimingMiddleware,
 )
 
+# EventBridgeMiddleware：
+#   用 custom 流模式把工具执行过程发成事件。
+#
+# from .events import EventBridgeMiddleware
+from .events import EventBridgeMiddleware
+
 # build_pii_middleware：
 #   按配置构造 PII 脱敏中间件列表（关闭脱敏时是空列表）。
 #
@@ -69,6 +75,7 @@ from .pii import build_pii_middleware
 __all__ = [
     "CUSTOM_MIDDLEWARE",
     "ContextInjectionMiddleware",
+    "EventBridgeMiddleware",
     "TaskGateMiddleware",
     "TimingMiddleware",
     "build_pii_middleware",
