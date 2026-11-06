@@ -1557,6 +1557,57 @@ def set_cli_override(name: str, value: str) -> None:
 - 🧩 `AIMessageChunk` 的 `content` 可能是内容块列表（多模态），非字符串形态要直接跳过。
 - 🧩 一次 run 一个 `StreamNormalizer` 实例 —— `ThinkFilter` 的缓冲跨 chunk 累积，换实例等于清零。
 
+### 9.6 同步流消费器（`runtime/consumer.py`）
+
+🧩 项目自研，桌面版改造计划的阶段 3。
+
+**它解决什么**：`agent.stream()` 是同步的，要跑在**工作线程**里（不能占住事件循环）；
+而事件队列是 asyncio 的，跨线程投递要显式处理。消费器把这两件事接起来。
+
+```python
+consumer = StreamConsumer(
+    agent=agent, run_id=run_id, queue=queue, loop=loop, cancel_event=cancel_event,
+)
+consumer.run(instruction, ctx, thread_id)   # 阻塞，在工作线程里跑
+```
+
+**用的流模式是三种**：`["messages", "values", "custom"]`
+- `messages` —— 模型的增量输出（阶段 1 的归一化层处理）
+- `custom` —— 中间件发的工具事件（阶段 2 的 EventBridgeMiddleware）
+- `values` —— 每步的完整状态，**消费循环结束时用来取最终答案与消息条数**
+
+**🧩 背压是两层的，缺一个内存就会被吃光**：
+
+| 层 | 管什么 | 在哪 |
+|---|---|---|
+| 队列容量 `maxsize` | 已入队的事件 | `asyncio.Queue` |
+| 在途上限 `max_pending` | 已投递但还没入队的事件 | 消费器自己计数 |
+
+在途达到上限时生产者等，等事件循环把队列消化掉、计数降下来。
+
+**🧩 千万别用 `run_coroutine_threadsafe(...).result()` 来等投递完成** ——
+实测会**永久阻塞**：那个 future 靠事件循环的回调来 resolve，
+事件循环在 resolve 之前关闭（进程退出、连接关闭）时 future 永远不 resolve，
+事件其实已经 put 进队列了，生产者却再也回不来。
+消费线程卡死的表现是「事件 0.03 秒就发完了，线程 8 秒还不退出」。
+
+**🧩 模型调用失败不会逃出消费循环**：
+`ModelRetryMiddleware` 的默认 `on_failure="continue"` 会把重试耗尽后的失败
+包成一条 AIMessage 继续跑 —— 图本身是「成功」跑完的。
+所以现状是：模型失败 → 消费循环正常结束 → 发 `run.end`，错误信息出现在 `output` 里。
+`run.error` 只在**不被任何中间件兜住**的异常时出现。
+
+**异常路径必须闭合**（三种退出各有一条结束事件，客户端才不会一直转圈）：
+
+| 情况 | 发什么 |
+|---|---|
+| 正常跑完 | `run.end` |
+| 收到取消（`cancel_event` 置位） | `run.cancelled`（不是 `run.end`） |
+| 不被兜住的异常 | `run.error` |
+
+**取消是协作式的**：置位 `cancel_event` 后，消费循环在**下一次迭代**时检查到并 break ——
+正在跑的那一步（模型调用或工具执行）会做完。
+
 ---
 
 ## 十、课件里有、项目还没用的

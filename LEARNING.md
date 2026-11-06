@@ -133,7 +133,7 @@
 
 ## 主线 5：运行时外壳（课件未覆盖，自研部分）
 
-**读源码**：`runtime/runner.py` → `runtime/scheduler.py` → `runtime/server.py` → `runtime/tasks.py`
+**读源码**：`runtime/runner.py` → `runtime/scheduler.py` → `runtime/server.py` → `runtime/tasks.py` → `runtime/consumer.py`（桌面版事件流）
 
 | 位置 | 看什么 |
 |---|---|
@@ -141,6 +141,7 @@
 | `runtime/scheduler.py:141` | `CronTrigger.from_crontab` —— 5 段 cron，按 `SCHEDULER_TIMEZONE` 解释。**LangGraph 1.x 本地没有内置 cron**，`langgraph_sdk` 也没导出，那是云端 Platform 的能力 |
 | `runtime/server.py:123` `/health` | 探活 + 调度器开关状态。**HTTP 层现在只管定时任务与状态查询，不提供触发 Agent 的入口** —— 触发走定时任务 / Python API / 桌面壳 |
 | `runtime/tasks.py:109` `TASKS` | 改这个文件就改 Agent 每天自动做什么。注意它是**内存字典，不落盘** |
+| `runtime/consumer.py` `StreamConsumer` | 桌面版阶段 3。在工作线程里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压 | — |
 
 ---
 

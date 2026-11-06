@@ -143,7 +143,8 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 - `runner.py` — 唯一的 Agent 调用入口，调度器和 Python 调用方都走它，保证行为一致。`_AGENT` 单例复用，保留 checkpointer 里的记忆。
 - `scheduler.py` — APScheduler 封装。**LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力），所以定时触发必须自己接 APScheduler。cron 表达式按 `SCHEDULER_TIMEZONE` 解释，用 `CronTrigger.from_crontab`，即标准 5 段格式。
 - `server.py` — FastAPI。**只管定时任务增删查 + 调度状态 + 探活**，不触发 Agent。
-- `events.py` — 事件模型 + 归一化层。`BaseEvent` 加 9 种事件构成桌面版的事件协议；`StreamNormalizer` 把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件。**项目现在还没有流式消费者** —— 阶段 3 的消费器会驱动它。
+- `events.py` — 事件模型 + 归一化层。`BaseEvent` 加 9 种事件构成桌面版的事件协议；`StreamNormalizer` 把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件。
+- `consumer.py` — 同步流消费器（桌面版阶段 3）。在**工作线程**里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压：队列容量管「已入队」、`max_pending` 管「在途未入队」。**不要改成等 `future.result()`** —— 事件循环在 resolve 前关闭时那会永久阻塞。
 - `tasks.py` — 定时任务表。改这个文件就改 Agent 每天自动做什么。**注意 `TASKS` 是模块级内存字典，不落盘** —— `POST /tasks` 动态加的任务进程重启即消失，只有改代码里的 `TASKS` 列表才是持久定义。
 - `__main__.py` — CLI 入口，唯一子命令 `serve`（默认，起 HTTP 服务 + 可选调度器）。`--no-schedule` / `--reload` / `--host` / `--port` 都在这里解析。**它同时是陷阱 10 的落地文件** —— 调度开关必须在 `import runtime.server` 之前生效，顺序不能改。
 

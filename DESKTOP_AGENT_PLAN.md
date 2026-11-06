@@ -279,7 +279,7 @@ HTTP 侧退成探活与定时任务管理。
 |---|---|---|---|
 | 1 | 事件模型（`BaseEvent` + 9 种事件）+ 归一化层 | P0 | ✅ 已完成（`runtime/events.py`） |
 | 2 | `EventBridgeMiddleware`（`wrap_tool_call` 发 tool.start/end/error） | P0 | ✅ 已完成（`agent/middleware/events.py`） |
-| 3 | 同步流消费器 + 线程桥接 + 有界队列背压 | P0 | |
+| 3 | 同步流消费器 + 线程桥接 + 有界队列背压 | P0 | ✅ 已完成（`runtime/consumer.py`） |
 | 4 | Run Manager（run_id / cancel_event / start / cancel / finish） | P0 | |
 | 5 | WebSocket 端点 `/ws`（收 run.start / cancel，单连接单任务） | P0 | |
 | 6 | 异常处理 + 连接断开清理 | P0 | |
@@ -287,6 +287,38 @@ HTTP 侧退成探活与定时任务管理。
 | 8 | 文档同步 | P1 | |
 
 阶段 3 和 4 有依赖（消费器要用 cancel_event），其余可独立推进。
+
+### 阶段 3 的实现与本文的两处出入
+
+**一、背压不是「等 put 完成」，而是「在途计数」。**
+
+本文原方案写的是 `loop.call_soon_threadsafe(lambda: asyncio.ensure_future(queue.put(event)))`，
+它不阻塞生产者 —— 队列满了待投递的协程会一直挂着，事件确实没丢，但内存照涨，
+跟「有界队列防堆积」的本意相反。
+
+改成用 `asyncio.run_coroutine_threadsafe(...).result()` 能真正背压，
+但**实测会永久阻塞**：那个 future 靠事件循环的回调来 resolve，
+事件循环在 resolve 之前关闭（进程退出、连接关闭）时，future 永远不 resolve ——
+事件其实已经 put 进队列了，生产者却再也回不来。实测表现为消费线程卡死 8 秒。
+
+现在的实现是两层上限：
+- 队列容量（`asyncio.Queue` 的 `maxsize`）管「已入队」
+- 在途上限（`max_pending`）管「已投递未入队」
+
+生产者只在计数上等，不等任何 future，事件循环关闭时不会卡死。
+
+**二、模型调用失败不会逃出消费循环。**
+
+本文的「异常路径必须闭合」一节写的是「模型调用失败 → 异常逃出消费循环 → `run.error`」。
+实测不成立：`ModelRetryMiddleware` 的默认 `on_failure="continue"`
+会把重试耗尽后的失败包成一条 AIMessage 继续跑 —— 图本身是「成功」跑完的。
+
+所以现状是：
+- 模型失败 → 包成一条 AIMessage → 消费循环正常结束 → 发 `run.end`，错误信息出现在 `output` 里
+- `run.error` 只在**不被任何中间件兜住**的异常时出现（图崩溃、checkpointer 出错等）
+
+要让模型失败也触发 `run.error`，得把 `agent/graph.py` 里 `ModelRetryMiddleware` 的
+`on_failure` 改成 `"error"` —— 那是行为变更，会影响 REPL 与 HTTP，等要做的时候再决定。
 阶段 6 的异常处理分散在 3 和 5 里，单独列出来是因为它最容易漏 —— 必须在每条退出路径上
 都保证发出一条结束事件。
 
