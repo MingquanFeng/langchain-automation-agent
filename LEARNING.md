@@ -32,8 +32,8 @@
 
 | 位置 | 看什么 | 对应课件 |
 |---|---|---|
-| `agent/graph.py:423` `build_agent()` | 唯一创建 Agent 的地方。`create_agent(model, tools, system_prompt, middleware, checkpointer, store, context_schema, name)` | 07 章 1.4.2「全新的调用」 |
-| `agent/graph.py:642` `SYSTEM_PROMPT` | 系统提示词就是普通字符串，Agent 的一切行为从它开始 | 07 章 6 |
+| `agent/graph.py:424` `build_agent()` | 唯一创建 Agent 的地方。`create_agent(model, tools, system_prompt, middleware, checkpointer, store, context_schema, name)` | 07 章 1.4.2「全新的调用」 |
+| `agent/graph.py:653` `SYSTEM_PROMPT` | 系统提示词就是普通字符串，Agent 的一切行为从它开始 | 07 章 6 |
 | `agent/config.py:187` `ModelConfig.build()` | `init_chat_model(model=..., model_provider=...)`。换模型只改 `.env` 三行，见 `CLAUDE.md` 的「换模型须知」 | 02 章 2.2「兼容用法」 |
 | `runtime/runner.py:166` | `HumanMessage` 构造输入 | 04 章 1.5.2 |
 
@@ -67,16 +67,16 @@
 
 ## 主线 3：中间件（课件 08 章）—— 本项目精华
 
-**读源码**：`agent/graph.py:471-499`（内置栈的组装处）→ `agent/middleware/custom.py`（三个自定义）→ `agent/middleware/pii.py`（脱敏）
+**读源码**：`agent/graph.py:472-510`（内置栈的组装处）→ `agent/middleware/custom.py`（三个自定义）→ `agent/middleware/pii.py`（脱敏）
 
-内置中间件栈：
+内置中间件栈（事件桥接在最外层，包住整个「工具调用 + 重试」）：
 
 | 位置 | 中间件 | 作用 | 对应课件 |
 |---|---|---|---|
-| `agent/graph.py:250` `LIMITS` | `ModelCallLimitMiddleware` / `ToolCallLimitMiddleware` | **最前**，先挡住跑飞，防止无人值守时烧钱 | 08 章 3.1 / 3.2 |
-| `agent/graph.py:193` `RETRY` | `ModelRetryMiddleware` / `ToolRetryMiddleware` | 模型/工具失败时重试 | 08 章 3.6 / 3.5 |
-| `agent/graph.py:627` `TODO` | `TodoListMiddleware` | 注入 `write_todos` 工具，让模型拆解多步任务 | 08 章 2.4 |
-| `agent/graph.py:154` `CONTEXT_EDITING` | `ContextEditingMiddleware(edits=[ClearToolUsesEdit(trigger=120_000, keep=3)])` | 上下文超限时清理旧工具结果 | 08 章 3.8 |
+| `agent/graph.py:251` `LIMITS` | `ModelCallLimitMiddleware` / `ToolCallLimitMiddleware` | **最前**，先挡住跑飞，防止无人值守时烧钱 | 08 章 3.1 / 3.2 |
+| `agent/graph.py:194` `RETRY` | `ModelRetryMiddleware` / `ToolRetryMiddleware` | 模型/工具失败时重试 | 08 章 3.6 / 3.5 |
+| `agent/graph.py:638` `TODO` | `TodoListMiddleware` | 注入 `write_todos` 工具，让模型拆解多步任务 | 08 章 2.4 |
+| `agent/graph.py:155` `CONTEXT_EDITING` | `ContextEditingMiddleware(edits=[ClearToolUsesEdit(trigger=120_000, keep=3)])` | 上下文超限时清理旧工具结果 | 08 章 3.8 |
 | `agent/middleware/custom.py:271` `CUSTOM_MIDDLEWARE` | TaskGate / ContextInjection / Timing | **最后**，能看到前面所有中间件的结果 | 08 章 5 |
 | `agent/middleware/pii.py` | PII 脱敏。邮箱 / 信用卡 / 手机号 / 身份证号，`redact` 策略，开关 `PII_MASKING` | 放在自定义中间件**之前** —— 先脱敏，后面几个看到的就是干净内容 | 08 章 2.3 |
 
@@ -103,12 +103,12 @@
 
 ## 主线 4：上下文与记忆（课件 09 章）
 
-**读源码**：`agent/context.py` → `agent/graph.py:291` `_build_checkpointer()` → `runtime/runner.py:148`
+**读源码**：`agent/context.py` → `agent/graph.py:292` `_build_checkpointer()` → `runtime/runner.py:148`
 
 | 位置 | 看什么 | 对应课件 |
 |---|---|---|
 | `context.py` `AgentContext` | 每次调用的**静态**运行时配置 | 09 章 4「Static runtime Context」 |
-| `agent/graph.py:291` | 记忆后端二选一：`sqlite`（`data/memory.sqlite`，进程级持久）或 `memory`（重启即失） | 09 章 2.1 / 2.2 / 2.3 |
+| `agent/graph.py:292` | 记忆后端二选一：`sqlite`（`data/memory.sqlite`，进程级持久）或 `memory`（重启即失） | 09 章 2.1 / 2.2 / 2.3 |
 | `runtime/runner.py:148` | thread_id 决定记忆隔离 | 09 章 2.1.4「工作原理」 |
 | `agent/middleware/custom.py:48` `_ctx()` | `runtime.context` **可能是 None**，所有钩子都要兜底 | 09 章 4.1 |
 
@@ -155,8 +155,8 @@ LangChain 课件讲的是「怎么用 `create_agent`」，这套课件讲的是�
 
 | 位置 | 看什么 | 对应课件 |
 |---|---|---|
-| `agent/graph.py:423` `build_agent()` | `create_agent()` 返回 `CompiledStateGraph`（底层 Pregel）。项目用的每一张图都是它画的 | 01 章 2.2「编译状态图」 |
-| `agent/graph.py:291` `_build_checkpointer()` | 短期记忆：`SqliteSaver` / `InMemorySaver` 二选一 | 03 章 6.2「启用可恢复执行」/ 7.1 |
+| `agent/graph.py:424` `build_agent()` | `create_agent()` 返回 `CompiledStateGraph`（底层 Pregel）。项目用的每一张图都是它画的 | 01 章 2.2「编译状态图」 |
+| `agent/graph.py:292` `_build_checkpointer()` | 短期记忆：`SqliteSaver` / `InMemorySaver` 二选一 | 03 章 6.2「启用可恢复执行」/ 7.1 |
 | `agent/graph.py:102` `InMemoryStore` | 长期记忆：跨 thread 的键值存储。**目前只挂了没用**（全项目没有 `store.put`/`get`/`search` 调用） | 03 章 7.2「长期记忆」 |
 | `agent/middleware/custom.py:38` `Runtime` | `runtime.context` 就是 LangGraph 的运行时上下文 | 03 章 7.3「运行时上下文」 |
 | `agent/middleware/custom.py:98` `after_model` | 钩子插在 `model` 与 `tools` **两个节点之间**，所以它能拦下写工具 | 02 章 4.2「分支结构」 |

@@ -53,7 +53,7 @@
     │
     │   ┌─────────────────────────────────────────────┐
     │   │  中间件栈（洋葱式，见第六章）                 │
-    │   │  LIMITS → RETRY → TODO → CONTEXT_EDITING    │
+    │   │  事件桥接 → LIMITS → RETRY → TODO → 清理 → PII │
     │   │        → CUSTOM_MIDDLEWARE                  │
     │   └─────────────────────────────────────────────┘
         │
@@ -213,7 +213,7 @@ prompt = chat_template.invoke({"name": "小明", "user_input": "你叫什么名�
 ```
 
 **项目里怎么用**：**完全没用**。全项目零 `ChatPromptTemplate` / `PromptTemplate` 引用。
-系统的提示词是纯字符串常量 `agent/graph.py:642`，需要随运行时变化的内容由中间件在调用前改写请求（见 6.8）。
+系统的提示词是纯字符串常量 `agent/graph.py:653`，需要随运行时变化的内容由中间件在调用前改写请求（见 6.8）。
 
 **为什么这样可行**：📘 04 章说纯字符串拼接的缺点是「可读性差、不易维护、无变量校验」——
 但项目的提示词里**根本没有变量**（任务名、触发方式、写权限是运行时动态追加的，不是模板占位符）。
@@ -249,7 +249,7 @@ checkpointer 自动完成「读历史 → 追加 → 调模型 → 存历史」�
 4. 把结果包成 ToolMessage 回灌，模型据此生成最终回答
 ```
 
-**项目里怎么用**：项目不手写这个循环，交给 `create_agent`（`agent/graph.py:505`）。
+**项目里怎么用**：项目不手写这个循环，交给 `create_agent`（`agent/graph.py:516`）。
 只在**闸门拦截**这一处手工构造 ToolMessage（`custom.py:134`）。
 
 ### 4.2 `@tool` 装饰器
@@ -447,7 +447,7 @@ def _resolve(path: str) -> Path:
 > ⚠️ **常见误引**：「工具数量 2-5 个最佳」这句话在 **07 章**（📘 07 章 P21「只给 Agent 需要的工具，工具太多会混淆。一般 2-5 个工具最佳」），**不在 05 章**。
 > 按这条标准，本项目 8 个工具偏多，模型选错工具的概率会上升。
 
-**🧩 项目自注的补充**（`graph.py:224-233`），课件没讲但很重要：
+**🧩 项目自注的补充**（`graph.py:225-234`），课件没讲但很重要：
 > 对发送消息、修改文件、写入数据库等**有副作用的工具，自动重试可能造成重复操作**。
 > 第一次发送消息实际上成功，但网络超时导致客户端认为失败，重试后可能再发一次。
 
@@ -486,7 +486,7 @@ print(type(agent))
 # <class 'langgraph.graph.state.CompiledStateGraph'>
 ```
 
-**🧩 项目实际用到 8 个参数**（`agent/graph.py:505-607`，全项目唯一的 `create_agent` 调用点）：
+**🧩 项目实际用到 8 个参数**（`agent/graph.py:516-618`，全项目唯一的 `create_agent` 调用点）：
 
 ```python
 return create_agent(
@@ -536,7 +536,7 @@ return create_agent(
 
 📘 07 章 P28-30：可以传字符串，也可以传 `SystemMessage` 对象。三条建议：明确角色、定义输出格式、说明何时使用工具。
 
-🧩 项目（`graph.py:642-651`）：
+🧩 项目（`graph.py:653-662`）：
 
 ```python
 SYSTEM_PROMPT = """你是一个自动化日常事务助手。
@@ -551,7 +551,7 @@ SYSTEM_PROMPT = """你是一个自动化日常事务助手。
 """
 ```
 
-**🧩 项目自己写明的局限**（`graph.py:653-669`）：
+**🧩 项目自己写明的局限**（`graph.py:664-680`）：
 > 提示词属于模型行为约束，**不能代替程序级权限控制和错误处理**。
 > 路径约束要在文件工具实现、`allow_write` 要在写工具里检查。
 
@@ -731,7 +731,7 @@ Ai Message:    你好啊！   -> wrap_model-after-3 <-  -> wrap_model-after-2 <-
                  -> after_model-3 <-  -> after_model-2 <-  -> after_model-1 <-
 ```
 
-**🧩 项目的中间件栈**（`graph.py:471-499`）：
+**🧩 项目的中间件栈**（`graph.py`）：
 
 ```python
 middleware = [
@@ -749,7 +749,7 @@ middleware = [
 （比如只读闸门拦截后，统计中间件统计到的就是被拦之后的结果）。
 
 **坑**
-- 🧩 `graph.py:276-284` 自注：**中间件的排列顺序可能影响重试与调用次数统计之间的关系** —— 重试会额外产生模型/工具调用。
+- 🧩 `graph.py:277-285` 自注：**中间件的排列顺序可能影响重试与调用次数统计之间的关系** —— 重试会额外产生模型/工具调用。
 - 🧩 `middleware` 必须是**扁平列表**，项目用 `*LIMITS` / `*RETRY` 解包。写 `middleware=[LIMITS, RETRY]` 会塞进两个列表对象。
 
 ### 6.4 Node-style vs Wrap-style 怎么选
@@ -919,7 +919,7 @@ def _ctx(runtime: Runtime) -> AgentContext:      # agent/middleware/custom.py:48
 - 📘 08 章 3.2：`exit_behavior` 三种：`error` / `end` / `continue`（**默认**）。🧩 项目没显式设，靠 `thread_limit=50` 兜底 ——
   默认 `continue` 在模型能力不足时**可能死循环**。
 - 📘 08 章 3.5：**`max_retries` 不含首次调用** —— 课件注释写明「一共最多调 1 + 6 = 7 次」。
-- 🧩 `graph.py:216-220`：`on_failure="continue"` **不保证模型一定会向用户报告失败**。
+- 🧩 `graph.py:217-221`：`on_failure="continue"` **不保证模型一定会向用户报告失败**。
 - 📘 08 章 2.4：`TodoListMiddleware` **只是提供工具，不保证模型一定先拆解任务**（课件 2.4.2 给了决策树）。
 - 📘 08 章 3.8：`ContextEditingMiddleware` **不会更改持久化的消息列表**，所以验证效果要看 `usage_metadata` 而不是看 messages。
   🧩 `clear_tool_inputs` 这个参数课件未列出，是项目自用的扩展项。
@@ -984,6 +984,48 @@ PIIMiddleware("id_card_cn",  strategy="redact", detector=ID_CARD_CN_PATTERN, ...
 - 🧩 开关是 `.env` 的 `PII_MASKING`（默认 `1`）。
   想让 agent 处理一份本来就该被它看到的通讯录时改成 `0`。
 
+### 6.13 事件桥接（`agent/middleware/events.py`）
+
+📘 08 章 5.3 的 wrap-style 钩子。桌面版的事件源。
+
+**它解决什么**：`messages` 流里只有模型的输出和工具结果，没有「工具什么时候开始、
+跑了多久、成功还是失败」。桌面版的工具卡片需要这些，所以用 `wrap_tool_call`
+包住工具执行，前后各发一条 `custom` 事件。
+
+| 事件 | 时机 | 字段 |
+|---|---|---|
+| `tool.start` | 调用前 | `name` / `call_id` / `args` |
+| `tool.end` | 成功返回后 | `name` / `call_id` / `ok` / `duration_ms` / `result_preview` |
+| `tool.error` | 失败后 | `name` / `call_id` / `message` / `duration_ms` |
+
+**8 个工具函数一行都不用改** —— 事件全部从中间件这一层发出去。
+
+**装配在中间件栈的最外层**（`agent/graph.py` 的 `middleware` 列表第一项）。
+wrap-style 钩子是洋葱结构，第一个定义的最外层，所以它包住的是
+**「工具调用 + 重试」整体**：
+
+- 一次工具调用只发一对事件，不会因为重试 3 次发 3 条 error；
+- `duration_ms` 是用户真正等待的时间（含重试）。
+
+**🧩 失败有两种形态，两种都要处理**：
+
+| 形态 | 什么时候 | 怎么判 |
+|---|---|---|
+| handler 直接抛异常 | 没有重试中间件兜着时 | `except` 捕获 → 发 tool.error → **继续往外抛**（中间件不吞异常） |
+| 正常返回但 `status="error"` | 项目常态：`ToolRetryMiddleware` 的 `on_failure="continue"` 把重试耗尽后的失败包成 ToolMessage | 检查 `result.status` |
+
+只处理第一种会**漏报失败**（在项目里失败走的是第二条路）；
+只处理第二种会**误报成功**。
+
+**坑**
+- 🧩 `get_stream_writer()` 只能在图的执行上下文里调用，外面调会抛
+  `RuntimeError: Called get_config outside of a runnable context`。
+  取 writer 的地方必须 try/except 兜底 —— 发不出去一个事件不该搞崩整个调用。
+- 🧩 `run_id` 由归一化层统一盖上，中间件不用管。
+- 🧩 只读闸门拦下写工具时工具**根本没执行**，所以不会有 tool.start / tool.end
+  —— 没跑的工具不该有执行事件。
+- 🧩 `result_preview` 截断到 500 字符：工具结果可能几百行，完整塞进事件会撑爆界面。
+
 ---
 
 ## 七、上下文与记忆（09 章）
@@ -1038,7 +1080,7 @@ Thread ID  ：用于唯一标识 State，LangChain 运行时会按照 thread_id 
 > This method creates the necessary tables ... and runs database migrations.
 > **It MUST be called directly by the user the first time checkpointer is used.**
 
-🧩 项目（`graph.py:291-416`）：
+🧩 项目（`graph.py:292-417`）：
 
 ```python
 conn = sqlite3.connect(path, check_same_thread=False)
@@ -1049,7 +1091,7 @@ saver.setup()          # 建表，重复执行不会重建（Create If Not Exist
 **坑**
 - 📘 09 章 24 页：`InMemorySaver()` 进程结束**或重建 Saver()** 则历史状态丢失。
 - 📘 09 章 14 页：**`InMemorySaver` 没有提供删除 API** —— 想清空某会话历史只能换 thread_id。
-- 🧩 `graph.py:403-404` 自注：「当前实现没有显式关闭 `conn` 的逻辑，长期运行时应由应用管理连接生命周期」。
+- 🧩 `graph.py:404-405` 自注：「当前实现没有显式关闭 `conn` 的逻辑，长期运行时应由应用管理连接生命周期」。
 
 ### 7.5 `SqliteSaver.from_conn_string()` 是上下文管理器（🧩 项目踩过）
 
@@ -1130,7 +1172,7 @@ class AgentContext:
     allow_write: bool = True
     notify_channel: str = "terminal"
 
-# 2. 声明：agent/graph.py:598
+# 2. 声明：agent/graph.py:609
 context_schema=AgentContext,
 
 # 3. 传入：runtime/runner.py:165
@@ -1219,7 +1261,7 @@ store.put(namespace, key, value)
 
 三个基础 API：`store.put(namespace, key, value)` / `store.get(namespace, key)` / `store.search(namespace_prefix, query=..., filter=..., limit=10)`。
 
-🧩 项目注入了 `InMemoryStore()`（`graph.py:573-577`）但**没有任何工具或中间件读写它**。
+🧩 项目注入了 `InMemoryStore()`（`graph.py:584-588`）但**没有任何工具或中间件读写它**。
 
 **坑**
 - 📘 09 章 43 页：`InMemoryStore` 每次 `put` 都创建**新 Item**（`created_at` 与 `updated_at` 始终一致）；
@@ -1317,7 +1359,7 @@ list(agent.get_state_history(config)) # → 历史快照列表
 | `async`（默认） | 每个超步末尾写主检查点，后台异步写 | 较强 |
 | `sync` | 进下一个超步之前等写完 | 最强，响应延迟最大 |
 
-**🧩 项目没显式设模式**，用默认的 `async` + `SqliteSaver`（`graph.py:291`）。
+**🧩 项目没显式设模式**，用默认的 `async` + `SqliteSaver`（`graph.py:292`）。
 
 ### 8.4 节点容错：LangGraph 的 RetryPolicy vs 项目的中间件重试
 
@@ -1338,7 +1380,7 @@ LangGraph 在**节点层**提供三种异常处理机制，执行顺序是：
 | 粒度 | 单个节点 | 整个模型调用 / 整个工具调用 |
 | 生效时机 | 节点抛异常时 | 同样，但由中间件包住 |
 | 错误消息 | 框架生成 | `ModelRetryMiddleware` / `ToolRetryMiddleware` 可定制 |
-| 项目用了吗 | ❌ | ✅ `graph.py:193` 的 `RETRY` |
+| 项目用了吗 | ❌ | ✅ `graph.py:194` 的 `RETRY` |
 
 选中间件而不是节点策略，是因为**错误消息可控** —— 工具失败时给模型一句能照做的中文说明，
 而不是 `failed after 3 attempts ... Please try again.`（见 4.7）。
@@ -1351,7 +1393,7 @@ LangGraph 在**节点层**提供三种异常处理机制，执行顺序是：
 它是**静态**的 —— 一次运行内不变、不持久化（详见 7.7）。
 
 **🧩 项目对应**：`agent/context.py` 的 `AgentContext`，
-`agent/graph.py:598` 声明、`runtime/runner.py:165` 传入。
+`agent/graph.py:609` 声明、`runtime/runner.py:165` 传入。
 `runtime.context` 可能为 `None` 是因为 context 是可选参数（见 6.9）。
 
 ### 8.6 中断与部署（项目未接）
@@ -1578,8 +1620,8 @@ LANGSMITH_PROJECT=automation-agent
 | `runtime.context` 是 `None`，任务名和写权限丢了 | 把 `context` 写进了 `config` | `agent.invoke(msgs, config, context=ctx)` | 🧩 `runner.py:154` |
 | `AttributeError: 'NoneType' object has no attribute ...` | 钩子里直接访问 `runtime.context` | 用 `_ctx(runtime)` | 🧩 `custom.py:48` |
 | HTTP 400 `tool call result does not follow tool call` | 拦下工具后没补 `ToolMessage` | 逐个补 `ToolMessage(tool_call_id=tc["id"])` | 🧩 `custom.py:80` |
-| `Invalid checkpointer` | 用了 `SqliteSaver.from_conn_string()`（上下文管理器，连接会被关） | 自持 `sqlite3` 连接 | 🧩 `graph.py:353` |
-| 测试会话落进 `data/memory.sqlite` 跨次累积 | `build_agent(checkpointer=None)` 不是「不要记忆」是「用默认的」 | 测试显式传 `InMemorySaver()` | 🧩 `graph.py:555` |
+| `Invalid checkpointer` | 用了 `SqliteSaver.from_conn_string()`（上下文管理器，连接会被关） | 自持 `sqlite3` 连接 | 🧩 `graph.py:354` |
+| 测试会话落进 `data/memory.sqlite` 跨次累积 | `build_agent(checkpointer=None)` 不是「不要记忆」是「用默认的」 | 测试显式传 `InMemorySaver()` | 🧩 `graph.py:566` |
 | `DeprecationWarning` / 系统提示词改不动 | `system_prompt` 是只读 property | `request.override(system_message=...)` | 🧩 `custom.py:190` |
 | 改了提示词但模型还是原样 | `override()` 是**替换**语义 | 把原提示词拼回去 | 🧩 `custom.py:208` |
 | 中间件钩子静默不触发 | `middleware` 里传了类不是实例 | 传 `TaskGateMiddleware()` | 🧩 `custom.py:17` |

@@ -131,11 +131,12 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 - `config.py` — 唯一的配置出口。`MODEL` 和 `RUNTIME` 两个 frozen dataclass 在模块导入时从环境变量读一次。改配置只改这里 + `.env`。`MEMORY_BACKEND` 决定记忆后端（`sqlite` 落盘到 `data/memory.sqlite`，`memory` 只在内存）。
 - `context.py` — `AgentContext`，每次调用的静态运行时配置（任务名、触发来源、是否允许写）。`trigger` 用 `Literal["schedule", "api", "cli", "lab"]` 限定，新增触发方式要同步改这个类型别名。
-- `graph.py` — **装配中心**。`build_agent()` 是唯一创建 Agent 的地方，模型/工具/记忆后端都从这里注入。中间件栈在这里组装：`LIMITS`（限次）→ `RETRY`（重试）→ `TODO`（任务拆解）→ `CONTEXT_EDITING`（上下文清理）→ `CUSTOM_MIDDLEWARE`（自定义）。
+- `graph.py` — **装配中心**。`build_agent()` 是唯一创建 Agent 的地方，模型/工具/记忆后端都从这里注入。中间件栈在这里组装：`EVENT_BRIDGE`（事件桥接，**最外层**）→ `LIMITS`（限次）→ `RETRY`（重试）→ `TODO`（任务拆解）→ `CONTEXT_EDITING`（上下文清理）→ `PII`（脱敏）→ `CUSTOM_MIDDLEWARE`（自定义守卫）。
 - `tools/` — L1 能力层。`files.py` 的文件工具被沙箱限制在 `data/` 目录内；读文件有 **200,000 字节硬上限**（`MAX_READ_BYTES`，超出即截断并把「还有多少行、传什么 offset」告诉模型），默认每次返回 200 行（`limit` 参数模型可传大，但字节上限始终生效）；二进制文件拒绝；记忆库（`memory.sqlite` 及其 WAL/SHM）禁读 —— 否则 agent 一句「看下这个文件」就能撑爆上下文窗口；`notify.py` 是通知出口，webhook 未配置时降级为终端输出。
   - **沙箱越界不抛异常，返回一句给模型看的中文说明**（`_resolve_safe`）。`_resolve()` 仍然抛 `ValueError`，但那是给 Python 调用方用的；工具层用它会让 `ToolRetryMiddleware`（默认 `retry_on=(Exception,)`）把同一个错参数重试 3 次、空耗约 3 秒，模型最后收到的还是 `failed after 3 attempts ... Please try again.` 这种没法照做的英文提示。
 - `middleware/custom.py` — L4 守卫层的自定义部分。三个中间件分别负责只读拦截、上下文注入、耗时统计。
 - `middleware/pii.py` — PII 脱敏。配置 langchain 内置的 `PIIMiddleware`，脱敏四种类型：邮箱、信用卡、手机号、身份证号。开关是 `.env` 的 `PII_MASKING`（默认开）。
+- `middleware/events.py` — 事件桥接。用 `wrap_tool_call` 把工具执行过程发成 `custom` 流事件（`tool.start` / `tool.end` / `tool.error`），供桌面版的工具卡片用。**8 个工具函数一行都不用改**。它装配在栈的**最外层** —— 包住整个「工具调用 + 重试」，所以一次调用只发一对事件，`duration_ms` 是用户真正等待的时间。
 
 ### runtime/ — 运行时外壳
 
