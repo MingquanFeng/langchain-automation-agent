@@ -139,10 +139,11 @@
 |---|---|
 | `runtime/runner.py:58` `get_agent()` | `_AGENT` 单例，保留 checkpointer 里的记忆。调度器和 Python 调用方都走 `run_task()`，保证行为一致 |
 | `runtime/scheduler.py:141` | `CronTrigger.from_crontab` —— 5 段 cron，按 `SCHEDULER_TIMEZONE` 解释。**LangGraph 1.x 本地没有内置 cron**，`langgraph_sdk` 也没导出，那是云端 Platform 的能力 |
-| `runtime/server.py:123` `/health` | 探活 + 调度器开关状态。**HTTP 层现在只管定时任务与状态查询，不提供触发 Agent 的入口** —— 触发走定时任务 / Python API / 桌面壳 |
+| `runtime/server.py:150` `/health` | 探活 + 调度器开关状态。**HTTP 层现在只管定时任务与状态查询，不提供触发 Agent 的入口** —— 触发走定时任务 / Python API / 桌面壳 |
 | `runtime/tasks.py:109` `TASKS` | 改这个文件就改 Agent 每天自动做什么。注意它是**内存字典，不落盘** |
 | `runtime/consumer.py` `StreamConsumer` | 桌面版阶段 3。在工作线程里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压 | — |
 | `runtime/runs.py` `RunManager` | 桌面版阶段 4。run 的生命周期。**run_id 是一次执行的身份，thread_id 是会话的记忆隔离键** | — |
+| `runtime/server.py` `/ws` | 桌面版阶段 5。WebSocket 事件流端点。收 `run.start` / `cancel`，推结构化事件 | — |
 
 ---
 

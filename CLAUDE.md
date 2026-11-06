@@ -71,6 +71,7 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 | POST | `/tasks` | 动态添加定时任务（cron + 指令） |
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 列出调度器已注册的 job 与下次运行时间 |
+| WS | `/ws` | 桌面版事件流。收 `run.start` / `cancel`，推结构化事件 |
 
 **HTTP 层不提供触发 Agent 的入口** —— 触发只有两条路：`runtime/runner.py` 的 `run_task()`（Python 调用方）、
 `runtime/scheduler.py` 的定时任务。交互入口（终端 / 桌面壳）按桌面版路线重做，见 `DESKTOP_AGENT_PLAN.md`。
@@ -142,7 +143,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 - `runner.py` — 唯一的 Agent 调用入口，调度器和 Python 调用方都走它，保证行为一致。`_AGENT` 单例复用，保留 checkpointer 里的记忆。
 - `scheduler.py` — APScheduler 封装。**LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力），所以定时触发必须自己接 APScheduler。cron 表达式按 `SCHEDULER_TIMEZONE` 解释，用 `CronTrigger.from_crontab`，即标准 5 段格式。
-- `server.py` — FastAPI。**只管定时任务增删查 + 调度状态 + 探活**，不触发 Agent。
+- `server.py` — FastAPI。定时任务增删查 + 调度状态 + 探活 + **`/ws` 事件流端点**（桌面版阶段 5）。`/ws` 收 `run.start` / `cancel` 两条命令，推 `run.start` / `model.text` / `tool.*` / `run.end` / `run.cancelled` / `run.error` 事件。**单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，并发发帧会交错，所以所有消息都进同一个队列由唯一的推送任务发出。
 - `events.py` — 事件模型 + 归一化层。`BaseEvent` 加 9 种事件构成桌面版的事件协议；`StreamNormalizer` 把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件。
 - `consumer.py` — 同步流消费器（桌面版阶段 3）。在**工作线程**里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压：队列容量管「已入队」、`max_pending` 管「在途未入队」。**不要改成等 `future.result()`** —— 事件循环在 resolve 前关闭时那会永久阻塞。
 - `runs.py` — Run Manager（桌面版阶段 4）。管 run 的生命周期：`start` / `get` / `cancel` / `finish` / `active`。**run_id 是一次执行的身份、thread_id 是会话的记忆隔离键，两回事**。第一版单连接单任务 —— 同一 owner 第二次 `start` 抛 `RunBusyError`，由调用方回一条 `run.error`，不静默取消旧的。

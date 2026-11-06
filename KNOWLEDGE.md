@@ -1591,6 +1591,20 @@ consumer.run(instruction, ctx, thread_id)   # 阻塞，在工作线程里跑
 事件其实已经 put 进队列了，生产者却再也回不来。
 消费线程卡死的表现是「事件 0.03 秒就发完了，线程 8 秒还不退出」。
 
+**🧩 `run.end` 的 output 用「累积的 model.text」，不是 state 里最后一条 AIMessage 的 content** ——
+后者是**原始**内容，推理模型（MiniMax 等）会把 `<think>` 思考块混在里面，又脏又长。
+model.text 是归一化层滤过思考块的正文，那才是用户该看到的。
+
+**🧩 累积的正文为空时会回退到 state 的最后一条消息** ——
+多数是**模型调用失败**：`on_failure="continue"` 把失败包成一条 AIMessage 写进 state，
+但那条消息不经过模型节点，**`messages` 模式看不到它**，
+所以既没有 model.text，累积的正文也是空的。回退一次，用户至少能看到「模型调用失败了」。
+
+**🧩 推理模型在工具调用轮次后可能返回空 content** ——
+实测 MiniMax-M3 多轮调工具时，那些轮的 `content` 是空串
+（`additional_kwargs` 只有 `refusal`，`response_metadata` 里也没有推理内容）。
+所以 `run.end` 的 `output` **允许为空**，客户端要能处理「这一轮模型没给出正文」。
+
 **🧩 模型调用失败不会逃出消费循环**：
 `ModelRetryMiddleware` 的默认 `on_failure="continue"` 会把重试耗尽后的失败
 包成一条 AIMessage 继续跑 —— 图本身是「成功」跑完的。
@@ -1651,6 +1665,46 @@ consumer.run(instruction, ctx, thread_id)   # 阻塞，在工作线程里跑
 - 🧩 任务跑完会**自动注销**（done callback 调 `finish`），不用手动调。
 - 🧩 `RunBusyError` 要由调用方捕获并转成 `run.error` 事件 ——
   Run Manager 自己不发事件，它不碰事件格式。
+
+### 9.8 WebSocket 事件流端点（`runtime/server.py` 的 `/ws`）
+
+🧩 项目自研，桌面版改造计划的阶段 5。
+
+**协议**（客户端 → 服务端，两条命令）：
+
+```json
+{"type": "run.start", "instruction": "...", "task_name": "...",
+ "thread_id": "可选", "allow_write": false}
+{"type": "cancel"}
+```
+
+**协议**（服务端 → 客户端）：一条一个 JSON 事件。
+`run.start` / `model.text` / `tool.start` / `tool.end` / `tool.error` /
+`run.progress` / `run.end` / `run.cancelled` / `run.error`
+
+**🧩 单一发送点**：Starlette 的 `WebSocket.send` **没有锁**，并发发帧会交错。
+所以所有要发给客户端的消息（事件的 + 端点自己产生的 `run.start` / `run.error`）
+都进同一个队列，由唯一的推送任务发出去 —— 端点自己不直接 `send`。
+
+**🧩 单连接单任务**：同一连接已有活跃 run 时，新的 `run.start` 被拒绝，
+回一条 `run.error` 说明「上一轮还在运行」—— 不静默取消旧的。
+
+**🧩 连接断开要清理**：断开时取消这个连接上的所有 run，
+否则消费线程会一直跑到 agent 结束。
+
+**错误也走事件**：命令非法、JSON 不合法、缺 `instruction`、取消时没有活跃 run ——
+全都回一条 `run.error`，客户端不会一直转圈等。
+
+**坑**
+- 🧩 **写权限默认关闭**：`allow_write` 不传就是 False（只读是默认态）。
+  `AgentContext` 这个 dataclass 自己的默认值是 `True`，所以端点必须**显式传**，不能省。
+- 🧩 **端点内部调 `get_agent()` 拿进程内的 Agent 单例** ——
+  测试必须替换 `runtime.server.get_agent`（而不是 `runtime.runner.get_agent`，
+  那是名字绑定）。不替换的话测试会**真的调模型 API**：
+  慢、不确定、模型可能一直说话，测试还会挂。
+- 🧩 测试时还要把 `start_scheduler` / `stop_scheduler` 换成空操作 ——
+  调度器会到点触发真实的定时任务。
+- 🧩 `RunManager` 挂在 `app.state` 上，每个应用实例一个，测试之间不共享状态。
 
 ---
 

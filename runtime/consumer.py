@@ -52,8 +52,15 @@ from typing import Any
 # AIMessage / HumanMessage：agent 循环的消息类型。
 from langchain_core.messages import AIMessage, HumanMessage
 
-# BaseEvent / RunCancelled / RunEnd / RunError：事件模型。
-from runtime.events import BaseEvent, RunCancelled, RunEnd, RunError, StreamNormalizer
+# BaseEvent / ModelText / RunCancelled / RunEnd / RunError：事件模型。
+from runtime.events import (
+    BaseEvent,
+    ModelText,
+    RunCancelled,
+    RunEnd,
+    RunError,
+    StreamNormalizer,
+)
 
 # AgentContext：运行时上下文。
 from agent.context import AgentContext
@@ -159,7 +166,15 @@ class StreamConsumer:
         """
         started = time.perf_counter()
         cancelled = False
+        # 每步的完整状态，留最后一份。
         final_state: dict = {}
+        # 累积模型说出来的正文。
+        #
+        # 为什么不用 state 里最后一条 AIMessage 的 content：
+        # 那是**原始**内容，推理模型（MiniMax 等）会把 <think> 思考块混在里面 ——
+        # 又脏又长，模型只输出了思考时甚至是空的。
+        # model.text 是归一化层滤过思考块的正文，那才是用户该看到的。
+        text_parts: list[str] = []
 
         try:
             for mode, payload in self.agent.stream(
@@ -178,12 +193,15 @@ class StreamConsumer:
                     cancelled = True
                     break
 
-                # values 模式归一化层不处理，这里单独接住完整状态。
+                # values 模式归一化层不处理。
+                # 每步推全量状态 —— 留最后一份，正文为空时要拿它兜底。
                 if mode == "values":
                     final_state = payload
                     continue
 
                 for event in self.normalizer.normalize(mode, payload):
+                    if isinstance(event, ModelText):
+                        text_parts.append(event.text)
                     self._emit(event)
 
         except Exception as exc:
@@ -204,11 +222,20 @@ class StreamConsumer:
             self._emit(RunCancelled(run_id=self.run_id, reason="用户取消"))
             return
 
-        messages = final_state.get("messages", []) or []
+        output = "".join(text_parts)
+        if not output:
+            # 没有正文 —— 多数是**模型调用失败**。
+            # 重试中间件的 `on_failure="continue"` 会把失败包成一条 AIMessage
+            # 写进 state，但那条消息不经过模型节点，
+            # **`messages` 模式看不到它** —— 所以既没有 model.text，累积的正文也是空的。
+            # 回退到 state 的最后一条消息，让用户看到「模型调用失败了」，
+            # 而不是一片空白。
+            output = _last_message_text(final_state.get("messages", []))
+
         self._emit(RunEnd(
             run_id=self.run_id,
-            output=_final_answer(messages),
-            messages=len(messages),
+            output=output,
+            messages=len(text_parts),
             duration_ms=duration_ms,
         ))
 
@@ -277,25 +304,21 @@ class StreamConsumer:
             self._slot_free.notify_all()
 
 
-# ============================================================
-# 3. 辅助函数
-# ============================================================
-
-def _final_answer(messages: list) -> str:
-    """从最终状态的消息列表里取模型的最终回答。
+def _last_message_text(messages: list) -> str:
+    """取消息列表里最后一条有文本的消息。
 
     参数：
         messages：agent 结束时的完整消息列表。
 
     返回：
-        最后一条 AIMessage 的内容。没有则返回空字符串。
+        最后一条 AIMessage 的文本。没有则返回空字符串。
 
     注意：
-    取「最后一条 AIMessage」而不是「最后一条消息」——
-    最后一条可能是中间件插入的提示（ContextInjectionMiddleware 每轮都插一条）。
+    只看 AIMessage —— 最后一条可能是中间件插入的提示
+    （ContextInjectionMiddleware 每轮都插一条），那不是模型的输出。
     """
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):
-            content = msg.content
+            content = getattr(msg, "content", "")
             return content if isinstance(content, str) else ""
     return ""

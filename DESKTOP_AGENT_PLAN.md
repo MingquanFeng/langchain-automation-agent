@@ -249,6 +249,12 @@ loop.call_soon_threadsafe(lambda: asyncio.ensure_future(queue.put(event)))
 `/health`、`/tasks`、`/jobs` 保留。新增 `/ws`。桌面版只用 `/ws` 做交互，
 HTTP 侧退成探活与定时任务管理。
 
+**D6 · WebSocket 端点只有一个发送点**
+
+Starlette 的 `WebSocket.send` **没有锁** —— 并发发帧会交错。
+所以所有要发给客户端的消息（事件的 + 端点自己产生的 `run.start` / `run.error`）
+都进同一个队列，由唯一的推送任务发出去。端点自己不直接 send。
+
 **D5 · 归一化层独立成 `runtime/events.py`**
 归一化层是 `runtime/events.py`（目前只有 `ThinkFilter` 与 `is_hint_node` 两个过滤器，
 事件模型与流式解析在这一步长出来）。
@@ -281,7 +287,7 @@ HTTP 侧退成探活与定时任务管理。
 | 2 | `EventBridgeMiddleware`（`wrap_tool_call` 发 tool.start/end/error） | P0 | ✅ 已完成（`agent/middleware/events.py`） |
 | 3 | 同步流消费器 + 线程桥接 + 有界队列背压 | P0 | ✅ 已完成（`runtime/consumer.py`） |
 | 4 | Run Manager（run_id / cancel_event / start / cancel / finish） | P0 | ✅ 已完成（`runtime/runs.py`） |
-| 5 | WebSocket 端点 `/ws`（收 run.start / cancel，单连接单任务） | P0 | |
+| 5 | WebSocket 端点 `/ws`（收 run.start / cancel，单连接单任务） | P0 | ✅ 已完成（`runtime/server.py`） |
 | 6 | 异常处理 + 连接断开清理 | P0 | |
 | 7 | 单元测试 + 集成测试 | P0 | |
 | 8 | 文档同步 | P1 | |

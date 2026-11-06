@@ -19,22 +19,44 @@ FastAPI 的 @app.on_event 已废弃，
 
 from __future__ import annotations
 
+# asyncio：起推送任务。
+import asyncio
+
+# json：解析 WebSocket 收到的消息。
+import json
+
 # logging：标准库的日志模块。
 import logging
+
+# uuid：生成连接 id。
+import uuid
 
 # asynccontextmanager：把生成器包装成异步上下文管理器，
 # 用于定义 FastAPI 的 lifespan。
 from contextlib import asynccontextmanager
 
 # FastAPI：Web 框架。
-from fastapi import FastAPI
+# WebSocket / WebSocketDisconnect：桌面版的事件流端点。
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 # BaseModel / Field：Pydantic 模型与字段声明，
 # FastAPI 用它做请求体校验和 OpenAPI 文档。
 from pydantic import BaseModel, Field
 
-# RUNTIME：应用运行配置，这里取调度开关。
+# RUNTIME：应用运行配置，这里取调度开关和通知渠道。
 from agent.config import RUNTIME
+
+# AgentContext：单次调用的运行时上下文。
+from agent.context import AgentContext
+
+# get_agent：进程内唯一的 Agent 单例（见 runner.py）。
+from .runner import get_agent
+
+# BaseEvent / RunError / RunStart：事件模型。
+from .events import BaseEvent, RunError, RunStart
+
+# RunBusyError / RunManager：run 的生命周期管理。
+from .runs import RunBusyError, RunManager
 
 # list_jobs / start_scheduler / stop_scheduler：调度器接口。
 from .scheduler import list_jobs, start_scheduler, stop_scheduler
@@ -76,6 +98,11 @@ async def lifespan(app: FastAPI):
     if RUNTIME.scheduler_enabled:
         start_scheduler()
         logger.info("定时任务已启动")
+
+    # Run Manager 挂在 app.state 上 ——
+    # 每个应用实例一个，测试之间不共享状态。
+    app.state.run_manager = RunManager()
+
     yield
     stop_scheduler()
 
@@ -228,3 +255,174 @@ def delete_task(name: str) -> dict:
     removed = remove_task(name)
     start_scheduler()
     return {"removed": name, "ok": removed}
+
+
+# ============================================================
+# 6. WebSocket 事件流端点（桌面版）
+# ============================================================
+
+# WS_QUEUE_SIZE：每个连接的事件队列容量。
+#
+# 有界 + 背压：客户端消费不过来时，生产者会停下来
+# （见 runtime/consumer.py 的两层上限说明）。
+WS_QUEUE_SIZE = 256
+
+
+@app.websocket("/ws")
+async def websocket_events(websocket: WebSocket) -> None:
+    """桌面版的事件流端点。
+
+    **客户端 → 服务端**（两条命令）：
+
+    ```json
+    {"type": "run.start", "instruction": "列出数据目录下的文件",
+     "task_name": "列文件", "thread_id": "可选", "allow_write": false}
+    {"type": "cancel"}
+    ```
+
+    **服务端 → 客户端**：一条一个 JSON 事件。
+    `run.start` / `model.text` / `tool.start` / `tool.end` / `tool.error` /
+    `run.progress` / `run.end` / `run.cancelled` / `run.error`
+
+    注意：
+    1. **单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，
+       并发发帧会交错。所以所有要发给客户端的消息
+       （事件的 + 端点自己产生的）都进同一个队列，
+       由唯一的推送任务发出去。
+    2. **单连接单任务** —— 同一连接已有活跃 run 时，
+       新的 run.start 会被拒绝，回一条 run.error，
+       而不是静默取消旧的。
+    3. **连接断开要清理** —— 断开时取消这个连接上的所有 run，
+       否则消费线程会一直跑下去。
+    """
+    await websocket.accept()
+
+    manager: RunManager = websocket.app.state.run_manager
+    conn_id = uuid.uuid4().hex[:8]
+    queue: asyncio.Queue[BaseEvent] = asyncio.Queue(maxsize=WS_QUEUE_SIZE)
+
+    async def pump() -> None:
+        """唯一的发送点：把队列里的事件推给客户端。"""
+        while True:
+            event = await queue.get()
+            await websocket.send_json(event.model_dump())
+
+    pump_task = asyncio.create_task(pump())
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                await queue.put(RunError(run_id="", message="消息不是合法 JSON"))
+                continue
+            if not isinstance(payload, dict):
+                await queue.put(RunError(run_id="", message="消息必须是 JSON 对象"))
+                continue
+            await _handle_ws_command(
+                manager=manager,
+                queue=queue,
+                conn_id=conn_id,
+                payload=payload,
+            )
+    except WebSocketDisconnect:
+        logger.info("WebSocket 断开：%s", conn_id)
+    finally:
+        # 断开：取消这个连接上的所有 run。
+        # 不取消的话，消费线程会一直跑到 agent 结束。
+        for handle in manager.active_for(conn_id):
+            manager.cancel(handle.run_id)
+        pump_task.cancel()
+
+
+async def _handle_ws_command(
+    *,
+    manager: RunManager,
+    queue: asyncio.Queue,
+    conn_id: str,
+    payload: dict,
+) -> None:
+    """处理一条客户端命令。
+
+    注意：
+    产生的消息都进 queue，由唯一的推送任务发出去 ——
+    端点自己不直接 send。
+    """
+    command = payload.get("type")
+
+    if command == "run.start":
+        await _handle_run_start(manager=manager, queue=queue, conn_id=conn_id, payload=payload)
+    elif command == "cancel":
+        await _handle_ws_cancel(manager=manager, queue=queue, conn_id=conn_id)
+    else:
+        await queue.put(RunError(run_id="", message=f"未知命令：{command}"))
+
+
+async def _handle_run_start(
+    *,
+    manager: RunManager,
+    queue: asyncio.Queue,
+    conn_id: str,
+    payload: dict,
+) -> None:
+    """启动一次执行。"""
+    instruction = str(payload.get("instruction", "")).strip()
+    if not instruction:
+        await queue.put(RunError(run_id="", message="缺少 instruction"))
+        return
+
+    task_name = str(payload.get("task_name") or instruction[:30])
+    thread_id = payload.get("thread_id") or None
+    # 写权限默认关闭 —— 只读是默认态，要写必须显式开。
+    allow_write = bool(payload.get("allow_write", False))
+
+    ctx = AgentContext(
+        task_name=task_name,
+        # WebSocket 是 HTTP 层触发的，用 api。
+        trigger="api",
+        allow_write=allow_write,
+        notify_channel=RUNTIME.notify_channel,
+    )
+
+    try:
+        handle = manager.start(
+            owner=conn_id,
+            instruction=instruction,
+            task_name=task_name,
+            thread_id=thread_id,
+            agent=get_agent(),
+            queue=queue,
+            loop=asyncio.get_running_loop(),
+            ctx=ctx,
+        )
+    except RunBusyError:
+        # 上一轮还在运行 —— 拒绝，不静默取消旧的。
+        await queue.put(RunError(run_id="", message="上一轮还在运行"))
+        return
+
+    await queue.put(RunStart(
+        run_id=handle.run_id,
+        task_name=task_name,
+        thread_id=handle.thread_id,
+        instruction=instruction,
+    ))
+
+
+async def _handle_ws_cancel(
+    *,
+    manager: RunManager,
+    queue: asyncio.Queue,
+    conn_id: str,
+) -> None:
+    """取消当前连接上的活跃 run。
+
+    注意：
+    取消是协作式的 —— 正在跑的那一步会做完，
+    取消信号最终表现为一条 run.cancelled 事件（由消费器发）。
+    """
+    active = manager.active_for(conn_id)
+    if not active:
+        await queue.put(RunError(run_id="", message="没有正在运行的任务"))
+        return
+    manager.cancel(active[0].run_id)
