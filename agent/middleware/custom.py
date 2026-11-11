@@ -39,6 +39,7 @@ from langgraph.runtime import Runtime
 
 # AgentContext：单次调用的运行时上下文结构，见 agent/context.py。
 from ..context import AgentContext
+from ..tools.risk import TOOL_RISK_LEVELS
 
 
 # ============================================================
@@ -86,15 +87,6 @@ class TaskGateMiddleware(AgentMiddleware):
        写工具本身不会执行（pending tool call 是空的）。
     """
 
-    # WRITE_TOOLS：算「写操作」的工具名集合。
-    #
-    # 注意 notify 也在里面：
-    # 发消息本身就是副作用，所以只读模式下同样要拦。
-    #
-    # 新增写类工具时，要同步更新这个集合，
-    # 否则新工具会绕过只读闸门。
-    WRITE_TOOLS = {"write_file", "append_file", "save_json", "notify", "notify_summary"}
-
     def after_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
         """
         模型这一轮输出之后、工具执行之前，检查有没有写操作。
@@ -113,7 +105,7 @@ class TaskGateMiddleware(AgentMiddleware):
             for msg in state.get("messages", [])[-3:]
             if isinstance(msg, AIMessage)
             for tc in (msg.tool_calls or [])
-            if tc.get("name") in self.WRITE_TOOLS
+            if TOOL_RISK_LEVELS.get(tc.get("name")) != "read_only"
         ]
         if not blocked:
             return None

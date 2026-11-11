@@ -25,6 +25,7 @@ from .files import FILE_TOOLS
 # NOTIFY_TOOLS：通知出口工具。
 # 来自 notify.py，webhook 未配置时降级为终端输出。
 from .notify import NOTIFY_TOOLS
+from .risk import TOOL_RISK_LEVELS, ToolRiskLevel, validate_tool_risk_levels
 
 
 # ============================================================
@@ -40,6 +41,10 @@ from .notify import NOTIFY_TOOLS
 # 用 *FILE_TOOLS, *NOTIFY_TOOLS 而不是直接拼接 +，
 # 是因为 + 只能连接两个列表，解包的方式可以继续加第三组。
 ALL_TOOLS = [*FILE_TOOLS, *NOTIFY_TOOLS]
+
+# 启动时校验工具清单和风险登记表完全一致。
+# 新增、移除或重命名工具却未同步风险表时，尽早失败，避免权限策略漏项。
+validate_tool_risk_levels(ALL_TOOLS)
 
 
 # ============================================================
@@ -57,7 +62,14 @@ ALL_TOOLS = [*FILE_TOOLS, *NOTIFY_TOOLS]
 # FILE_TOOLS 和 NOTIFY_TOOLS 一并导出，
 # 是为了让调用方能只装配某一组工具
 # （比如只给只读任务挂文件工具，不给通知工具）。
-__all__ = ["ALL_TOOLS", "FILE_TOOLS", "NOTIFY_TOOLS"]
+__all__ = [
+    "ALL_TOOLS",
+    "FILE_TOOLS",
+    "NOTIFY_TOOLS",
+    "TOOL_RISK_LEVELS",
+    "ToolRiskLevel",
+    "validate_tool_risk_levels",
+]
 
 
 # ============================================================
@@ -80,7 +92,6 @@ __all__ = ["ALL_TOOLS", "FILE_TOOLS", "NOTIFY_TOOLS"]
 # agent = create_agent(model=model, tools=FILE_TOOLS)
 #
 # 注意：
-# 新增写类工具时，除了登记进 ALL_TOOLS，
-# 还要同步更新 middleware/custom.py 里
-# TaskGateMiddleware.WRITE_TOOLS，
-# 否则只读模式下这个工具不会被拦住。
+# 新增工具时，除了登记进 ALL_TOOLS，
+# 还要在 risk.py 中声明风险等级。
+# 模块导入时会自动检查两份清单是否一致。

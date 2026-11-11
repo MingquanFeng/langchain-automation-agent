@@ -797,8 +797,10 @@ class MyMiddleware(AgentMiddleware):
 🧩 项目（`custom.py:73`）：
 
 ```python
+from agent.tools.risk import TOOL_RISK_LEVELS
+
 class TaskGateMiddleware(AgentMiddleware):
-    WRITE_TOOLS = {"write_file", "append_file", "save_json", "notify", "notify_summary"}
+    # after_model 中，非 read_only 的工具调用进入拦截逻辑。
 
     def after_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
         ...

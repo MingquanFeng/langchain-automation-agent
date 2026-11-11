@@ -131,7 +131,9 @@ def test_tool_error_is_emitted_once():
     for mode, payload in agent.stream(
         {"messages": [HumanMessage(content="跑一下")]},
         {"configurable": {"thread_id": "evt-err"}},
-        context=AgentContext(task_name="t", trigger="cli", allow_write=False),
+        # boom 是本测试临时注入的工具，不在生产工具风险登记表中。
+        # 显式允许执行，确保测试覆盖 EventBridge 的异常事件，而不是被只读闸门提前拦截。
+        context=AgentContext(task_name="t", trigger="cli", allow_write=True),
         stream_mode=["messages", "custom"],
     ):
         events.extend(normalizer.normalize(mode, payload))

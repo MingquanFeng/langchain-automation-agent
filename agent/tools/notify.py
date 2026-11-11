@@ -23,8 +23,8 @@ print 只在本模块内部做降级输出使用。
 消息就散落在日志里，使用方收不到。
 
 注意：
-notify / notify_summary 都属于**写工具**，
-名字写在 middleware/custom.py 的 TaskGateMiddleware.WRITE_TOOLS 里。
+notify / notify_summary 都属于有外部副作用的工具，
+风险等级在 agent/tools/risk.py 中登记。
 只读模式（AgentContext.allow_write=False）下会被闸门拦下，
 所以只读任务要汇报结论，只能写在回复文本里。
 """
@@ -181,9 +181,6 @@ def notify_summary(items: str, title: str = "每日汇总") -> str:
 # NOTIFY_TOOLS 会被 tools/__init__.py 汇总进 ALL_TOOLS，
 # 最终交给 create_agent 作为模型可调用的工具。
 #
-# 注意：
-# 往这里加新工具时，要同步更新
-# middleware/custom.py 里 TaskGateMiddleware.WRITE_TOOLS。
-# 通知类工具都有外部副作用，
-# 只读模式下必须被拦住，否则会往用户那里推不该推的消息。
+# 注意：新增通知工具时，也要在 agent/tools/risk.py 中登记风险等级。
+# 通知类工具都有外部副作用，不能被只读模式放行。
 NOTIFY_TOOLS = [notify, notify_summary]

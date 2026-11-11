@@ -267,8 +267,8 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 ## 约定
 
 - **记忆隔离靠 `thread_id`**。定时任务用 `cron-{任务名}` 作为 thread_id，保留跨天记忆；`runner.run_task()` 不传 thread_id 时生成随机 `task-{uuid}`。**同一个 thread_id 就共享同一份记忆**，客户端想续聊就显式传同一个值。
-- **新增工具要做两件事**：登记进 `agent/tools/__init__.py` 的 `ALL_TOOLS`（不登记模型根本看不到这个工具），写类工具还要同步 `TaskGateMiddleware.WRITE_TOOLS`（`agent/middleware/custom.py`）。漏第二步，只读闸门就拦不住它。
-- **写操作受 `AgentContext.allow_write` 控制，默认关闭**（只读是默认态，写权限要显式开启：`AgentContext(allow_write=True)` / `run_task(allow_write=True)` / `ScheduledTask(allow_write=True)`）。只读模式由 `TaskGateMiddleware` 拦截。注意 `notify` / `notify_summary` 也算写工具，需要推送的任务必须显式开权限。新增写类工具时，要同步更新 `TaskGateMiddleware.WRITE_TOOLS`（见上一条）。
+- **新增工具要登记两处**：加入 `agent/tools/__init__.py` 的 `ALL_TOOLS`，并在 `agent/tools/risk.py` 声明风险等级。工具清单与风险表在导入时自动校验；不能再维护独立的 `WRITE_TOOLS` 名单。
+- **写操作受 `AgentContext.allow_write` 控制，默认关闭**（只读是默认态，写权限要显式开启：`AgentContext(allow_write=True)` / `run_task(allow_write=True)` / `ScheduledTask(allow_write=True)`）。只读模式由 `TaskGateMiddleware` 根据 `TOOL_RISK_LEVELS` 拦截所有非只读等级的工具。注意 `notify` / `notify_summary` 属于外部副作用工具。
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
 - **PII 脱敏默认开着**（`.env` 的 `PII_MASKING=1`）。它脱敏**用户指令**与**工具结果**
   （文件工具读出来的内容走后者，是最主要的泄露通道），但**不脱敏模型输出** ——
