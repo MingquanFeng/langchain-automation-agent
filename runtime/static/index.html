@@ -199,6 +199,28 @@
     .activity-tool { color: #45546a; font: 600 10px var(--mono); }
     .activity-meta { margin-left: auto; color: #8b95a4; font: 10px var(--mono); }
     .activity-body { padding: 0 11px 10px; color: #687589; font: 10px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    /* 授权卡片单独强调一次具体操作；琥珀色边线表示需要用户判断。 */
+    .approval-card { margin: -9px 0 20px 37px; max-width: 680px; border: 1px solid #ead9c3; border-left: 3px solid var(--amber); border-radius: 9px; background: #fffdf9; box-shadow: 0 5px 16px #7c55200a; overflow: hidden; }
+    .approval-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px 8px; }
+    .approval-title { margin: 0; color: #76501f; font-size: 12px; font-weight: 700; }
+    .approval-risk { flex: 0 0 auto; border: 1px solid #eddcc2; border-radius: 20px; padding: 3px 7px; color: #936123; background: #fff8ed; font-size: 9px; }
+    .approval-description { margin: 0; padding: 0 14px 10px; color: #566174; font-size: 11px; line-height: 1.6; }
+    .approval-tool { margin: 0 14px 10px; color: #46546a; font: 600 10px var(--mono); }
+    .approval-preview { margin: -3px 14px 9px; color: #707b8d; font: 10px/1.55 var(--mono); overflow-wrap: anywhere; }
+    .approval-args { margin: 0 14px 10px; border-top: 1px solid #f0e8dc; padding-top: 8px; }
+    .approval-args summary { width: fit-content; color: #8a6b45; cursor: pointer; font-size: 10px; }
+    .approval-args pre { max-height: 160px; overflow: auto; margin: 7px 0 0; color: #667184; font: 10px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .approval-status { min-height: 17px; padding: 0 14px 9px; color: #8a6b45; font-size: 10px; }
+    .approval-card[data-state="allowed"], .approval-card[data-state="running"], .approval-card[data-state="done"] { border-color: #cfe3db; border-left-color: var(--green); background: #fbfefc; }
+    .approval-card[data-state="allowed"] .approval-status, .approval-card[data-state="running"] .approval-status, .approval-card[data-state="done"] .approval-status { color: #33735e; }
+    .approval-card[data-state="rejected"], .approval-card[data-state="expired"], .approval-card[data-state="cancelled"] { border-color: #ead8d0; border-left-color: var(--red); background: #fffafa; }
+    .approval-card[data-state="rejected"] .approval-status, .approval-card[data-state="expired"] .approval-status, .approval-card[data-state="cancelled"] .approval-status { color: #9b5148; }
+    .approval-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 9px 12px; border-top: 1px solid #f0e8dc; background: #fffaf3; }
+    .approval-actions button { min-height: 32px; border: 1px solid transparent; border-radius: 6px; padding: 0 11px; font-size: 10px; font-weight: 650; }
+    .approval-reject { border-color: #e3e7ed !important; background: white; color: #657187; }
+    .approval-reject:hover:not(:disabled) { background: #f4f6f8; }
+    .approval-allow { background: #9a641f; color: white; }
+    .approval-allow:hover:not(:disabled) { background: #835316; }
     .run-notice { margin: 0 0 17px 37px; color: #8a94a3; font-size: 10px; }
     .run-notice.error { color: #a6503e; }
     .composer-wrap { border-top: 1px solid var(--line); padding: 14px clamp(14px, 4vw, 36px) 12px; background: #fff; }
@@ -209,8 +231,6 @@
     .composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .composer-hint { color: #929baa; font-size: 10px; }
     .composer-controls { display: flex; align-items: center; gap: 11px; }
-    .write-control { display: inline-flex; align-items: center; gap: 6px; color: #6b7687; font-size: 10px; white-space: nowrap; }
-    .write-control input { accent-color: var(--amber); }
     .send-button { min-width: 76px; border: 0; border-radius: 7px; background: var(--blue); color: white; padding: 8px 12px; font-size: 11px; font-weight: 650; }
     .send-button:hover:not(:disabled) { background: #244ed0; }
     .cancel-inline { border: 1px solid #f0d4d2; border-radius: 7px; background: #fff9f8; color: #a44848; padding: 7px 10px; font-size: 10px; }
@@ -236,6 +256,7 @@
       .composer-hint { display: none; }
       .composer-controls { gap: 7px; }
       .activity { margin-left: 30px; }
+      .approval-card { margin-left: 30px; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
@@ -283,17 +304,14 @@
         <form class="composer" id="chatForm">
           <textarea id="messageInput" required rows="2" placeholder="给 Agent 发消息…（Enter 发送，Shift + Enter 换行）"></textarea>
           <div class="composer-bottom">
-            <span class="composer-hint" id="composerHint">新会话 · 写入权限默认关闭</span>
+            <span class="composer-hint" id="composerHint">写入或通知操作会逐次请求确认</span>
             <div class="composer-controls">
-              <label class="write-control" title="允许本轮任务修改文件或发送通知">
-                <input id="allowWrite" type="checkbox"> 允许写入
-              </label>
               <button class="cancel-inline hidden" id="cancelButton" type="button">取消</button>
               <button class="send-button" id="sendButton" type="submit">发送 ↑</button>
             </div>
           </div>
         </form>
-        <div class="chat-foot" id="writeHint">Agent 可能会调用工具；打开写入权限前请确认任务内容。</div>
+        <div class="chat-foot" id="writeHint">写入文件或发送通知前会先向你确认；未允许的操作不会执行。</div>
       </div>
     </section>
   </main>
@@ -310,12 +328,25 @@
     const sendButton = $("#sendButton");
     const cancelButton = $("#cancelButton");
     const newChatButton = $("#newChatButton");
-    const writeToggle = $("#allowWrite");
     let socket = null;
     let activeRunId = null;
     let threadId = null;
     let currentAssistantBubble = null;
     const toolCards = new Map();
+    const pendingApprovals = new Map();
+
+    // 把协议风险等级转换成界面上的简短说明，帮助用户快速判断操作影响。
+    const riskLabels = {
+      workspace_write: "修改数据文件",
+      external_effect: "发送到外部",
+    };
+    const toolDescriptions = {
+      write_file: "将创建或覆盖数据目录中的文件。",
+      append_file: "将内容追加到数据目录中的文件。",
+      save_json: "将创建或覆盖数据目录中的 JSON 文件。",
+      notify: "将消息发送到已配置的通知渠道。",
+      notify_summary: "将摘要发送到已配置的通知渠道。",
+    };
 
     function setConnection(state, label) {
       connection.dataset.state = state;
@@ -395,6 +426,132 @@
       scrollToBottom();
     }
 
+    // 更新某条授权卡片的状态，并同步按钮可用状态。
+    function setApprovalState(entry, state, label, disableActions = true) {
+      entry.card.dataset.state = state;
+      entry.status.textContent = label;
+      if (disableActions) {
+        entry.allowButton.disabled = true;
+        entry.rejectButton.disabled = true;
+      }
+    }
+
+    // 展示待执行工具的影响、完整参数和只对本次调用生效的决定按钮。
+    function addApprovalRequest(event) {
+      const card = document.createElement("section");
+      card.className = "approval-card";
+      card.dataset.state = "waiting";
+      card.setAttribute("aria-label", `等待确认：${event.name || "工具调用"}`);
+
+      const header = document.createElement("div");
+      header.className = "approval-head";
+      const title = document.createElement("h3");
+      title.className = "approval-title";
+      title.textContent = "需要确认这次操作";
+      const risk = document.createElement("span");
+      risk.className = "approval-risk";
+      risk.textContent = riskLabels[event.risk_level] || "有副作用的操作";
+      header.append(title, risk);
+
+      const description = document.createElement("p");
+      description.className = "approval-description";
+      description.textContent = toolDescriptions[event.name] || "Agent 请求执行一个可能产生副作用的工具。";
+
+      const tool = document.createElement("div");
+      tool.className = "approval-tool";
+      tool.textContent = event.name || "未知工具";
+
+      // 始终显示一行参数摘要；完整参数可展开查看，长文本不会挤满聊天记录。
+      const argsPreview = document.createElement("div");
+      argsPreview.className = "approval-preview";
+      const argumentEntries = Object.entries(event.args || {});
+      argsPreview.textContent = argumentEntries.length
+        ? `参数：${argumentEntries.slice(0, 3).map(([key, value]) => {
+          const preview = typeof value === "string" ? value : JSON.stringify(value);
+          const shortValue = preview.length > 72 ? `${preview.slice(0, 72)}…` : preview;
+          return `${key}=${shortValue}`;
+        }).join(" · ")}${argumentEntries.length > 3 ? " · …" : ""}`
+        : "本次调用没有额外参数。";
+
+      const argsDetails = document.createElement("details");
+      argsDetails.className = "approval-args";
+      const argsSummary = document.createElement("summary");
+      argsSummary.textContent = "查看本次调用参数";
+      const args = document.createElement("pre");
+      args.textContent = JSON.stringify(event.args || {}, null, 2);
+      argsDetails.append(argsSummary, args);
+
+      const status = document.createElement("div");
+      status.className = "approval-status";
+      status.setAttribute("role", "status");
+      status.textContent = "工具尚未执行；请选择允许或拒绝。";
+
+      const actions = document.createElement("div");
+      actions.className = "approval-actions";
+      const rejectButton = document.createElement("button");
+      rejectButton.type = "button";
+      rejectButton.className = "approval-reject";
+      rejectButton.textContent = "拒绝本次";
+      const allowButton = document.createElement("button");
+      allowButton.type = "button";
+      allowButton.className = "approval-allow";
+      allowButton.textContent = "仅允许本次";
+      actions.append(rejectButton, allowButton);
+      card.append(header, description, tool, argsPreview, argsDetails, status, actions);
+      messages.append(card);
+
+      const entry = {
+        runId: event.run_id,
+        card,
+        status,
+        allowButton,
+        rejectButton,
+        state: "waiting",
+      };
+      pendingApprovals.set(event.call_id, entry);
+      allowButton.addEventListener("click", () => respondToApproval(event.call_id, true));
+      rejectButton.addEventListener("click", () => respondToApproval(event.call_id, false));
+      currentAssistantBubble = null;
+      scrollToBottom();
+    }
+
+    // 发送与当前 run / call_id 匹配的决定；每张卡片只允许提交一次。
+    function respondToApproval(callId, approved) {
+      const entry = pendingApprovals.get(callId);
+      if (!entry || entry.state !== "waiting") return;
+      if (!socket || socket.readyState !== WebSocket.OPEN || activeRunId !== entry.runId) {
+        setApprovalState(entry, "cancelled", "连接已关闭，本次工具不会执行。");
+        return;
+      }
+
+      try {
+        socket.send(JSON.stringify({
+          type: "approval.respond",
+          run_id: entry.runId,
+          call_id: callId,
+          approved,
+        }));
+        entry.state = approved ? "allowed" : "rejected";
+        setApprovalState(
+          entry,
+          entry.state,
+          approved ? "已允许本次调用，等待工具执行。" : "已拒绝本次调用，工具不会执行。",
+        );
+      } catch {
+        setApprovalState(entry, "cancelled", "决定未能送达；请检查连接状态。");
+      }
+    }
+
+    // run 结束或连接断开时关闭仍等待用户处理的卡片，避免留下过期按钮。
+    function closePendingApprovals(state, label) {
+      for (const entry of pendingApprovals.values()) {
+        if (entry.state === "waiting" || entry.state === "allowed") {
+          setApprovalState(entry, state, label);
+        }
+      }
+      pendingApprovals.clear();
+    }
+
     function showEvent(event) {
       if (event.type === "run.start") {
         activeRunId = event.run_id;
@@ -410,6 +567,10 @@
         scrollToBottom();
       } else if (event.type === "tool.start") {
         addToolActivity(event);
+        const approval = pendingApprovals.get(event.call_id);
+        if (approval && approval.runId === event.run_id && approval.state === "allowed") {
+          setApprovalState(approval, "running", "本次调用已获允许，工具正在执行。");
+        }
       } else if (event.type === "tool.end" || event.type === "tool.error") {
         let card = toolCards.get(event.call_id);
         if (!card) {
@@ -427,7 +588,21 @@
           body.textContent = result;
           card.details.append(body);
         }
+        const approval = pendingApprovals.get(event.call_id);
+        if (approval && approval.runId === event.run_id) {
+          if (event.type === "tool.end") {
+            setApprovalState(approval, "done", "工具已完成。");
+          } else if (approval.state === "waiting") {
+            setApprovalState(approval, "expired", "未收到允许决定或请求已超时；工具未执行。");
+          } else if (approval.state === "rejected") {
+            setApprovalState(approval, "rejected", "已拒绝本次调用；工具未执行。");
+          } else if (approval.state === "allowed" || approval.state === "running") {
+            setApprovalState(approval, "expired", "工具执行失败；请查看下方错误信息。");
+          }
+        }
         currentAssistantBubble = null;
+      } else if (event.type === "approval.request") {
+        addApprovalRequest(event);
       } else if (event.type === "run.end") {
         if (currentAssistantBubble) {
           currentAssistantBubble.textContent = event.output || currentAssistantBubble.textContent || "（没有文本输出）";
@@ -435,19 +610,23 @@
           addMessage("assistant", "Agent", event.output);
         }
         addNotice(`完成 · ${event.duration_ms ?? 0} ms · ${event.messages ?? 0} 条消息`);
+        closePendingApprovals("expired", "任务已结束；本次工具不会继续执行。");
         activeRunId = null;
         setBusy(false);
         currentAssistantBubble = null;
         input.focus();
       } else if (event.type === "run.cancelled") {
         addNotice("本轮已取消");
+        closePendingApprovals("cancelled", "任务已取消；本次工具未执行。");
         activeRunId = null;
         setBusy(false);
         currentAssistantBubble = null;
         input.focus();
       } else if (event.type === "run.error") {
         addNotice(event.message || "发生未知错误", true);
-        if (!event.run_id || event.run_id === activeRunId) {
+        // recoverable 错误只说明某条命令无效（例如重复应答），不代表 run 已结束。
+        if (!event.recoverable && (!event.run_id || event.run_id === activeRunId)) {
+          closePendingApprovals("expired", "任务发生错误；本次工具未执行。");
           activeRunId = null;
           setBusy(false);
           currentAssistantBubble = null;
@@ -480,6 +659,7 @@
         socket.addEventListener("close", () => {
           setConnection("idle", "连接已关闭");
           if (activeRunId) {
+            closePendingApprovals("cancelled", "连接中断；本次工具未执行。");
             activeRunId = null;
             setBusy(false);
             addNotice("连接中断；重新发送即可继续。", true);
@@ -492,12 +672,9 @@
       submitEvent.preventDefault();
       const instruction = input.value.trim();
       if (!instruction || activeRunId) return;
-      const allowWrite = writeToggle.checked;
 
       addMessage("user", "你", instruction);
       input.value = "";
-      writeToggle.checked = false;
-      $("#writeHint").textContent = "Agent 可能会调用工具；打开写入权限前请确认任务内容。";
       setBusy(true);
       currentAssistantBubble = null;
 
@@ -508,7 +685,6 @@
           instruction,
           task_name: instruction.slice(0, 30),
           thread_id: threadId || undefined,
-          allow_write: allowWrite,
         }));
       } catch (error) {
         setBusy(false);
@@ -532,9 +708,10 @@
       activeRunId = null;
       currentAssistantBubble = null;
       toolCards.clear();
+      pendingApprovals.clear();
       messages.innerHTML = `<div class="welcome" id="welcome"><div class="welcome-mark" aria-hidden="true">A</div><h2>想先做点什么？</h2><p>你可以像聊天一样描述任务，之后继续追问时会自动沿用本次会话记忆。</p><div class="suggestions"><button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。">列出数据目录</button><button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。">读取报告内容</button></div></div>`;
       sessionLabel.textContent = "新会话";
-      composerHint.textContent = "新会话 · 写入权限默认关闭";
+      composerHint.textContent = "写入或通知操作会逐次请求确认";
       setBusy(false);
       input.focus();
     });
@@ -552,12 +729,6 @@
         event.preventDefault();
         if (!sendButton.disabled) form.requestSubmit();
       }
-    });
-
-    writeToggle.addEventListener("change", () => {
-      $("#writeHint").innerHTML = writeToggle.checked
-        ? '<span class="warning">本轮已开启写入权限，Agent 可能修改文件或发送通知。</span>'
-        : "Agent 可能会调用工具；打开写入权限前请确认任务内容。";
     });
 
     document.addEventListener("keydown", (event) => {
