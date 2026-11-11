@@ -151,7 +151,7 @@ return init_chat_model(**kwargs)
 | | `.invoke()` | `.stream()` |
 |---|---|---|
 | 返回 | 一次性返回完整 `AIMessage` | 迭代器，逐块返回 |
-| 项目用在 | `runtime/runner.py:165`（同步路径） | 流式路径项目还没接，桌面版事件流待做 |
+| 项目用在 | `runtime/runner.py` 同步调用；`runtime/consumer.py` 通过 `agent.stream()` 消费流式输出 | WebSocket 工作台使用流式路径 |
 
 📘 02 章 31 页签名：
 
@@ -569,26 +569,26 @@ SYSTEM_PROMPT = """你是一个自动化日常事务助手。
 
 | 模式 | 输出内容 | 场景 | 项目用了吗 |
 |---|---|---|---|
-| `values` | 每步执行后输出**完整状态** | 每步要完整状态、状态持久化 | ❌ 暂无消费者 |
+| `values` | 每步执行后输出**完整状态** | 每步要完整状态、状态持久化 | ✅ 取最终回答与消息数 |
 | `updates`（默认） | 每步只输出**增量**变化 | 监控执行进度 | ❌ |
-| `messages` | 流式返回 token 及元数据 | 打字机效果、实时交互 | ❌ 暂无消费者 |
+| `messages` | 流式返回 token 及元数据 | 打字机效果、实时交互 | ✅ 归一化为 `model.text` |
 | `tasks` | task 开始/结束时间、结果、错误 | 监控任务生命周期 | ❌ |
 | `debug` | 类似 tasks，多时间戳与 task 类型 | 调试、监控 | ❌ |
 | `checkpoints` | 检查点创建时触发 | 状态持久化、工作流恢复 | ❌ |
-| `custom` | `get_stream_writer()` 自定义数据 | 业务进度、自定义日志 | ❌ |
+| `custom` | `get_stream_writer()` 自定义数据 | 业务进度、自定义日志 | ✅ EventBridge 发出 `tool.*` 事件 |
 
-**🧩 项目当前没有流式消费者**，所以七种模式现在一个都没在用。
+**🧩 项目当前使用 `messages`、`values`、`custom` 三种模式**，其余模式暂未接入。
 
-留下的只有流式**处理**逻辑，搬到了 `runtime/events.py`：
+流式事件的**归一化处理**位于 `runtime/events.py`：
 - `ThinkFilter`：滤掉模型混在正文里的 `<think>` 思考块；
 - `is_hint_node`：按 `langgraph_node` 滤掉中间件插入的例行提示。
 
-桌面版做 WebSocket 事件流时会重新用起 `messages` + `custom` 两种模式，
+WebSocket 事件流由 `runtime/consumer.py` 消费 `messages`、`custom` 与 `values`；
 多模式的迭代形式仍是 `(stream_mode, chunk)` 二元组。
 
 **坑**
 - 📘 07 章 P75-76：**多模式的迭代形式是 `(stream_mode, chunk)` 二元组**，不是裸 payload。
-- 🧩 `messages` 模式的 payload 是 `(chunk, metadata)` 二元组；`chunk` 可能是 `AIMessageChunk`（增量）也可能是整条 `AIMessage`（最终回答、中间件插入的消息）。桌面版事件流要同时处理这两种形态。
+- 🧩 `messages` 模式的 payload 是 `(chunk, metadata)` 二元组；`chunk` 可能是 `AIMessageChunk`（增量）也可能是整条 `AIMessage`（中间件插入的消息）。当前事件流要同时处理这两种形态。
 - 🧩 **工具调用只能从 `values` 里认** —— messages 模式下非流式模型不吐 `tool_call_chunks`。
 - 🧩 `values` 每步推整个状态字典，`messages` 列表随轮次线性膨胀。多模式调用时要用 `mode` 分流，不能把两种 payload 混着解。
 - 🧩 `meta` 里带 `langgraph_node`，用它过滤中间件噪音 —— 判定逻辑在 `runtime/events.py` 的 `is_hint_node`。
@@ -1440,7 +1440,7 @@ LangGraph 在**节点层**提供三种异常处理机制，执行顺序是：
 | `interrupt()` | ❌ 桌面版用协作式取消 |
 | 子图 | ❌ |
 | `langgraph dev` 部署 | ❌ 自建 FastAPI |
-| `astream_events` | ❌ 事件流还没做 |
+| `astream_events` | ❌ 当前用同步 `agent.stream()` + WebSocket 事件协议 |
 
 ---
 
@@ -1448,11 +1448,11 @@ LangGraph 在**节点层**提供三种异常处理机制，执行顺序是：
 
 这一层没有课件对应，是项目自己实现的部分。
 
-### 9.1 单一入口 `runtime/runner.py`
+### 9.1 共享 Agent 单例与调用路径
 
-**设计要点**：只有这一个入口能调用 Agent。调度器和 Python 调用方都从这里走，
-这样触发出来的行为（上下文构造、thread_id 规则、写权限默认值）完全一致，
-不会出现「某个入口忘了传 context」的情况。
+**设计要点**：`get_agent()` 提供进程内共享的 Agent 单例。定时任务和 Python 调用方通过
+`run_task()` 调用 `agent.invoke()`；WebSocket 端点复用同一实例，由 `StreamConsumer` 调用
+`agent.stream()`。两条执行路径都显式构造 `AgentContext`，并共享 checkpointer 的会话记忆。
 
 ```python
 _AGENT = None          # 模块级惰性单例
@@ -1545,7 +1545,7 @@ def set_cli_override(name: str, value: str) -> None:
 | chunk 类型 | 来自 | 处理 |
 |---|---|---|
 | `AIMessageChunk` | 模型增量 | → `model.text`（过一遍 `ThinkFilter` 滤掉 `<think>` 块） |
-| `AIMessage`（整条） | 中间件插入的提示 | 命中例行提示节点就丢掉，其余 → `model.text` |
+| `AIMessage`（整条） | 中间件插入的提示 | 命中例行提示节点就丢掉，其余文本 → `model.text` |
 | `ToolMessage` | 工具结果 | **丢掉** —— 它不是模型输出 |
 
 **坑**
@@ -1557,7 +1557,7 @@ def set_cli_override(name: str, value: str) -> None:
 - 🧩 `AIMessageChunk` 的 `content` 可能是内容块列表（多模态），非字符串形态要直接跳过。
 - 🧩 一次 run 一个 `StreamNormalizer` 实例 —— `ThinkFilter` 的缓冲跨 chunk 累积，换实例等于清零。
 
-### 9.6 同步流消费器（`runtime/consumer.py`）
+### 9.7 同步流消费器（`runtime/consumer.py`）
 
 🧩 项目自研，桌面版改造计划的阶段 3。
 
@@ -1622,7 +1622,7 @@ model.text 是归一化层滤过思考块的正文，那才是用户该看到的
 **取消是协作式的**：置位 `cancel_event` 后，消费循环在**下一次迭代**时检查到并 break ——
 正在跑的那一步（模型调用或工具执行）会做完。
 
-### 9.7 Run Manager（`runtime/runs.py`）
+### 9.8 Run Manager（`runtime/runs.py`）
 
 🧩 项目自研，桌面版改造计划的阶段 4。职责单一：**run 的生命周期**，不碰 agent、不碰事件格式。
 
@@ -1666,7 +1666,7 @@ model.text 是归一化层滤过思考块的正文，那才是用户该看到的
 - 🧩 `RunBusyError` 要由调用方捕获并转成 `run.error` 事件 ——
   Run Manager 自己不发事件，它不碰事件格式。
 
-### 9.8 WebSocket 事件流端点（`runtime/server.py` 的 `/ws`）
+### 9.9 WebSocket 事件流端点（`runtime/server.py` 的 `/ws`）
 
 🧩 项目自研，桌面版改造计划的阶段 5。
 
@@ -1720,9 +1720,9 @@ model.text 是归一化层滤过思考块的正文，那才是用户该看到的
 | 09 章 4.1 | `dynamic_prompt` | 未实现 | 值得练一次 |
 | 10 RAG | 检索增强生成 | requirements 里被注释掉了 | 需要向量库 + 切分，最后再碰 |
 | LG 02 章 5.3-5.4 节点超时 / 错误处理 | 当前 `langgraph 1.1.2` 不支持 | 升级到 langgraph ≥ 1.2 后，`RetryPolicy` 才有 `timeout` 与 `error_handler` |
-| LG 04 章 8 中断 | 没用 `interrupt()` | 桌面版做「取消」时可能要设计暂停点；当前用协作式取消 |
+| LG 04 章 8 中断 | 没用 `interrupt()` | 当前 WebSocket 取消是协作式取消；需要暂停并等待用户输入时再引入中断与恢复 |
 | LG 04 章 9.1 `langgraph dev` 部署 | 自建 FastAPI | 要用得让模块导出一个图对象（现在导出的是 FastAPI `app`） |
-| LG 05 章 11.3 `astream_events` | 没用 | 桌面版事件流可能用得上 |
+| LG 05 章 11.3 `astream_events` | 没用 | 当前以同步 `agent.stream()` 归一化为项目自己的 WebSocket 事件协议 |
 | LG 05 章 12 子图 | 单张图 | 等任务表长出多步骤工作流再拆 |
 | LG 05 章 13 设计模式 | 单一 ReAct 循环 | 编排者-工人 / 评估者-优化者要手写 `StateGraph` |
 

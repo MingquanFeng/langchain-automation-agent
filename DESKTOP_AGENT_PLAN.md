@@ -1,11 +1,10 @@
 # 桌面 Agent 改造计划
 
-> 这是把本项目从「HTTP 服务 + Python API」改造成「桌面 Agent」的路线图。
-> 本文只写**第一步**（事件流后端）的完整设计；后面的步骤列到里程碑级别。
+> 本文最初用于规划事件流后端，后续已补记实施状态与连续对话调试工作台。顶部的 Context、范围和 D1-D6 记录的是**实施前的设计基线**；当前完成情况以文末「实施顺序」和「后续里程碑」为准。
 
 ## Context：为什么要做这一步
 
-现在的 agent 调用是**黑盒**：
+启动这份计划时，agent 调用是**黑盒**：
 
 - HTTP 层不提供触发入口，交互终端也不存在 —— 只能调 `runner.run_task()` 跑一次等最终结果
 - 中途发生了什么完全看不见
@@ -14,8 +13,7 @@
 桌面 Agent 的第一个要求是「运行中可见、可打断」。而 UI 的唯一输入是**事件流** ——
 没有它，GUI 只能等最终结果；有了它，终端、网页、桌面壳都能从同一份事件流长出来。
 
-所以第一步只做一件事：**把 agent 的内部过程变成结构化事件，用 WebSocket 双向推给客户端，
-并支持客户端取消**。不做界面。
+所以计划的第一步是：**把 agent 的内部过程变成结构化事件，用 WebSocket 双向推给客户端，并支持客户端取消**。当时先实现后端；浏览器工作台已在后续提交中补上。
 
 ### 已实测验证的技术前提
 
@@ -52,7 +50,7 @@
 
 ### 这一步不做
 
-- 任何界面（TUI / GUI）—— 下一步
+- 本阶段不包含界面（TUI / GUI）；这是当时的实施范围，浏览器工作台已在后续提交中完成
 - 权限分级与授权弹窗 —— 第三步
 - `interrupt()` / 暂停等输入 —— 只做「取消」
 - 工具级超时 —— 见 P1 说明，只在事件模型里预留
@@ -231,7 +229,7 @@ loop.call_soon_threadsafe(lambda: asyncio.ensure_future(queue.put(event)))
 ### 关键决策
 
 **D1 · 用同步 `agent.stream()` + 线程桥接，不用 `astream()`**
-现有假模型只在同步路径工作（见上）。走同步路径还有个好处：**现有 38 项测试一行不用改**。
+现有假模型只在同步路径工作（见上）。走同步路径还有个好处：当时既有测试不需要改动；目前测试套件已扩展，数量以实际运行结果为准。
 
 **D2 · 取消用 `threading.Event` + `break`，不 hack 生成器**
 在消费循环里检查标志位，命中就 `break`。生成器随之被关闭，LangGraph 自行清理。
@@ -288,9 +286,10 @@ Starlette 的 `WebSocket.send` **没有锁** —— 并发发帧会交错。
 | 3 | 同步流消费器 + 线程桥接 + 有界队列背压 | P0 | ✅ 已完成（`runtime/consumer.py`） |
 | 4 | Run Manager（run_id / cancel_event / start / cancel / finish） | P0 | ✅ 已完成（`runtime/runs.py`） |
 | 5 | WebSocket 端点 `/ws`（收 run.start / cancel，单连接单任务） | P0 | ✅ 已完成（`runtime/server.py`） |
-| 6 | 异常处理 + 连接断开清理 | P0 | |
-| 7 | 单元测试 + 集成测试 | P0 | |
-| 8 | 文档同步 | P1 | |
+| 6 | 异常处理 + 连接断开清理 | P0 | ✅ 已完成（消费器、Run Manager、WebSocket 均处理结束/取消/异常路径；断连会取消活跃 run） |
+| 7 | 单元测试 + 集成测试 | P0 | ✅ 后端覆盖已完成（事件、消费器、Run Manager、WebSocket 均有测试；聊天页面尚无自动化回归测试） |
+| 8 | 文档同步 | P1 | ✅ 已完成（README、CLAUDE、LEARNING、KNOWLEDGE 与本计划已对齐当前实现） |
+| 9 | 连续对话调试工作台（GET `/`） | P1 | ✅ 已完成（`runtime/static/index.html`，通过 WebSocket 展示事件并复用 `thread_id`） |
 
 阶段 3 和 4 有依赖（消费器要用 cancel_event），其余可独立推进。
 
@@ -333,11 +332,11 @@ Starlette 的 `WebSocket.send` **没有锁** —— 并发发帧会交错。
 ## 验证
 
 ```bash
-# 1. 全部测试通过（现有 47 项不能坏）
+# 1. 运行完整测试套件（当前 README 记录为 101 项；以实际 pytest 结果为准）
 $PY -m pytest tests/ -q
 
-# 2. 新增测试通过
-$PY -m pytest tests/test_events.py tests/test_runs.py -q
+# 2. 运行事件流后端的重点测试
+$PY -m pytest tests/test_events.py tests/test_event_bridge.py tests/test_consumer.py tests/test_runs.py tests/test_ws.py -q
 
 # 3. 服务起得来，WebSocket 端点可用
 $PY -m runtime --no-schedule --port 8125
@@ -371,8 +370,7 @@ asyncio.run(main())
 
 **取消路径**：发 `run.start` 后立刻发 `cancel`，应收到 `run.cancelled` 且**没有** `run.end`。
 
-**异常路径**：让模型抛异常，应收到 `run.error` 且**没有** `run.end`。
-（这条最容易漏，必须有集成测试守着 —— 否则 UI 会一直转圈。）
+**异常路径**：区分两种情况验证：未被中间件处理的异常应收到 `run.error` 且没有 `run.end`；模型调用失败在当前 `ModelRetryMiddleware(on_failure="continue")` 配置下会作为回答内容结束，收到 `run.end`。不要把后一种行为误判成 WebSocket 异常路径失效。
 
 ---
 
@@ -391,7 +389,8 @@ asyncio.run(main())
 
 | 步骤 | 内容 | 依赖 |
 |---|---|---|
-| **1. 事件流后端**（本文） | WebSocket、事件模型、Run Manager、取消机制 | — |
+| **已完成：1. 事件流后端**（本文） | WebSocket、事件模型、Run Manager、取消机制 | — |
+| **已完成：连续对话调试工作台** | 浏览器聊天界面、实时事件展示、同一会话复用 `thread_id` | 1 |
 | 2. 权限分级 | 工具声明 `risk_level`；`TaskGateMiddleware` 从二值改策略式；授权请求事件 → 客户端应答 | 1 |
 | 3. Textual TUI | 接上事件流；diff 视图、工具卡片、授权弹窗 | 1、2 |
 | 4. 工具集扩张 | 先只读（目录树、grep、读任意源码），再可逆写（结构化编辑），最后 shell | 2 |

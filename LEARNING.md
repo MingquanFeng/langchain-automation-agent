@@ -41,7 +41,7 @@
 模型、工具、中间件、记忆全是**注入参数** —— 所以换模型/换工具不用改调用方，这就是 `build_agent()` 存在的意义。
 
 **延伸**：课件 07 章 8.2 讲了 7 种 `stream_mode`（values / updates / messages / tasks / debug / checkpoints / custom）。
-**项目目前没有流式消费者** —— 桌面版做事件流时会重新用起 `values` + `messages` + `custom`（见主线 6）。
+**项目已有流式消费者**：`runtime/consumer.py` 在工作线程中运行 `agent.stream()`，并消费 `values`、`messages` 与 `custom` 三种模式（见主线 5）。
 
 ---
 
@@ -133,17 +133,19 @@
 
 ## 主线 5：运行时外壳（课件未覆盖，自研部分）
 
-**读源码**：`runtime/runner.py` → `runtime/scheduler.py` → `runtime/server.py` → `runtime/tasks.py` → `runtime/consumer.py`（桌面版事件流）
+**读源码**：`runtime/runner.py` → `runtime/scheduler.py` → `runtime/tasks.py` → `runtime/events.py` → `runtime/consumer.py` → `runtime/runs.py` → `runtime/server.py` → `runtime/static/index.html`
 
 | 位置 | 看什么 |
 |---|---|
-| `runtime/runner.py:58` `get_agent()` | `_AGENT` 单例，保留 checkpointer 里的记忆。调度器和 Python 调用方都走 `run_task()`，保证行为一致 |
+| `runtime/runner.py` `get_agent()` / `run_task()` | `_AGENT` 单例保留 checkpointer 记忆；定时任务与 Python 调用方走同步 `run_task()`，WebSocket 消费器复用同一 Agent 做流式执行 |
 | `runtime/scheduler.py:141` | `CronTrigger.from_crontab` —— 5 段 cron，按 `SCHEDULER_TIMEZONE` 解释。**LangGraph 1.x 本地没有内置 cron**，`langgraph_sdk` 也没导出，那是云端 Platform 的能力 |
-| `runtime/server.py:150` `/health` | 探活 + 调度器开关状态。**HTTP 层现在只管定时任务与状态查询，不提供触发 Agent 的入口** —— 触发走定时任务 / Python API / 桌面壳 |
+| `runtime/server.py` `/`、`/health` | 根路径提供连续对话调试工作台；`/health` 返回探活与调度器状态 |
 | `runtime/tasks.py:109` `TASKS` | 改这个文件就改 Agent 每天自动做什么。注意它是**内存字典，不落盘** |
-| `runtime/consumer.py` `StreamConsumer` | 桌面版阶段 3。在工作线程里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压 | — |
-| `runtime/runs.py` `RunManager` | 桌面版阶段 4。run 的生命周期。**run_id 是一次执行的身份，thread_id 是会话的记忆隔离键** | — |
-| `runtime/server.py` `/ws` | 桌面版阶段 5。WebSocket 事件流端点。收 `run.start` / `cancel`，推结构化事件 | — |
+| `runtime/events.py` `StreamNormalizer` | 把 `agent.stream()` 多模式输出转换为带版本的结构化事件；过滤思考块、提示节点和工具消息 | — |
+| `runtime/consumer.py` `StreamConsumer` | 在工作线程运行 `agent.stream()`，把事件送入 asyncio 队列；队列容量与在途上限共同提供背压 | — |
+| `runtime/runs.py` `RunManager` | 管理 WebSocket run 生命周期、取消与清理。**run_id 是一次执行的身份，thread_id 是会话的记忆隔离键** | — |
+| `runtime/server.py` `/ws` | WebSocket 事件流端点。收 `run.start` / `cancel`，推结构化事件；连接断开会取消活跃 run | — |
+| `runtime/static/index.html` | 连续聊天工作台；后续消息沿用当前 `thread_id`，可观察工具事件并取消运行 | — |
 
 ---
 

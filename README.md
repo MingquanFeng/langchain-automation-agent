@@ -7,15 +7,15 @@
 | 层 | 职责 | 对应内容 |
 |---|---|---|
 | `agent/` | 能力与状态层 | 工具、中间件栈、运行时上下文、记忆后端 |
-| `runtime/` | 运行时外壳 | APScheduler 定时任务、FastAPI 服务、任务表 |
+| `runtime/` | 运行时外壳 | APScheduler 定时任务、FastAPI 服务、事件流、连续对话工作台 |
 
-整个项目约 4200 行（去掉空行和纯注释约 1900 行），每段源码都标注了对应的教程章节，是一份**可运行的学习教材**，而不是业务系统。
+源码带有教程章节索引，是一份**可运行的学习教材**，而不是业务系统。
 
 ## 特点
 
 - **1.x 新写法**：`create_agent` + 中间件体系 + `state`/`store`/`checkpointer`
 - **中间件栈完整**：事件桥接 → 限次 → 重试 → 任务拆解 → 上下文清理 → 脱敏 → 自定义守卫，顺序可考
-- **测试零成本**：38 项端到端测试全部用假模型，不调用任何真实 API
+- **测试零成本**：测试使用假模型，不调用真实模型 API
 - **学习材料齐备**：`LEARNING.md` 源码索引，课件章节 ↔ 源码位置一一对应；`KNOWLEDGE.md` 把相关知识点浓缩成速查手册
 
 ## 快速开始
@@ -50,7 +50,7 @@ cp .env.example .env
 python -m pytest tests/ -q
 ```
 
-当前测试套件预期 `101 passed`。全部使用假模型，不需要 API key。
+仓库当前记录的测试结果为 `101 passed`。全部使用假模型，不需要 API key；新增测试后以实际 pytest 输出为准。
 
 ### 4. 起服务
 
@@ -73,7 +73,7 @@ python -m runtime --reload       # 开发模式热重载
 
 WebSocket `/ws` 是工作台使用的实时事件流接口。
 
-REST 接口只管理定时任务和查询状态；交互式任务通过 WebSocket `/ws` 触发。也可以从 Python 直接调用：
+REST 接口只管理定时任务和查询状态；浏览器工作台通过 WebSocket `/ws` 触发交互式任务。也可以从 Python 直接调用：
 
 ```bash
 # Python API（allow_write 默认 false，即只读，写工具会被闸门拦下）
@@ -109,12 +109,15 @@ agent/
   tools/             L1 能力层：文件工具（沙箱限制在 data/）+ 通知出口
   middleware/        中间件：只读闸门、上下文注入、耗时统计 + PII 脱敏
 runtime/
-  runner.py          唯一 Agent 调用入口，调度器和 Python 调用方都走它
+  runner.py          同步 run_task() 入口；提供共享的 get_agent() 单例
   scheduler.py       APScheduler 封装（LangGraph 1.x 本地没有内置 cron）
-  server.py          FastAPI，定时任务增删查 + 状态查询（不触发 Agent）
-  events.py          事件归一化层，桌面版事件流的落点
+  server.py          FastAPI，定时任务接口、浏览器工作台、WebSocket 事件流
+  events.py          事件模型与流归一化
+  consumer.py        工作线程中的 agent.stream() 消费器与跨线程背压
+  runs.py             WebSocket run 生命周期、取消和清理
+  static/index.html  连续对话调试工作台
   tasks.py           定时任务表，改这里就改 Agent 每天自动做什么
-tests/               端到端测试
+tests/               单元测试与集成测试（含假模型）
 ```
 
 ## 实现要点

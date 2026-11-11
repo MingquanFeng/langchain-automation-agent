@@ -39,7 +39,7 @@ PY=/opt/miniconda3/envs/langchain1.2/bin/python
 所有命令都在本目录（`automation_agent/`）下执行。
 
 ```bash
-# 跑测试（38 项，全部用假模型，不调真实 API）
+# 跑完整测试套件（当前记录为 101 项，全部用假模型，不调真实模型 API）
 $PY -m pytest tests/ -q
 
 # 跑单个测试
@@ -60,7 +60,7 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 # serve 是默认子命令，$PY -m runtime serve 与 $PY -m runtime 等价
 ```
 
-**本项目只有 pytest 一道验证关卡**，没有 lint、type-check、build 步骤（纯 Python 包，无打包产物）。提交前的验证底线就是 `pytest tests/ -q` 38 项全过 + 按实际需求跑一次服务确认能起来。
+本项目目前没有单独的 lint、type-check 或 build 步骤。提交前运行 `pytest tests/ -q`，确认全部通过；测试数量随测试增删变化，以实际输出为准。涉及服务或界面时，再启动服务做相应手工验证。
 
 服务起来后的 HTTP 端点：
 
@@ -71,10 +71,10 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 | POST | `/tasks` | 动态添加定时任务（cron + 指令） |
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 列出调度器已注册的 job 与下次运行时间 |
+| GET | `/` | 连续对话调试工作台 |
 | WS | `/ws` | 桌面版事件流。收 `run.start` / `cancel`，推结构化事件 |
 
-**HTTP 层不提供触发 Agent 的入口** —— 触发只有两条路：`runtime/runner.py` 的 `run_task()`（Python 调用方）、
-`runtime/scheduler.py` 的定时任务。交互入口（终端 / 桌面壳）按桌面版路线重做，见 `DESKTOP_AGENT_PLAN.md`。
+浏览器工作台通过 WebSocket `/ws` 启动和取消交互式任务；Python 调用方可用 `runtime/runner.py` 的 `run_task()`，定时任务由 `runtime/scheduler.py` 触发。当前已有浏览器调试工作台；权限分级、Textual TUI 与 Tauri GUI 仍在路线图中，见 `DESKTOP_AGENT_PLAN.md`。
 
 首次使用需 `cp .env.example .env` 并填 `LLM_API_KEY`。环境变量全清单见 `.env.example`。
 
@@ -117,7 +117,7 @@ LANGSMITH_PROJECT=automation-agent
 - `LEARNING.md` — **源码索引**：课件章节 ↔ 源码位置的对照表。想学这个项目先看它。共 6 条主线，第 6 条是 LangGraph 底层。
 - `KNOWLEDGE.md` — **知识点总结**：只讲本项目实际用到的 API 是什么、怎么写、坑在哪。当速查手册用。
 - `courseware/` — 课件原文，两个子目录：`langChain/`（LangChain 1.x 的 10 章 PDF）+ `langGraph/`（LangGraph 专项课件 6 篇 Markdown）。索引见 `courseware/README.md`。
-- `DESKTOP_AGENT_PLAN.md` — 把本项目改造成桌面 Agent 的路线图，第一步（事件流后端）要用到 LangGraph 的中断与流式。
+- `DESKTOP_AGENT_PLAN.md` — 事件流后端与连续对话调试工作台的设计、现状及后续路线图。
 
 ## 架构
 
@@ -141,12 +141,13 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 ### runtime/ — 运行时外壳
 
-- `runner.py` — 唯一的 Agent 调用入口，调度器和 Python 调用方都走它，保证行为一致。`_AGENT` 单例复用，保留 checkpointer 里的记忆。
+- `runner.py` — `run_task()` 同步调用入口；`get_agent()` 提供共享 Agent 单例。定时任务和 Python 调用方走 `run_task()`，WebSocket 消费器则用同一单例运行 `agent.stream()`。
 - `scheduler.py` — APScheduler 封装。**LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力），所以定时触发必须自己接 APScheduler。cron 表达式按 `SCHEDULER_TIMEZONE` 解释，用 `CronTrigger.from_crontab`，即标准 5 段格式。
-- `server.py` — FastAPI。定时任务增删查 + 调度状态 + 探活 + **`/ws` 事件流端点**（桌面版阶段 5）。`/ws` 收 `run.start` / `cancel` 两条命令，推 `run.start` / `model.text` / `tool.*` / `run.end` / `run.cancelled` / `run.error` 事件。**单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，并发发帧会交错，所以所有消息都进同一个队列由唯一的推送任务发出。
+- `server.py` — FastAPI。定时任务增删查、调度状态、探活、根路径工作台与 **`/ws` 事件流端点**。`/ws` 收 `run.start` / `cancel` 两条命令，推 `run.start` / `model.text` / `tool.*` / `run.end` / `run.cancelled` / `run.error` 事件。**单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，并发发帧会交错，所以所有消息都进同一个队列由唯一的推送任务发出。
 - `events.py` — 事件模型 + 归一化层。`BaseEvent` 加 9 种事件构成桌面版的事件协议；`StreamNormalizer` 把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件。
 - `consumer.py` — 同步流消费器（桌面版阶段 3）。在**工作线程**里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压：队列容量管「已入队」、`max_pending` 管「在途未入队」。**不要改成等 `future.result()`** —— 事件循环在 resolve 前关闭时那会永久阻塞。
 - `runs.py` — Run Manager（桌面版阶段 4）。管 run 的生命周期：`start` / `get` / `cancel` / `finish` / `active`。**run_id 是一次执行的身份、thread_id 是会话的记忆隔离键，两回事**。第一版单连接单任务 —— 同一 owner 第二次 `start` 抛 `RunBusyError`，由调用方回一条 `run.error`，不静默取消旧的。
+- `static/index.html` — 根路径提供的连续对话调试工作台，复用 `thread_id` 展示对话与运行事件。
 - `tasks.py` — 定时任务表。改这个文件就改 Agent 每天自动做什么。**注意 `TASKS` 是模块级内存字典，不落盘** —— `POST /tasks` 动态加的任务进程重启即消失，只有改代码里的 `TASKS` 列表才是持久定义。
 - `__main__.py` — CLI 入口，唯一子命令 `serve`（默认，起 HTTP 服务 + 可选调度器）。`--no-schedule` / `--reload` / `--host` / `--port` 都在这里解析。**它同时是陷阱 10 的落地文件** —— 调度开关必须在 `import runtime.server` 之前生效，顺序不能改。
 
@@ -279,4 +280,4 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
   `version` 是协议版本，改事件结构时要动它 —— 客户端靠它识别新旧格式。
 - **中间件顺序有意义**：`LIMITS` 放最前（先挡住跑飞），`CUSTOM_MIDDLEWARE` 放最后（能看到前面中间件的结果）。
 - **测试会真写 `data/` 目录**（`data/out/report.md` 等），`data/` 已在 `.gitignore` 里，跑测试不必清理。
-- 提交前跑 `pytest tests/ -q`，38 项必须全过。
+- 提交前跑 `pytest tests/ -q`，全部测试必须通过；测试数量以当次输出为准。
