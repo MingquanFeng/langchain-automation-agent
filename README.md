@@ -50,27 +50,30 @@ cp .env.example .env
 python -m pytest tests/ -q
 ```
 
-预期输出 `38 passed`。全部使用假模型，不需要 API key。
+当前测试套件预期 `101 passed`。全部使用假模型，不需要 API key。
 
 ### 4. 起服务
 
 ```bash
 python -m runtime                # 含定时任务
-python -m runtime --no-schedule  # 只起 HTTP 服务
+python -m runtime --no-schedule  # 启动服务，但不启动定时任务
 python -m runtime --reload       # 开发模式热重载
 ```
 
-服务起在 `http://127.0.0.1:8000`：
+服务起在 `http://127.0.0.1:8000`。打开根地址即可与 Agent 连续聊天：后续消息自动沿用当前会话记忆，并可实时查看工具调用或取消运行。
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
+| GET | `/` | 本地 Agent 调试工作台 |
 | GET | `/health` | 健康检查 |
 | GET | `/tasks` | 列出定时任务 |
 | POST | `/tasks` | 动态添加定时任务 |
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 已注册 job 与下次运行时间 |
 
-**HTTP 层不触发 Agent** —— 它只管定时任务与状态查询。触发 Agent 现在只剩一条路：
+WebSocket `/ws` 是工作台使用的实时事件流接口。
+
+REST 接口只管理定时任务和查询状态；交互式任务通过 WebSocket `/ws` 触发。也可以从 Python 直接调用：
 
 ```bash
 # Python API（allow_write 默认 false，即只读，写工具会被闸门拦下）
@@ -80,7 +83,7 @@ print(run_task(instruction='列出数据目录下的文件', allow_write=True)['
 "
 ```
 
-交互入口（终端 / 桌面壳）正在按桌面版路线重做，见 [DESKTOP_AGENT_PLAN.md](DESKTOP_AGENT_PLAN.md)。
+更完整的桌面版路线见 [DESKTOP_AGENT_PLAN.md](DESKTOP_AGENT_PLAN.md)。
 
 ## 代码导览
 

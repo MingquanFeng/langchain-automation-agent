@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f5f8">
+  <title>Agent Workbench</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --blue: #315fe8;
+      --blue-soft: #edf2ff;
+      --ink: #202938;
+      --muted: #778294;
+      --line: #e4e8ef;
+      --paper: #fff;
+      --canvas: #f3f5f8;
+      --amber: #d9822b;
+      --green: #258568;
+      --red: #c44f4f;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
+      outline: 3px solid #9bb2ff;
+      outline-offset: 2px;
+    }
+
+    .topbar {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 30px;
+      background: var(--paper);
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 680; letter-spacing: -.02em; }
+    .brand-mark {
+      width: 30px; height: 30px; display: grid; place-items: center;
+      border-radius: 9px; color: white; background: var(--blue);
+      font-family: var(--mono); font-size: 15px; font-weight: 700;
+      box-shadow: 0 4px 10px #315fe833;
+    }
+    .brand small { display: block; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .02em; }
+    .connection { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+    .connection code, .mono { font-family: var(--mono); }
+    .signal { width: 8px; height: 8px; border-radius: 50%; background: #a0a8b5; }
+    .connection[data-state="connected"] .signal { background: var(--green); box-shadow: 0 0 0 4px #25856818; }
+    .connection[data-state="connecting"] .signal { background: var(--amber); }
+    .connection[data-state="error"] .signal { background: var(--red); }
+
+    main { width: min(1240px, calc(100% - 48px)); margin: 34px auto 28px; }
+    .intro { display: flex; align-items: end; justify-content: space-between; margin-bottom: 22px; }
+    .eyebrow { color: var(--blue); font: 650 10px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+    h1 { margin: 8px 0 0; font-size: clamp(24px, 3vw, 32px); line-height: 1.15; letter-spacing: -.045em; font-weight: 690; }
+    .intro p { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+    .local-tag { color: #687487; font: 11px var(--mono); border: 1px solid #dce1e9; background: #f8f9fb; padding: 7px 10px; border-radius: 7px; }
+
+    .workspace { display: grid; grid-template-columns: minmax(290px, 360px) minmax(0, 1fr); gap: 18px; align-items: stretch; }
+    .panel { min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px #25324a08; }
+    .compose { padding: 22px; }
+    .panel-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 21px; }
+    .panel-heading h2 { margin: 0; font-size: 14px; font-weight: 650; }
+    .step-label { color: #97a1af; font: 10px var(--mono); letter-spacing: .08em; }
+    .field { margin-bottom: 17px; }
+    .field label, .field-label { display: block; margin-bottom: 7px; color: #536071; font-size: 12px; font-weight: 600; }
+    input[type="text"], textarea {
+      width: 100%; border: 1px solid #dce2eb; border-radius: 7px; background: #fff;
+      color: var(--ink); padding: 10px 11px; transition: border-color .15s, box-shadow .15s;
+    }
+    input[type="text"]:focus, textarea:focus { border-color: #8ba5ff; box-shadow: 0 0 0 3px #315fe814; outline: none; }
+    input::placeholder, textarea::placeholder { color: #a5adba; }
+    textarea { min-height: 132px; resize: vertical; line-height: 1.55; }
+    .hint { margin-top: 6px; color: #929baa; font-size: 11px; }
+    .permission {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 12px; margin: 4px 0 17px; border: 1px solid var(--line); border-radius: 8px;
+      background: #fafbfc;
+    }
+    .permission strong { display: block; font-size: 12px; }
+    .permission small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
+    .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+    .switch span { position: absolute; inset: 0; border-radius: 20px; background: #c8ced8; transition: background .18s; }
+    .switch span::after { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #0002; transition: transform .18s; }
+    .switch input:checked + span { background: var(--amber); }
+    .switch input:checked + span::after { transform: translateX(16px); }
+    .switch input:focus-visible + span { outline: 3px solid #9bb2ff; outline-offset: 2px; }
+    .actions { display: flex; gap: 9px; }
+    .primary, .secondary {
+      min-height: 40px; border: 0; border-radius: 7px; padding: 0 14px; font-size: 12px; font-weight: 650;
+    }
+    .primary { flex: 1; color: white; background: var(--blue); box-shadow: 0 3px 9px #315fe82b; }
+    .primary:hover:not(:disabled) { background: #244ed0; }
+    .secondary { color: #586476; background: #edf0f5; }
+    .secondary:hover:not(:disabled) { background: #e3e7ee; }
+    button:disabled { cursor: not-allowed; opacity: .48; }
+    .permission-warning { display: none; color: #a65d17; font-size: 11px; margin: -8px 0 15px; }
+    .permission-warning.visible { display: block; }
+
+    .run-panel { display: flex; flex-direction: column; min-height: 620px; overflow: hidden; }
+    .run-head { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+    .run-title { min-width: 0; }
+    .run-title h2 { margin: 0; font-size: 14px; font-weight: 650; }
+    .run-id { margin-top: 4px; color: var(--muted); font: 10px var(--mono); overflow-wrap: anywhere; }
+    .run-controls { display: flex; align-items: center; gap: 10px; }
+    .status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .status::before { content: ""; width: 7px; height: 7px; background: #adb5c1; border-radius: 50%; }
+    .status[data-state="running"] { color: var(--blue); }
+    .status[data-state="running"]::before { background: var(--blue); animation: pulse 1.2s infinite; }
+    .status[data-state="done"] { color: var(--green); }
+    .status[data-state="done"]::before { background: var(--green); }
+    .status[data-state="error"], .status[data-state="cancelled"] { color: var(--red); }
+    .status[data-state="error"]::before, .status[data-state="cancelled"]::before { background: var(--red); }
+    @keyframes pulse { 50% { box-shadow: 0 0 0 5px #315fe81c; } }
+    .cancel { border: 1px solid #f0d4d2; border-radius: 6px; color: #a44848; background: #fff9f8; padding: 6px 10px; font-size: 11px; font-weight: 600; }
+    .cancel:hover:not(:disabled) { background: #fff0ed; }
+
+    .timeline { position: relative; flex: 1; min-height: 360px; max-height: 590px; overflow: auto; padding: 20px 22px 26px 42px; }
+    .timeline::before { content: ""; position: absolute; top: 25px; bottom: 28px; left: 25px; width: 1px; background: #e5e9f0; }
+    .empty { height: 100%; min-height: 320px; display: grid; place-content: center; text-align: center; color: var(--muted); }
+    .empty-mark { width: 46px; height: 46px; margin: 0 auto 13px; display: grid; place-items: center; color: var(--blue); background: var(--blue-soft); border-radius: 14px; font: 20px var(--mono); }
+    .empty strong { color: #4b5869; font-size: 13px; font-weight: 620; }
+    .empty p { max-width: 250px; margin: 5px auto 0; font-size: 11px; }
+    .entry { position: relative; margin: 0 0 18px; animation: arrive .22s ease-out both; }
+    @keyframes arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .entry::before { content: ""; position: absolute; left: -21px; top: 5px; width: 8px; height: 8px; border-radius: 2px; background: var(--blue); box-shadow: 0 0 0 4px white, 0 0 0 5px #dfe5ef; }
+    .entry[data-kind="tool"]::before { border-radius: 2px; background: #6c7d9c; }
+    .entry[data-kind="error"]::before { background: var(--amber); }
+    .entry[data-kind="terminal"]::before { width: 10px; height: 10px; left: -22px; border-radius: 50%; background: var(--green); }
+    .entry-top { display: flex; align-items: center; gap: 8px; color: var(--muted); font: 10px var(--mono); }
+    .event-label { color: #4f5e73; font-weight: 700; letter-spacing: .04em; }
+    .entry-body { margin-top: 6px; color: #384456; font-size: 12px; overflow-wrap: anywhere; }
+    .model-copy { white-space: pre-wrap; line-height: 1.7; }
+    .tool-card { margin-top: 7px; border: 1px solid #e7eaf0; border-radius: 7px; background: #fafbfc; overflow: hidden; }
+    .tool-card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; background: #f5f7fa; }
+    .tool-name { color: #43536b; font: 600 11px var(--mono); }
+    .tool-meta { color: #7c8796; font: 10px var(--mono); }
+    .tool-preview { padding: 9px 10px; color: #596678; font: 10px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 150px; overflow: auto; }
+    .answer { margin: 4px 0 0; padding: 13px 14px; border: 1px solid #dce6ff; border-left: 3px solid var(--blue); border-radius: 7px; background: #f8faff; color: #27354d; font-size: 13px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .error-copy { color: #9a4d28; }
+    details.raw { border-top: 1px solid var(--line); background: #fcfcfd; }
+    details.raw summary { padding: 11px 20px; color: #758093; cursor: pointer; font-size: 10px; font-weight: 600; list-style: none; }
+    details.raw summary::-webkit-details-marker { display: none; }
+    details.raw summary::before { content: "+"; margin-right: 8px; color: var(--blue); font: 13px var(--mono); }
+    details.raw[open] summary::before { content: "−"; }
+    .raw pre { max-height: 210px; overflow: auto; margin: 0; padding: 0 20px 16px; color: #647186; font: 10px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .footnote { margin: 14px 2px 0; color: #8791a0; font-size: 10px; }
+    .key { padding: 2px 5px; border: 1px solid #dce1e9; border-radius: 4px; background: #fff; font: 10px var(--mono); }
+
+    main.chat-app { width: min(920px, calc(100% - 36px)); height: calc(100vh - 100px); min-height: 560px; margin: 18px auto; display: flex; flex-direction: column; }
+    .chat-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 2px 14px; }
+    .chat-heading { min-width: 0; }
+    .chat-heading h1 { margin: 0; font-size: 17px; letter-spacing: -.025em; }
+    .chat-heading p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+    .chat-actions { display: flex; align-items: center; gap: 10px; }
+    .session-chip { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #69768a; font: 10px var(--mono); }
+    .new-chat { border: 1px solid #dce2eb; border-radius: 7px; background: #fff; color: #526075; padding: 7px 11px; font-size: 11px; font-weight: 600; }
+    .new-chat:hover:not(:disabled) { border-color: #b9c7eb; color: var(--blue); }
+    .chat-panel { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .messages { min-height: 0; flex: 1; overflow: auto; padding: 24px clamp(16px, 5vw, 54px); scroll-behavior: smooth; }
+    .welcome { max-width: 510px; margin: 10vh auto 0; text-align: center; color: var(--muted); }
+    .welcome-mark { width: 46px; height: 46px; display: grid; place-items: center; margin: 0 auto 14px; border-radius: 14px; background: var(--blue-soft); color: var(--blue); font: 22px var(--mono); }
+    .welcome h2 { margin: 0; color: #344054; font-size: 19px; letter-spacing: -.03em; }
+    .welcome p { margin: 8px 0 0; font-size: 12px; }
+    .suggestions { display: flex; justify-content: center; flex-wrap: wrap; gap: 7px; margin-top: 20px; }
+    .suggestion { border: 1px solid #e2e7ef; border-radius: 18px; background: white; color: #657187; padding: 7px 10px; font-size: 10px; }
+    .suggestion:hover { border-color: #bbc9ec; color: var(--blue); }
+    .message { display: flex; gap: 11px; margin: 0 0 23px; animation: arrive .2s ease-out both; }
+    .message.user { justify-content: flex-end; }
+    .avatar { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; border-radius: 8px; background: var(--blue); color: white; font: 11px var(--mono); }
+    .message.user .avatar { order: 2; background: #e8edf6; color: #55647a; }
+    .message-content { min-width: 0; max-width: min(680px, 88%); }
+    .message-label { margin: 0 0 5px; color: #8791a0; font-size: 10px; }
+    .message.user .message-label { text-align: right; }
+    .bubble { border: 1px solid #e7eaf0; border-radius: 3px 12px 12px 12px; background: #fff; padding: 11px 14px; color: #354154; font-size: 13px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .message.user .bubble { border-color: #dbe5ff; border-radius: 12px 3px 12px 12px; background: #f1f5ff; }
+    .activity { margin: -9px 0 20px 37px; animation: arrive .2s ease-out both; }
+    .activity details { max-width: 680px; border: 1px solid #e6eaf0; border-radius: 8px; background: #fafbfc; }
+    .activity summary { display: flex; align-items: center; gap: 8px; padding: 9px 11px; cursor: pointer; color: #58677e; font-size: 11px; list-style: none; }
+    .activity summary::-webkit-details-marker { display: none; }
+    .activity summary::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: #8291a9; }
+    .activity[data-state="running"] summary::before { background: var(--blue); animation: pulse 1.2s infinite; }
+    .activity[data-state="error"] summary::before { background: var(--amber); }
+    .activity-tool { color: #45546a; font: 600 10px var(--mono); }
+    .activity-meta { margin-left: auto; color: #8b95a4; font: 10px var(--mono); }
+    .activity-body { padding: 0 11px 10px; color: #687589; font: 10px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .run-notice { margin: 0 0 17px 37px; color: #8a94a3; font-size: 10px; }
+    .run-notice.error { color: #a6503e; }
+    .composer-wrap { border-top: 1px solid var(--line); padding: 14px clamp(14px, 4vw, 36px) 12px; background: #fff; }
+    .composer { border: 1px solid #dce2eb; border-radius: 12px; background: #fff; padding: 11px 12px 9px; box-shadow: 0 5px 18px #26354d0a; }
+    .composer:focus-within { border-color: #aebff3; box-shadow: 0 0 0 3px #315fe80d, 0 5px 18px #26354d0a; }
+    .composer textarea { display: block; width: 100%; min-height: 58px; max-height: 180px; padding: 2px 2px 8px; resize: vertical; border: 0; outline: 0; box-shadow: none; font-size: 13px; }
+    .composer textarea:focus { border: 0; box-shadow: none; }
+    .composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .composer-hint { color: #929baa; font-size: 10px; }
+    .composer-controls { display: flex; align-items: center; gap: 11px; }
+    .write-control { display: inline-flex; align-items: center; gap: 6px; color: #6b7687; font-size: 10px; white-space: nowrap; }
+    .write-control input { accent-color: var(--amber); }
+    .send-button { min-width: 76px; border: 0; border-radius: 7px; background: var(--blue); color: white; padding: 8px 12px; font-size: 11px; font-weight: 650; }
+    .send-button:hover:not(:disabled) { background: #244ed0; }
+    .cancel-inline { border: 1px solid #f0d4d2; border-radius: 7px; background: #fff9f8; color: #a44848; padding: 7px 10px; font-size: 10px; }
+    .chat-foot { padding: 7px 2px 0; text-align: center; color: #929baa; font-size: 9px; }
+    .chat-foot .warning { color: #a65d17; }
+    .hidden { display: none !important; }
+
+    @media (max-width: 760px) {
+      .topbar { height: 58px; padding: 0 16px; }
+      main { width: min(100% - 28px, 620px); margin: 24px auto; }
+      .intro { align-items: start; }
+      .local-tag { display: none; }
+      .workspace { grid-template-columns: 1fr; }
+      .compose { padding: 18px; }
+      .run-panel { min-height: 560px; }
+      .timeline { max-height: 58vh; }
+      main.chat-app { width: calc(100% - 20px); height: calc(100vh - 78px); min-height: 500px; margin: 10px auto; }
+      .chat-top { padding-bottom: 10px; }
+      .chat-heading p { display: none; }
+      .session-chip { max-width: 100px; }
+      .messages { padding: 18px 12px; }
+      .composer-wrap { padding: 10px; }
+      .composer-hint { display: none; }
+      .composer-controls { gap: 7px; }
+      .activity { margin-left: 30px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">A</div>
+      <div>Agent Workbench<small>LOCAL RUNTIME CONSOLE</small></div>
+    </div>
+    <div class="connection" id="connection" data-state="idle" role="status">
+      <span class="signal" aria-hidden="true"></span>
+      <span id="connectionText">尚未连接</span>
+      <code>127.0.0.1</code>
+    </div>
+  </header>
+
+  <main class="chat-app">
+    <div class="chat-top">
+      <div class="chat-heading">
+        <h1>Agent 对话</h1>
+        <p>直接继续追问；工具执行过程会显示在对话里。</p>
+      </div>
+      <div class="chat-actions">
+        <span class="session-chip" id="sessionLabel">新会话</span>
+        <button class="new-chat" id="newChatButton" type="button">＋ 新会话</button>
+      </div>
+    </div>
+
+    <section class="panel chat-panel" aria-label="Agent 聊天">
+      <div class="messages" id="messages" aria-live="polite" aria-relevant="additions text">
+        <div class="welcome" id="welcome">
+          <div class="welcome-mark" aria-hidden="true">A</div>
+          <h2>想先做点什么？</h2>
+          <p>你可以像聊天一样描述任务，之后继续追问时会自动沿用本次会话记忆。</p>
+          <div class="suggestions">
+            <button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。">列出数据目录</button>
+            <button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。">读取报告内容</button>
+          </div>
+        </div>
+      </div>
+      <div class="composer-wrap">
+        <form class="composer" id="chatForm">
+          <textarea id="messageInput" required rows="2" placeholder="给 Agent 发消息…（Enter 发送，Shift + Enter 换行）"></textarea>
+          <div class="composer-bottom">
+            <span class="composer-hint" id="composerHint">新会话 · 写入权限默认关闭</span>
+            <div class="composer-controls">
+              <label class="write-control" title="允许本轮任务修改文件或发送通知">
+                <input id="allowWrite" type="checkbox"> 允许写入
+              </label>
+              <button class="cancel-inline hidden" id="cancelButton" type="button">取消</button>
+              <button class="send-button" id="sendButton" type="submit">发送 ↑</button>
+            </div>
+          </div>
+        </form>
+        <div class="chat-foot" id="writeHint">Agent 可能会调用工具；打开写入权限前请确认任务内容。</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const form = $("#chatForm");
+    const input = $("#messageInput");
+    const messages = $("#messages");
+    const connection = $("#connection");
+    const connectionText = $("#connectionText");
+    const sessionLabel = $("#sessionLabel");
+    const composerHint = $("#composerHint");
+    const sendButton = $("#sendButton");
+    const cancelButton = $("#cancelButton");
+    const newChatButton = $("#newChatButton");
+    const writeToggle = $("#allowWrite");
+    let socket = null;
+    let activeRunId = null;
+    let threadId = null;
+    let currentAssistantBubble = null;
+    const toolCards = new Map();
+
+    function setConnection(state, label) {
+      connection.dataset.state = state;
+      connectionText.textContent = label;
+    }
+
+    function setBusy(busy) {
+      sendButton.disabled = busy;
+      input.disabled = busy;
+      newChatButton.disabled = busy;
+      cancelButton.classList.toggle("hidden", !busy);
+      sendButton.textContent = busy ? "运行中…" : "发送 ↑";
+      cancelButton.disabled = false;
+      cancelButton.textContent = "取消";
+    }
+
+    function scrollToBottom() {
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function addMessage(role, label, text = "") {
+      const welcome = $("#welcome");
+      if (welcome) welcome.remove();
+      const row = document.createElement("article");
+      row.className = `message ${role}`;
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = role === "user" ? "你" : "A";
+      const content = document.createElement("div");
+      content.className = "message-content";
+      const caption = document.createElement("div");
+      caption.className = "message-label";
+      caption.textContent = label;
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = text;
+      content.append(caption, bubble);
+      row.append(avatar, content);
+      messages.append(row);
+      scrollToBottom();
+      return bubble;
+    }
+
+    function addNotice(text, isError = false) {
+      const notice = document.createElement("div");
+      notice.className = `run-notice${isError ? " error" : ""}`;
+      notice.textContent = text;
+      messages.append(notice);
+      scrollToBottom();
+      return notice;
+    }
+
+    function addToolActivity(event) {
+      const activity = document.createElement("div");
+      activity.className = "activity";
+      activity.dataset.state = "running";
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      const label = document.createElement("span");
+      label.className = "activity-tool";
+      label.textContent = event.name || "工具";
+      const meta = document.createElement("span");
+      meta.className = "activity-meta";
+      meta.textContent = "执行中";
+      summary.append(label, meta);
+      details.append(summary);
+      if (event.args && Object.keys(event.args).length) {
+        const args = document.createElement("div");
+        args.className = "activity-body";
+        args.textContent = `参数\n${JSON.stringify(event.args, null, 2)}`;
+        details.append(args);
+      }
+      activity.append(details);
+      messages.append(activity);
+      toolCards.set(event.call_id, { activity, details, meta });
+      currentAssistantBubble = null;
+      scrollToBottom();
+    }
+
+    function showEvent(event) {
+      if (event.type === "run.start") {
+        activeRunId = event.run_id;
+        threadId = event.thread_id || threadId;
+        sessionLabel.textContent = threadId ? `会话 ${threadId}` : "新会话";
+        composerHint.textContent = "继续发送消息即可沿用本次会话记忆";
+        addNotice(`开始运行 · ${event.run_id}`);
+      } else if (event.type === "model.text") {
+        const chunk = event.text || "";
+        if (!currentAssistantBubble && !chunk.trim()) return;
+        if (!currentAssistantBubble) currentAssistantBubble = addMessage("assistant", "Agent", "");
+        currentAssistantBubble.textContent += chunk;
+        scrollToBottom();
+      } else if (event.type === "tool.start") {
+        addToolActivity(event);
+      } else if (event.type === "tool.end" || event.type === "tool.error") {
+        let card = toolCards.get(event.call_id);
+        if (!card) {
+          addToolActivity(event);
+          card = toolCards.get(event.call_id);
+        }
+        card.activity.dataset.state = event.type === "tool.error" ? "error" : "done";
+        card.meta.textContent = event.type === "tool.error"
+          ? `失败${event.duration_ms == null ? "" : ` · ${event.duration_ms} ms`}`
+          : `完成 · ${event.duration_ms ?? 0} ms`;
+        const result = event.result_preview || event.message;
+        if (result) {
+          const body = document.createElement("div");
+          body.className = "activity-body";
+          body.textContent = result;
+          card.details.append(body);
+        }
+        currentAssistantBubble = null;
+      } else if (event.type === "run.end") {
+        if (currentAssistantBubble) {
+          currentAssistantBubble.textContent = event.output || currentAssistantBubble.textContent || "（没有文本输出）";
+        } else if (event.output) {
+          addMessage("assistant", "Agent", event.output);
+        }
+        addNotice(`完成 · ${event.duration_ms ?? 0} ms · ${event.messages ?? 0} 条消息`);
+        activeRunId = null;
+        setBusy(false);
+        currentAssistantBubble = null;
+        input.focus();
+      } else if (event.type === "run.cancelled") {
+        addNotice("本轮已取消");
+        activeRunId = null;
+        setBusy(false);
+        currentAssistantBubble = null;
+        input.focus();
+      } else if (event.type === "run.error") {
+        addNotice(event.message || "发生未知错误", true);
+        if (!event.run_id || event.run_id === activeRunId) {
+          activeRunId = null;
+          setBusy(false);
+          currentAssistantBubble = null;
+          input.focus();
+        }
+      } else if (event.type === "run.progress") {
+        addNotice(event.note || "正在处理");
+      }
+    }
+
+    function connect() {
+      if (socket && socket.readyState === WebSocket.OPEN) return Promise.resolve(socket);
+      setConnection("connecting", "正在连接");
+      const url = new URL("/ws", window.location.href);
+      url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(url);
+      return new Promise((resolve, reject) => {
+        socket.addEventListener("open", () => {
+          setConnection("connected", "已连接");
+          resolve(socket);
+        }, { once: true });
+        socket.addEventListener("error", () => {
+          setConnection("error", "连接失败");
+          reject(new Error("无法连接 Agent 服务，请确认服务仍在运行。"));
+        }, { once: true });
+        socket.addEventListener("message", (message) => {
+          try { showEvent(JSON.parse(message.data)); }
+          catch { addNotice("服务返回了无法解析的事件。", true); }
+        });
+        socket.addEventListener("close", () => {
+          setConnection("idle", "连接已关闭");
+          if (activeRunId) {
+            activeRunId = null;
+            setBusy(false);
+            addNotice("连接中断；重新发送即可继续。", true);
+          }
+        });
+      });
+    }
+
+    form.addEventListener("submit", async (submitEvent) => {
+      submitEvent.preventDefault();
+      const instruction = input.value.trim();
+      if (!instruction || activeRunId) return;
+      const allowWrite = writeToggle.checked;
+
+      addMessage("user", "你", instruction);
+      input.value = "";
+      writeToggle.checked = false;
+      $("#writeHint").textContent = "Agent 可能会调用工具；打开写入权限前请确认任务内容。";
+      setBusy(true);
+      currentAssistantBubble = null;
+
+      try {
+        const ws = await connect();
+        ws.send(JSON.stringify({
+          type: "run.start",
+          instruction,
+          task_name: instruction.slice(0, 30),
+          thread_id: threadId || undefined,
+          allow_write: allowWrite,
+        }));
+      } catch (error) {
+        setBusy(false);
+        addNotice(error.message, true);
+        input.value = instruction;
+        input.focus();
+      }
+    });
+
+    cancelButton.addEventListener("click", () => {
+      if (socket && socket.readyState === WebSocket.OPEN && activeRunId) {
+        socket.send(JSON.stringify({ type: "cancel" }));
+        cancelButton.disabled = true;
+        cancelButton.textContent = "正在取消…";
+      }
+    });
+
+    newChatButton.addEventListener("click", () => {
+      if (activeRunId) return;
+      threadId = null;
+      activeRunId = null;
+      currentAssistantBubble = null;
+      toolCards.clear();
+      messages.innerHTML = `<div class="welcome" id="welcome"><div class="welcome-mark" aria-hidden="true">A</div><h2>想先做点什么？</h2><p>你可以像聊天一样描述任务，之后继续追问时会自动沿用本次会话记忆。</p><div class="suggestions"><button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。">列出数据目录</button><button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。">读取报告内容</button></div></div>`;
+      sessionLabel.textContent = "新会话";
+      composerHint.textContent = "新会话 · 写入权限默认关闭";
+      setBusy(false);
+      input.focus();
+    });
+
+    messages.addEventListener("click", (event) => {
+      const suggestion = event.target.closest("[data-prompt]");
+      if (suggestion) {
+        input.value = suggestion.dataset.prompt;
+        input.focus();
+      }
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        if (!sendButton.disabled) form.requestSubmit();
+      }
+    });
+
+    writeToggle.addEventListener("change", () => {
+      $("#writeHint").innerHTML = writeToggle.checked
+        ? '<span class="warning">本轮已开启写入权限，Agent 可能修改文件或发送通知。</span>'
+        : "Agent 可能会调用工具；打开写入权限前请确认任务内容。";
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && activeRunId) cancelButton.click();
+    });
+  </script>
+</body>
+</html>

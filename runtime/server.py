@@ -27,6 +27,7 @@ import json
 
 # logging：标准库的日志模块。
 import logging
+from pathlib import Path
 
 # uuid：生成连接 id。
 import uuid
@@ -38,6 +39,7 @@ from contextlib import asynccontextmanager
 # FastAPI：Web 框架。
 # WebSocket / WebSocketDisconnect：桌面版的事件流端点。
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 
 # BaseModel / Field：Pydantic 模型与字段声明，
 # FastAPI 用它做请求体校验和 OpenAPI 文档。
@@ -113,6 +115,12 @@ async def lifespan(app: FastAPI):
 # 这是 FastAPI 0.135+ 推荐的写法，
 # 不要再用 @app.on_event("startup") / @app.on_event("shutdown")。
 app = FastAPI(title="Automation Agent", version="0.1.0", lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+def workbench() -> FileResponse:
+    """返回本地 Agent 调试工作台。"""
+    return FileResponse(Path(__file__).parent / "static" / "index.html")
 
 
 # ============================================================
