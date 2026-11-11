@@ -241,6 +241,10 @@ class StreamConsumer:
 
     # ---------- 跨线程投递 ----------
 
+    def emit_event(self, event: BaseEvent) -> None:
+        """线程安全地发布运行期间产生的额外事件。"""
+        self._emit(event)
+
     def _emit(self, event: BaseEvent) -> None:
         """把一个事件投进 asyncio 队列。
 

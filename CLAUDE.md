@@ -143,8 +143,8 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 - `runner.py` — `run_task()` 同步调用入口；`get_agent()` 提供共享 Agent 单例。定时任务和 Python 调用方走 `run_task()`，WebSocket 消费器则用同一单例运行 `agent.stream()`。
 - `scheduler.py` — APScheduler 封装。**LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力），所以定时触发必须自己接 APScheduler。cron 表达式按 `SCHEDULER_TIMEZONE` 解释，用 `CronTrigger.from_crontab`，即标准 5 段格式。
-- `server.py` — FastAPI。定时任务增删查、调度状态、探活、根路径工作台与 **`/ws` 事件流端点**。`/ws` 收 `run.start` / `cancel` 两条命令，推 `run.start` / `model.text` / `tool.*` / `run.end` / `run.cancelled` / `run.error` 事件。**单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，并发发帧会交错，所以所有消息都进同一个队列由唯一的推送任务发出。
-- `events.py` — 事件模型 + 归一化层。`BaseEvent` 加 9 种事件构成桌面版的事件协议；`StreamNormalizer` 把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件。
+- `server.py` — FastAPI。定时任务增删查、调度状态、探活、根路径工作台与 **`/ws` 事件流端点**。`/ws` 收 `run.start` / `cancel` / `approval.respond` 命令，推 `run.start` / `approval.request` / `model.text` / `tool.*` / `run.end` / `run.cancelled` / `run.error` 事件。**单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，并发发帧会交错，所以所有消息都进同一个队列由唯一的推送任务发出。
+- `events.py` — 事件模型 + 归一化层。`BaseEvent` 加 10 种事件构成桌面版的事件协议；`StreamNormalizer` 把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件。
 - `consumer.py` — 同步流消费器（桌面版阶段 3）。在**工作线程**里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压：队列容量管「已入队」、`max_pending` 管「在途未入队」。**不要改成等 `future.result()`** —— 事件循环在 resolve 前关闭时那会永久阻塞。
 - `runs.py` — Run Manager（桌面版阶段 4）。管 run 的生命周期：`start` / `get` / `cancel` / `finish` / `active`。**run_id 是一次执行的身份、thread_id 是会话的记忆隔离键，两回事**。第一版单连接单任务 —— 同一 owner 第二次 `start` 抛 `RunBusyError`，由调用方回一条 `run.error`，不静默取消旧的。
 - `static/index.html` — 根路径提供的连续对话调试工作台，复用 `thread_id` 展示对话与运行事件。

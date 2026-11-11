@@ -213,6 +213,51 @@ def test_cancel_without_active_run_gets_run_error(client):
     assert "没有正在运行" in events[0]["message"]
 
 
+def test_write_tool_waits_for_matching_approval(client, monkeypatch, tmp_path):
+    """写工具在匹配的 approval.respond 前不能执行，批准后才继续。"""
+    import uuid
+
+    from agent.graph import build_agent
+    from fakes import FakeModel
+    from langchain_core.messages import AIMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+    from agent.tools.files import SANDBOX
+
+    # 用随机文件名隔离并行或重复测试，避免覆盖数据目录里的现有文件。
+    relative = f"approval-test-{uuid.uuid4().hex}.txt"
+    target = SANDBOX / relative
+    tool_call = AIMessage(content="", tool_calls=[{"name": "write_file", "args": {"path": relative, "content": "approved"}, "id": "write-1", "type": "tool_call"}])
+    agent = build_agent(model=FakeModel(messages=iter([tool_call, AIMessage(content="完成")])), checkpointer=InMemorySaver())
+    monkeypatch.setattr(server_mod, "get_agent", lambda: agent)
+
+    try:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"type": "run.start", "instruction": "写入文件"})
+            approval = _drain_until(ws, {"approval.request"})[-1]
+            assert approval["call_id"] == "write-1"
+            assert approval["name"] == "write_file"
+            assert not target.exists()
+            ws.send_json({"type": "approval.respond", "run_id": approval["run_id"], "call_id": "wrong", "approved": True})
+            error = _drain_until(ws, {"run.error"})[-1]
+            assert error["recoverable"] is True
+            assert not target.exists()
+            ws.send_json({"type": "approval.respond", "run_id": approval["run_id"], "call_id": "write-1", "approved": True})
+            events = _drain_until(ws, {"run.end", "run.error", "run.cancelled"})
+        assert target.read_text() == "approved"
+        assert any(event["type"] == "tool.start" and event["call_id"] == "write-1" for event in events)
+    finally:
+        target.unlink(missing_ok=True)
+
+
+def test_malformed_approval_response_is_recoverable(client):
+    """approved 不是布尔值时返回可恢复错误，不中断 WebSocket。"""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "approval.respond", "run_id": "r", "call_id": "c", "approved": "yes"})
+        event = ws.receive_json()
+    assert event["type"] == "run.error"
+    assert event["recoverable"] is True
+
+
 # ---------- 连接生命周期 ----------
 
 

@@ -158,7 +158,9 @@ def test_missing_stream_writer_is_silent():
         tool_call = {"name": "ping", "args": {}, "id": "c1"}
         tool = None
         state = {}
-        runtime = None
+        class runtime:
+            from agent.context import AgentContext
+            context = AgentContext(allow_write=True)
 
     def handler(request):
         return ToolMessage(content="pong", tool_call_id="c1")

@@ -118,7 +118,7 @@ class BaseEvent(BaseModel):
     type: str                 # 判别字段
 ```
 
-九种事件：
+十种事件：
 
 | 事件 | 作用 | 什么时候发 |
 |---|---|---|
@@ -127,6 +127,7 @@ class BaseEvent(BaseModel):
 | `tool.start` | 工具开始执行 | `EventBridgeMiddleware` 的 `wrap_tool_call` 入口 |
 | `tool.end` | 工具执行完成 | `wrap_tool_call` 的 handler 正常返回 |
 | `tool.error` | 工具执行失败 | `wrap_tool_call` 里 handler 抛异常 |
+| `approval.request` | 请求本次工具调用授权 | 有副作用的工具开始执行前；客户端用 `approval.respond` 携带相同 `run_id` / `call_id` 和布尔值 `approved` 应答 |
 | `run.progress` | 任务进度 | **预留**，第一版不产生（将来给 TodoList 进度用） |
 | `run.end` | 任务正常结束 | 消费循环正常跑完 |
 | `run.cancelled` | 任务取消 | 收到 `cancel` 或连接断开 |
@@ -281,7 +282,7 @@ Starlette 的 `WebSocket.send` **没有锁** —— 并发发帧会交错。
 
 | 阶段 | 内容 | 优先级 | 状态 |
 |---|---|---|---|
-| 1 | 事件模型（`BaseEvent` + 9 种事件）+ 归一化层 | P0 | ✅ 已完成（`runtime/events.py`） |
+| 1 | 事件模型（`BaseEvent` + 10 种事件）+ 归一化层 | P0 | ✅ 已完成（`runtime/events.py`） |
 | 2 | `EventBridgeMiddleware`（`wrap_tool_call` 发 tool.start/end/error） | P0 | ✅ 已完成（`agent/middleware/events.py`） |
 | 3 | 同步流消费器 + 线程桥接 + 有界队列背压 | P0 | ✅ 已完成（`runtime/consumer.py`） |
 | 4 | Run Manager（run_id / cancel_event / start / cancel / finish） | P0 | ✅ 已完成（`runtime/runs.py`） |
@@ -419,7 +420,7 @@ asyncio.run(main())
 
 1. **[x] 为工具声明风险等级**：在 `agent/tools/risk.py` 集中维护风险等级；工具注册表导入时校验工具清单与风险表完全对应，避免遗漏或陈旧登记。
 2. **[x] 把权限策略集中到中间件**：新增基于风险等级的 `allow` / `require_approval` / `deny` 决策，并由 `TaskGateMiddleware` 统一执行；旧入口的 `allow_write` 作为整轮授权兼容保留。WebSocket 确认交互由后续协议任务接入。
-3. **[ ] 扩展 WebSocket 确认协议**：服务端发 `approval.request`，客户端回 `approval.respond`；请求和应答至少关联 `run_id`、`call_id` 与允许/拒绝决定。工具必须等到匹配的允许应答后才开始执行。
+3. **[x] 扩展 WebSocket 确认协议**：服务端发 `approval.request`，客户端回 `approval.respond`；请求和应答至少关联 `run_id`、`call_id` 与允许/拒绝决定。工具必须等到匹配的允许应答后才开始执行。
 4. **[ ] 处理确认生命周期**：拒绝、超时、取消、断连、重复应答、未知 `call_id` 和并发待确认调用均有明确结果；等待确认时仍能接收 `cancel`，所有退出路径都清理等待状态。
 5. **[ ] 更新浏览器工作台**：展示待确认的工具、简要参数和操作说明；提供单次允许与拒绝；显示处理结果。移除或调整整轮“允许写入”选项，避免它绕过逐次确认。
 6. **[ ] 补齐测试与文档**：覆盖工具分类、策略判断、WebSocket 请求/应答、拒绝与超时、取消/断连清理、旧调用方兼容，并同步更新协议和使用说明。

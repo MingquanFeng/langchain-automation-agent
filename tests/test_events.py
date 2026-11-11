@@ -56,14 +56,15 @@ def test_base_event_has_common_fields():
     assert e.type == "model.text"
 
 
-def test_all_nine_event_types_registered():
-    """九种事件都要在注册表里，一个都不能少。"""
+def test_all_event_types_registered():
+    """所有协议事件都要在注册表里，一个都不能少。"""
     assert set(EVENT_CLASSES) == {
         "run.start",
         "model.text",
         "tool.start",
         "tool.end",
         "tool.error",
+        "approval.request",
         "run.progress",
         "run.end",
         "run.cancelled",
@@ -74,6 +75,18 @@ def test_all_nine_event_types_registered():
         # 客户端靠 type 分发，键和字段对不上就会发错事件。
         assert cls.model_fields["type"].default == name, name
         assert issubclass(cls, BaseEvent)
+
+
+def test_approval_request_serializes_call_details():
+    """确认授权请求事件包含客户端配对应答所需的调用信息。"""
+    from runtime.events import ApprovalRequest
+
+    event = ApprovalRequest(run_id="run-1", call_id="call-1", name="write_file", args={"path": "x"}, risk_level="workspace_write")
+    payload = event.model_dump()
+    assert payload["type"] == "approval.request"
+    assert payload["run_id"] == "run-1"
+    assert payload["call_id"] == "call-1"
+    assert payload["args"] == {"path": "x"}
 
 
 def test_event_json_shape_matches_protocol():

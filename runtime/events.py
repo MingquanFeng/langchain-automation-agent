@@ -6,7 +6,7 @@
 - 课件未覆盖事件模型，本模块按桌面 Agent 的需要自行设计。
 
 分两层：
-1. **事件模型** —— BaseEvent 加 9 种事件。
+1. **事件模型** —— BaseEvent 加 10 种事件。
    所有事件统一带 version / run_id / timestamp / type 四个字段，
    客户端只认这四个 + 各事件自己的业务字段。
    version 是协议版本：将来改结构时客户端能识别。
@@ -163,6 +163,22 @@ class ToolError(BaseEvent):
     duration_ms: int | None = None
 
 
+class ApprovalRequest(BaseEvent):
+    """工具执行前请求用户对这一次调用作出决定。"""
+
+    type: Literal["approval.request"] = "approval.request"
+
+    # 工具调用标识；客户端应在 approval.respond 中原样回传。
+    call_id: str
+
+    # 请求执行的工具与参数，供用户判断这次操作。
+    name: str
+    args: dict[str, Any] = Field(default_factory=dict)
+
+    # 工具风险等级，便于客户端按风险展示确认提示。
+    risk_level: str
+
+
 class RunProgress(BaseEvent):
     """任务进度。
 
@@ -230,6 +246,7 @@ EVENT_CLASSES: dict[str, type[BaseEvent]] = {
     "tool.start": ToolStart,
     "tool.end": ToolEnd,
     "tool.error": ToolError,
+    "approval.request": ApprovalRequest,
     "run.progress": RunProgress,
     "run.end": RunEnd,
     "run.cancelled": RunCancelled,

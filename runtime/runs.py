@@ -49,6 +49,7 @@ from agent.context import AgentContext
 
 # StreamConsumer：真正地执行体（阶段 3）。
 from runtime.consumer import StreamConsumer
+from runtime.approvals import ApprovalBroker
 
 
 # ============================================================
@@ -92,6 +93,7 @@ class RunHandle:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     started_at: float = 0.0
     task: asyncio.Task | None = None
+    approval_broker: ApprovalBroker | None = None
 
 
 # ============================================================
@@ -176,6 +178,13 @@ class RunManager:
             loop=loop,
             cancel_event=handle.cancel_event,
         )
+        broker = ApprovalBroker(
+            run_id=run_id,
+            emit=consumer.emit_event,
+            cancel_event=handle.cancel_event,
+        )
+        handle.approval_broker = broker
+        ctx.approval_handler = broker.request
 
         # to_thread 把同步的消费器放到工作线程里跑。
         # 消费器结束时自己会发结束事件（run.end / run.cancelled / run.error），
@@ -224,9 +233,20 @@ class RunManager:
         if handle is None:
             return False
         handle.cancel_event.set()
+        if handle.approval_broker is not None:
+            handle.approval_broker.cancel_pending()
         return True
+
+    def respond_approval(self, run_id: str, owner: str, call_id: str, approved: bool) -> bool:
+        """仅允许该 run 的所属连接响应仍待处理的授权请求。"""
+        handle = self.get(run_id)
+        if handle is None or handle.owner != owner or handle.approval_broker is None:
+            return False
+        return handle.approval_broker.respond(call_id, approved)
 
     def finish(self, run_id: str) -> None:
         """注销一个 run。幂等 —— 重复调用无害。"""
         with self._lock:
-            self._runs.pop(run_id, None)
+            handle = self._runs.pop(run_id, None)
+        if handle is not None and handle.approval_broker is not None:
+            handle.approval_broker.cancel_pending()

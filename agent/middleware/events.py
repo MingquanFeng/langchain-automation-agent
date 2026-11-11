@@ -52,6 +52,9 @@ from typing import Any
 # AgentMiddleware：所有自定义中间件的基类。
 # ToolCallRequest：工具调用的请求对象。
 from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import ToolMessage
+
+from ..tools.risk import TOOL_RISK_LEVELS, decide_tool_permission
 
 
 # ============================================================
@@ -128,6 +131,44 @@ class EventBridgeMiddleware(AgentMiddleware):
         name = str(call.get("name", ""))
         call_id = str(call.get("id", ""))
         args = call.get("args", {}) or {}
+
+        # 只读闸门负责阻止没有授权入口的调用；这里处理交互式 WebSocket run。
+        # 等待授权发生在工具开始事件之前，用户拒绝时工具 handler 完全不会执行。
+        runtime = getattr(request, "runtime", None)
+        ctx = getattr(runtime, "context", None)
+        decision = decide_tool_permission(
+            name,
+            allow_write=bool(getattr(ctx, "allow_write", False)),
+        )
+        if decision != "allow":
+            approval_handler = getattr(ctx, "approval_handler", None)
+            approved = False
+            if decision == "require_approval" and callable(approval_handler):
+                try:
+                    approved = approval_handler(name, call_id, args) is True
+                except Exception:
+                    # 授权通道出错时按拒绝处理，不能继续执行有副作用的工具。
+                    approved = False
+
+            if not approved:
+                if decision == "deny":
+                    message = f"工具 {name or '<未知>'} 没有风险登记，按默认拒绝策略未执行。"
+                elif callable(approval_handler):
+                    message = "用户未批准本次工具调用，工具未执行。"
+                else:
+                    message = "当前入口不支持单次授权，本次工具调用已拒绝。"
+                self._emit({
+                    "type": "tool.error",
+                    "name": name,
+                    "call_id": call_id,
+                    "message": message,
+                })
+                return ToolMessage(
+                    content=message,
+                    name=name,
+                    tool_call_id=call_id,
+                    status="error",
+                )
 
         self._emit({
             "type": "tool.start",

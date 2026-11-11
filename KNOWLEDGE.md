@@ -1519,7 +1519,7 @@ def set_cli_override(name: str, value: str) -> None:
 
 🧩 项目自研，课件未覆盖。是桌面版的事件协议。
 
-**事件模型**：`BaseEvent` 加 9 种事件。公共字段四个 —— `version`（协议版本）、
+**事件模型**：`BaseEvent` 加 10 种事件。公共字段四个 —— `version`（协议版本）、
 `run_id`（归属哪次执行）、`timestamp`（秒级浮点）、`type`（判别字段）。
 
 | 事件 | 什么时候发 | 关键字段 |
@@ -1529,6 +1529,7 @@ def set_cli_override(name: str, value: str) -> None:
 | `tool.start` | 工具开始执行 | `name` / `call_id` / `args` |
 | `tool.end` | 工具执行完成 | `name` / `call_id` / `ok` / `duration_ms` / `result_preview` |
 | `tool.error` | 工具执行失败 | `name` / `call_id` / `message` |
+| `approval.request` | 有副作用的工具执行前等待逐次授权 | `call_id` / `name` / `args` / `risk_level` |
 | `run.progress` | **只定义不发出**（留给 TodoList 进度） | `note` |
 | `run.end` | 消费循环跑完 | `output` / `messages` / `duration_ms` |
 | `run.cancelled` | 收到取消或连接断开 | `reason` |
@@ -1673,17 +1674,18 @@ model.text 是归一化层滤过思考块的正文，那才是用户该看到的
 
 🧩 项目自研，桌面版改造计划的阶段 5。
 
-**协议**（客户端 → 服务端，两条命令）：
+**协议**（客户端 → 服务端）：
 
 ```json
 {"type": "run.start", "instruction": "...", "task_name": "...",
  "thread_id": "可选", "allow_write": false}
 {"type": "cancel"}
+{"type": "approval.respond", "run_id": "...", "call_id": "...", "approved": true}
 ```
 
 **协议**（服务端 → 客户端）：一条一个 JSON 事件。
 `run.start` / `model.text` / `tool.start` / `tool.end` / `tool.error` /
-`run.progress` / `run.end` / `run.cancelled` / `run.error`
+`approval.request` / `run.progress` / `run.end` / `run.cancelled` / `run.error`
 
 **🧩 单一发送点**：Starlette 的 `WebSocket.send` **没有锁**，并发发帧会交错。
 所以所有要发给客户端的消息（事件的 + 端点自己产生的 `run.start` / `run.error`）

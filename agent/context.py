@@ -18,11 +18,11 @@ from __future__ import annotations
 
 # dataclass：标准库的数据类装饰器。
 # 自动生成 __init__、__repr__、__eq__ 等方法。
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # Literal：类型字面量。
 # 用来把某个字段的取值限制在固定的几个字符串里。
-from typing import Literal
+from typing import Any, Callable, Literal
 
 
 # ============================================================
@@ -133,6 +133,17 @@ class AgentContext:
     # 保留原代码默认值 True。
     # 无人值守场景建议考虑默认 False。
     allow_write: bool = True
+
+    # WebSocket 交互任务提供的单次工具授权回调。
+    #
+    # TaskGateMiddleware 用它区分「需要向用户请求确认」与「没有授权入口」。
+    # EventBridgeMiddleware 在工具真正执行前调用它；回调会阻塞当前工作线程，
+    # 直到用户响应、任务取消或请求超时。普通 Python / 定时任务不传此字段。
+    approval_handler: Callable[[str, str, dict[str, Any]], bool] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     # --------------------------------------------------------
     # 4. 通知渠道

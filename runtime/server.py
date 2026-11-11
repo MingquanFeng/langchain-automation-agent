@@ -290,7 +290,7 @@ async def websocket_events(websocket: WebSocket) -> None:
 
     **服务端 → 客户端**：一条一个 JSON 事件。
     `run.start` / `model.text` / `tool.start` / `tool.end` / `tool.error` /
-    `run.progress` / `run.end` / `run.cancelled` / `run.error`
+    `approval.request` / `run.progress` / `run.end` / `run.cancelled` / `run.error`
 
     注意：
     1. **单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，
@@ -363,8 +363,23 @@ async def _handle_ws_command(
         await _handle_run_start(manager=manager, queue=queue, conn_id=conn_id, payload=payload)
     elif command == "cancel":
         await _handle_ws_cancel(manager=manager, queue=queue, conn_id=conn_id)
+    elif command == "approval.respond":
+        await _handle_approval_respond(manager=manager, queue=queue, conn_id=conn_id, payload=payload)
     else:
         await queue.put(RunError(run_id="", message=f"未知命令：{command}"))
+
+
+async def _handle_approval_respond(*, manager: RunManager, queue: asyncio.Queue, conn_id: str, payload: dict) -> None:
+    """校验授权应答，并确保只有发起 run 的连接能完成对应请求。"""
+    run_id, call_id, approved = payload.get("run_id"), payload.get("call_id"), payload.get("approved")
+    valid_run_id = run_id if isinstance(run_id, str) else ""
+    if not isinstance(run_id, str) or not run_id or not isinstance(call_id, str) or not call_id or type(approved) is not bool:
+        await queue.put(RunError(run_id=valid_run_id, message="approval.respond 需要非空 run_id、非空 call_id 和布尔值 approved", recoverable=True))
+        return
+    if not manager.respond_approval(run_id, conn_id, call_id, approved):
+        await queue.put(RunError(run_id=run_id, message="授权请求不存在、已处理或不属于当前连接", recoverable=True))
+        return
+    # 应答确认属于协议控制消息，不另发事件；工具后续会产生 tool.start / tool.error。
 
 
 async def _handle_run_start(

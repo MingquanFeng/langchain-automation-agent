@@ -95,18 +95,25 @@ class TaskGateMiddleware(AgentMiddleware):
         返回字典表示往消息列表里追加内容。
         """
         ctx = _ctx(runtime)
-        if ctx.allow_write:
-            return None
-
         # 只看最近 3 条消息：中间件自己注入的提示消息会夹在中间，
         # 但模型这轮的 tool_calls 一定在最后一条 AIMessage 上。
-        decisions = [
-            (tc, decide_tool_permission(tc.get("name"), allow_write=ctx.allow_write))
+        tool_calls = [
+            tc
             for msg in state.get("messages", [])[-3:]
             if isinstance(msg, AIMessage)
             for tc in (msg.tool_calls or [])
         ]
-        blocked = [(tc, decision) for tc, decision in decisions if decision != "allow"]
+        blocked = []
+        for tc in tool_calls:
+            decision = decide_tool_permission(tc.get("name"), allow_write=ctx.allow_write)
+            if decision == "allow":
+                continue
+            # 有交互授权回调时，把决定留给 EventBridgeMiddleware 在执行前请求；
+            # 非交互入口没有该回调，必须在这里默认拒绝有副作用的工具。
+            if decision == "require_approval" and ctx.approval_handler is not None:
+                continue
+            blocked.append((tc, decision))
+
         if not blocked:
             return None
 
@@ -120,17 +127,22 @@ class TaskGateMiddleware(AgentMiddleware):
         return {
             "messages": [
                 ToolMessage(
-                    content=(
-                        f"工具 {tc.get('name', '<未知>')} 尚未获得执行授权，已阻止本次调用。"
-                        "如果是写入或外部副作用操作，请等待用户授权；未登记风险等级的工具默认拒绝。"
-                    ),
-                    name=tc["name"],
+                    content=_blocked_tool_message(tc.get("name"), decision),
+                    name=str(tc.get("name", "")),
                     tool_call_id=tc["id"],
                     status="error",
                 )
-                for tc, _decision in blocked
+                for tc, decision in blocked
             ]
         }
+
+
+def _blocked_tool_message(tool_name: str | None, decision: str) -> str:
+    """给模型一条与拦截原因对应的工具结果。"""
+    name = tool_name or "<未知>"
+    if decision == "deny":
+        return f"工具 {name} 没有登记风险等级，按默认拒绝策略未执行。"
+    return f"工具 {name} 需要对本次调用单独授权，但当前入口没有授权回调，未执行。"
 
 
 # ============================================================
@@ -159,9 +171,14 @@ class ContextInjectionMiddleware(AgentMiddleware):
         """
         ctx = _ctx(runtime)
         if not ctx.allow_write:
+            notice = (
+                "（提示：写入或外部操作需要对具体工具调用单独授权；未授权的操作不会执行。）"
+                if ctx.approval_handler is not None
+                else "（提示：本轮为只读模式，任何写操作都会被拒绝。）"
+            )
             return {
                 "messages": [
-                    AIMessage(content="（提示：本轮为只读模式，任何写操作都会被拒绝。）")
+                    AIMessage(content=notice)
                 ]
             }
         return None
@@ -182,11 +199,16 @@ class ContextInjectionMiddleware(AgentMiddleware):
         ctx = _ctx(request.runtime)
 
         # 要追加到系统提示词末尾的上下文信息。
+        permission_text = (
+            "需要逐次授权"
+            if not ctx.allow_write and ctx.approval_handler is not None
+            else "允许" if ctx.allow_write else "禁止"
+        )
         extra = (
             f"\n\n[运行时上下文]\n"
             f"任务名：{ctx.task_name}\n"
             f"触发方式：{ctx.trigger}\n"
-            f"写权限：{'允许' if ctx.allow_write else '禁止'}"
+            f"写权限：{permission_text}"
         )
 
         # system_prompt 只是只读 property，直接赋值已废弃；改用 override 造新 request
