@@ -53,6 +53,9 @@ class _PendingApproval:
     # 先保存决定，再置位 decided；等待方被唤醒后即可读取完整结果。
     approved: bool | None = None
 
+    # 单调时钟下的过期时间；用于拒绝刚好在清理前到达的迟到应答。
+    expires_at: float = 0.0
+
 
 class ApprovalBroker:
     """在工具工作线程与 WebSocket 事件循环之间协调逐次授权。
@@ -97,8 +100,11 @@ class ApprovalBroker:
         if not call_id or self.cancel_event.is_set():
             return False
 
+        # 从开始处理请求时就计算截止时间，避免事件发送期间耗时被排除在等待上限外。
+        deadline = time.monotonic() + max(0.0, self.timeout)
+
         # 先登记，再发事件：客户端可能很快应答，先登记可避免应答早于请求入表。
-        pending = _PendingApproval()
+        pending = _PendingApproval(expires_at=deadline)
         with self._lock:
             # 同一个 run 内 call_id 必须唯一；重复 id 无法安全地区分两次决定。
             if call_id in self._pending:
@@ -119,14 +125,16 @@ class ApprovalBroker:
             self._remove_if_current(call_id, pending)
             return False
 
-        # 使用 monotonic 时钟计算截止时间，不受系统时钟校准影响。
-        deadline = time.monotonic() + max(0.0, self.timeout)
         try:
             # Event.wait 会阻塞工作线程，不会占住 WebSocket 的 asyncio 事件循环。
             while not self.cancel_event.is_set():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     # 没有及时收到决定时拒绝工具调用，避免超时后意外产生副作用。
+                    with self._lock:
+                        if not pending.decided.is_set():
+                            pending.approved = False
+                            pending.decided.set()
                     return False
                 # 短间隔轮询取消标志，保证取消无需等满整个授权超时。
                 if pending.decided.wait(min(0.1, remaining)):
@@ -146,6 +154,13 @@ class ApprovalBroker:
             # 只接受当前仍在等待的请求；过期、未知和重复应答都不改变状态。
             pending = self._pending.get(call_id)
             if pending is None or pending.decided.is_set():
+                return False
+
+            # request 线程可能还没来得及清理刚过期的条目；在这里再次核对截止时间，
+            # 防止迟到的允许应答抢在 finally 清理前进入。
+            if time.monotonic() >= pending.expires_at:
+                pending.approved = False
+                pending.decided.set()
                 return False
 
             # 先写入决定，再通知工作线程，确保被唤醒时状态已经完整。

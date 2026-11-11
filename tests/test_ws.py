@@ -17,6 +17,8 @@ from __future__ import annotations
 
 # 标准库：sys / pathlib。
 import sys
+import time
+import uuid
 from pathlib import Path
 
 # 把项目根目录与 tests/ 插到 sys.path 最前面。
@@ -94,6 +96,33 @@ def _drain_until(ws, stop_types, limit=30):
         if data.get("type") in stop_types:
             return events
     raise AssertionError(f"没等到 {stop_types}，收到的是 {[e.get('type') for e in events]}")
+
+
+def _install_write_agent(monkeypatch, *, call_id="write-1"):
+    """让 WebSocket run 请求写入一个唯一的沙箱文件，并返回目标路径。"""
+    from agent.graph import build_agent
+    from agent.tools.files import SANDBOX
+    from fakes import FakeModel
+    from langchain_core.messages import AIMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    relative = f"approval-test-{uuid.uuid4().hex}.txt"
+    target = SANDBOX / relative
+    tool_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "write_file",
+            "args": {"path": relative, "content": "approved"},
+            "id": call_id,
+            "type": "tool_call",
+        }],
+    )
+    agent = build_agent(
+        model=FakeModel(messages=iter([tool_call, AIMessage(content="完成")])),
+        checkpointer=InMemorySaver(),
+    )
+    monkeypatch.setattr(server_mod, "get_agent", lambda: agent)
+    return target
 
 
 # ---------- 正常流程 ----------
@@ -213,22 +242,10 @@ def test_cancel_without_active_run_gets_run_error(client):
     assert "没有正在运行" in events[0]["message"]
 
 
-def test_write_tool_waits_for_matching_approval(client, monkeypatch, tmp_path):
+def test_write_tool_waits_for_matching_approval(client, monkeypatch):
     """写工具在匹配的 approval.respond 前不能执行，批准后才继续。"""
-    import uuid
-
-    from agent.graph import build_agent
-    from fakes import FakeModel
-    from langchain_core.messages import AIMessage
-    from langgraph.checkpoint.memory import InMemorySaver
-    from agent.tools.files import SANDBOX
-
     # 用随机文件名隔离并行或重复测试，避免覆盖数据目录里的现有文件。
-    relative = f"approval-test-{uuid.uuid4().hex}.txt"
-    target = SANDBOX / relative
-    tool_call = AIMessage(content="", tool_calls=[{"name": "write_file", "args": {"path": relative, "content": "approved"}, "id": "write-1", "type": "tool_call"}])
-    agent = build_agent(model=FakeModel(messages=iter([tool_call, AIMessage(content="完成")])), checkpointer=InMemorySaver())
-    monkeypatch.setattr(server_mod, "get_agent", lambda: agent)
+    target = _install_write_agent(monkeypatch)
 
     try:
         with client.websocket_connect("/ws") as ws:
@@ -242,9 +259,82 @@ def test_write_tool_waits_for_matching_approval(client, monkeypatch, tmp_path):
             assert error["recoverable"] is True
             assert not target.exists()
             ws.send_json({"type": "approval.respond", "run_id": approval["run_id"], "call_id": "write-1", "approved": True})
-            events = _drain_until(ws, {"run.end", "run.error", "run.cancelled"})
+            # run.error 可能是重复应答的可恢复错误；继续读取直到整轮任务结束。
+            events = _drain_until(ws, {"run.end", "run.cancelled"})
         assert target.read_text() == "approved"
         assert any(event["type"] == "tool.start" and event["call_id"] == "write-1" for event in events)
+    finally:
+        target.unlink(missing_ok=True)
+
+
+def test_rejecting_approval_prevents_write_and_repeated_response(client, monkeypatch):
+    """拒绝时不执行写入；同一 call_id 的第二次应答返回可恢复错误。"""
+    target = _install_write_agent(monkeypatch)
+    try:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"type": "run.start", "instruction": "写入文件"})
+            approval = _drain_until(ws, {"approval.request"})[-1]
+            ws.send_json({
+                "type": "approval.respond",
+                "run_id": approval["run_id"],
+                "call_id": approval["call_id"],
+                "approved": False,
+            })
+            ws.send_json({
+                "type": "approval.respond",
+                "run_id": approval["run_id"],
+                "call_id": approval["call_id"],
+                "approved": True,
+            })
+            # run.error 可能是重复应答的可恢复错误；继续读取直到整轮任务结束。
+            events = _drain_until(ws, {"run.end", "run.cancelled"})
+
+        assert not target.exists()
+        assert not any(event["type"] == "tool.start" for event in events)
+        assert any(event["type"] == "tool.error" for event in events)
+        assert any(event["type"] == "run.error" and event["recoverable"] for event in events)
+    finally:
+        target.unlink(missing_ok=True)
+
+
+def test_cancel_during_approval_prevents_write(client, monkeypatch):
+    """等待授权时仍可处理 cancel，并且取消后写工具保持未执行。"""
+    target = _install_write_agent(monkeypatch)
+    try:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"type": "run.start", "instruction": "写入文件"})
+            approval = _drain_until(ws, {"approval.request"})[-1]
+            ws.send_json({"type": "cancel"})
+            events = _drain_until(ws, {"run.cancelled", "run.end", "run.error"})
+
+        assert events[-1]["type"] == "run.cancelled"
+        assert not target.exists()
+        assert not any(event["type"] == "tool.start" for event in events)
+    finally:
+        target.unlink(missing_ok=True)
+
+
+def test_disconnect_during_approval_cleans_pending_request(client, monkeypatch):
+    """WebSocket 断开会取消等待中的授权，并清理 run 与 pending 记录。"""
+    target = _install_write_agent(monkeypatch)
+    manager = app.state.run_manager
+    try:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"type": "run.start", "instruction": "写入文件"})
+            approval = _drain_until(ws, {"approval.request"})[-1]
+            handle = manager.get(approval["run_id"])
+            assert handle is not None
+            assert "write-1" in handle.approval_broker._pending
+
+        # 退出 websocket 上下文会触发服务端断连清理；等待工作线程结束后检查状态。
+        for _ in range(50):
+            if manager.get(approval["run_id"]) is None:
+                break
+            time.sleep(0.05)
+
+        assert manager.get(approval["run_id"]) is None
+        assert handle.approval_broker._pending == {}
+        assert not target.exists()
     finally:
         target.unlink(missing_ok=True)
 
