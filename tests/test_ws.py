@@ -267,6 +267,39 @@ def test_write_tool_waits_for_matching_approval(client, monkeypatch):
         target.unlink(missing_ok=True)
 
 
+def test_only_the_run_owner_can_approve_a_tool_call(client, monkeypatch):
+    """其他 WebSocket 连接不能替 run 所属连接批准写操作。"""
+    target = _install_write_agent(monkeypatch)
+    try:
+        with client.websocket_connect("/ws") as owner, client.websocket_connect("/ws") as other:
+            owner.send_json({"type": "run.start", "instruction": "写入文件"})
+            approval = _drain_until(owner, {"approval.request"})[-1]
+
+            # 他人知道 run_id / call_id 也不够，服务端还要核对 WebSocket owner。
+            other.send_json({
+                "type": "approval.respond",
+                "run_id": approval["run_id"],
+                "call_id": approval["call_id"],
+                "approved": True,
+            })
+            error = other.receive_json()
+            assert error["type"] == "run.error"
+            assert error["recoverable"] is True
+            assert not target.exists()
+
+            owner.send_json({
+                "type": "approval.respond",
+                "run_id": approval["run_id"],
+                "call_id": approval["call_id"],
+                "approved": True,
+            })
+            _drain_until(owner, {"run.end", "run.cancelled"})
+
+        assert target.read_text() == "approved"
+    finally:
+        target.unlink(missing_ok=True)
+
+
 def test_rejecting_approval_prevents_write_and_repeated_response(client, monkeypatch):
     """拒绝时不执行写入；同一 call_id 的第二次应答返回可恢复错误。"""
     target = _install_write_agent(monkeypatch)

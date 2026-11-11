@@ -268,7 +268,7 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 
 - **记忆隔离靠 `thread_id`**。定时任务用 `cron-{任务名}` 作为 thread_id，保留跨天记忆；`runner.run_task()` 不传 thread_id 时生成随机 `task-{uuid}`。**同一个 thread_id 就共享同一份记忆**，客户端想续聊就显式传同一个值。
 - **新增工具要登记两处**：加入 `agent/tools/__init__.py` 的 `ALL_TOOLS`，并在 `agent/tools/risk.py` 声明风险等级。工具清单与风险表在导入时自动校验；不能再维护独立的 `WRITE_TOOLS` 名单。
-- **权限决策由 `agent/tools/risk.py` 集中定义**：只读等级自动放行；有副作用的等级返回 `require_approval`；无风险登记返回 `deny`。`TaskGateMiddleware` 负责拦截未授权调用。旧入口显式设置 `allow_write=True` 时仍保持整轮授权兼容；WebSocket 的逐次确认协议尚待实现。
+- **权限决策由 `agent/tools/risk.py` 集中定义**：只读等级自动放行；有副作用的等级返回 `require_approval`；无风险登记返回 `deny`。`TaskGateMiddleware` 负责拦截未授权调用。浏览器工作台通过 `approval.request` / `approval.respond` 逐次确认；旧 Python API、定时任务和旧 WebSocket 客户端显式设置 `allow_write=True` 时仍保持整轮授权兼容。
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
 - **PII 脱敏默认开着**（`.env` 的 `PII_MASKING=1`）。它脱敏**用户指令**与**工具结果**
   （文件工具读出来的内容走后者，是最主要的泄露通道），但**不脱敏模型输出** ——

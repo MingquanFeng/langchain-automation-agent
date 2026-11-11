@@ -280,13 +280,17 @@ WS_QUEUE_SIZE = 256
 async def websocket_events(websocket: WebSocket) -> None:
     """桌面版的事件流端点。
 
-    **客户端 → 服务端**（两条命令）：
+    **客户端 → 服务端**：
 
     ```json
     {"type": "run.start", "instruction": "列出数据目录下的文件",
-     "task_name": "列文件", "thread_id": "可选", "allow_write": false}
+     "task_name": "列文件", "thread_id": "可选"}
     {"type": "cancel"}
+    {"type": "approval.respond", "run_id": "...", "call_id": "...", "approved": true}
     ```
+
+    浏览器工作台不传 `allow_write`，有副作用的工具会逐次请求批准。
+    为兼容旧客户端，显式传 `allow_write: true` 仍代表整轮授权。
 
     **服务端 → 客户端**：一条一个 JSON 事件。
     `run.start` / `model.text` / `tool.start` / `tool.end` / `tool.error` /

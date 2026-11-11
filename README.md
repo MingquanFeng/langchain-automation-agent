@@ -50,7 +50,7 @@ cp .env.example .env
 python -m pytest tests/ -q
 ```
 
-仓库当前记录的测试结果为 `101 passed`。全部使用假模型，不需要 API key；新增测试后以实际 pytest 输出为准。
+测试全部使用假模型，不需要 API key；运行结果以本地实际 pytest 输出为准。
 
 ### 4. 起服务
 
@@ -71,7 +71,16 @@ python -m runtime --reload       # 开发模式热重载
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 已注册 job 与下次运行时间 |
 
-WebSocket `/ws` 是工作台使用的实时事件流接口。
+WebSocket `/ws` 是工作台使用的实时事件流接口。只读工具会直接运行；写文件或发送通知时，聊天窗口会显示工具用途和参数，并等待你选择“仅允许本次”或“拒绝本次”。每次批准只对当前工具调用生效，取消任务或关闭连接时，等待中的工具不会执行。
+
+授权协议的事件形状如下。客户端必须把请求中的 `run_id` 和 `call_id` 原样带回；服务端只接受发起该 run 的连接所作的应答。
+
+```json
+{"type":"approval.request","run_id":"run-a1b2c3d4","call_id":"call-1","name":"write_file","args":{"path":"out/report.md","content":"..."},"risk_level":"workspace_write"}
+{"type":"approval.respond","run_id":"run-a1b2c3d4","call_id":"call-1","approved":true}
+```
+
+浏览器工作台不会发送整轮 `allow_write`。旧 WebSocket 客户端仍可显式传 `allow_write: true`，但这会按旧规则一次性允许本轮写操作；Python API 和定时任务也继续支持原有设置。
 
 REST 接口只管理定时任务和查询状态；浏览器工作台通过 WebSocket `/ws` 触发交互式任务。也可以从 Python 直接调用：
 
