@@ -797,10 +797,11 @@ class MyMiddleware(AgentMiddleware):
 🧩 项目（`custom.py:73`）：
 
 ```python
-from agent.tools.risk import TOOL_RISK_LEVELS
+from agent.tools.risk import decide_tool_permission
 
 class TaskGateMiddleware(AgentMiddleware):
-    # after_model 中，非 read_only 的工具调用进入拦截逻辑。
+    # after_model 中对每个 tool_call 调用统一策略：
+    # allow / require_approval / deny。
 
     def after_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
         ...

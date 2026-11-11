@@ -39,7 +39,7 @@ from langgraph.runtime import Runtime
 
 # AgentContext：单次调用的运行时上下文结构，见 agent/context.py。
 from ..context import AgentContext
-from ..tools.risk import TOOL_RISK_LEVELS
+from ..tools.risk import decide_tool_permission
 
 
 # ============================================================
@@ -100,19 +100,15 @@ class TaskGateMiddleware(AgentMiddleware):
 
         # 只看最近 3 条消息：中间件自己注入的提示消息会夹在中间，
         # 但模型这轮的 tool_calls 一定在最后一条 AIMessage 上。
-        blocked = [
-            tc
+        decisions = [
+            (tc, decide_tool_permission(tc.get("name"), allow_write=ctx.allow_write))
             for msg in state.get("messages", [])[-3:]
             if isinstance(msg, AIMessage)
             for tc in (msg.tool_calls or [])
-            if TOOL_RISK_LEVELS.get(tc.get("name")) != "read_only"
         ]
+        blocked = [(tc, decision) for tc, decision in decisions if decision != "allow"]
         if not blocked:
             return None
-
-        # 只在提示文字里列出工具名，不列出每个调用参数，
-        # 免得参数里的大段内容又灌进上下文。
-        names = ", ".join(sorted({tc["name"] for tc in blocked}))
 
         # 逐个被拦的 tool_call 补一条 ToolMessage。
         #
@@ -125,14 +121,14 @@ class TaskGateMiddleware(AgentMiddleware):
             "messages": [
                 ToolMessage(
                     content=(
-                        f"当前任务为只读模式，已阻止写操作 {names}。"
-                        "不要再调用这个工具，改用只读方式把结论写在回复里。"
+                        f"工具 {tc.get('name', '<未知>')} 尚未获得执行授权，已阻止本次调用。"
+                        "如果是写入或外部副作用操作，请等待用户授权；未登记风险等级的工具默认拒绝。"
                     ),
                     name=tc["name"],
                     tool_call_id=tc["id"],
                     status="error",
                 )
-                for tc in blocked
+                for tc, _decision in blocked
             ]
         }
 

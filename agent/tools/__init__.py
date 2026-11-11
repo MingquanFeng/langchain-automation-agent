@@ -25,7 +25,13 @@ from .files import FILE_TOOLS
 # NOTIFY_TOOLS：通知出口工具。
 # 来自 notify.py，webhook 未配置时降级为终端输出。
 from .notify import NOTIFY_TOOLS
-from .risk import TOOL_RISK_LEVELS, ToolRiskLevel, validate_tool_risk_levels
+from .risk import (
+    PermissionDecision,
+    TOOL_RISK_LEVELS,
+    ToolRiskLevel,
+    decide_tool_permission,
+    validate_tool_risk_levels,
+)
 
 
 # ============================================================
@@ -68,6 +74,8 @@ __all__ = [
     "NOTIFY_TOOLS",
     "TOOL_RISK_LEVELS",
     "ToolRiskLevel",
+    "PermissionDecision",
+    "decide_tool_permission",
     "validate_tool_risk_levels",
 ]
 

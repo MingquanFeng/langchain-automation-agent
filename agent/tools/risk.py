@@ -14,6 +14,7 @@ from typing import Iterable, Literal
 # 提前发现拼写错误。运行时仍需用下面的 RISK_LEVELS 再检查一次，
 # 因为 Python 的类型标注本身不会阻止错误字符串进入字典。
 ToolRiskLevel = Literal["read_only", "workspace_write", "external_effect"]
+PermissionDecision = Literal["allow", "require_approval", "deny"]
 
 # RISK_LEVELS 是运行时校验使用的合法值集合。
 # frozenset 表示这组允许值定义后不应再被调用方修改。
@@ -46,6 +47,35 @@ TOOL_RISK_LEVELS: dict[str, ToolRiskLevel] = {
     "notify": "external_effect",
     "notify_summary": "external_effect",
 }
+
+
+def decide_tool_permission(
+    tool_name: str | None,
+    *,
+    allow_write: bool,
+) -> PermissionDecision:
+    """按工具风险等级给出统一的权限决策。
+
+    返回值分三种：
+        allow：工具可以进入执行阶段。
+        require_approval：工具有副作用，需为本次调用取得授权。
+        deny：工具没有风险登记，按默认拒绝处理。
+
+    `allow_write` 是旧入口使用的整轮授权开关。为了兼容 Python API、
+    定时任务和现有 WebSocket 客户端，显式设为 True 时仍放行工具；
+    后续确认协议接入后，WebSocket 路径会改用逐次授权结果。
+    未分类工具在没有整轮显式授权时始终拒绝。
+    """
+    # 旧入口显式授权整轮写操作时，保持原有行为。
+    if allow_write:
+        return "allow"
+
+    risk_level = TOOL_RISK_LEVELS.get(tool_name or "")
+    if risk_level is None:
+        return "deny"
+    if risk_level == "read_only":
+        return "allow"
+    return "require_approval"
 
 
 def validate_tool_risk_levels(
