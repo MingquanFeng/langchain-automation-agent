@@ -1,0 +1,9 @@
+# Node.js 安装产物不提交；package-lock.json 保留以锁定 Tauri CLI 依赖。
+node_modules/
+
+# Rust 编译产物由 Cargo 自动生成，避免把本机二进制放进版本库。
+src-tauri/target/
+
+# Tauri 本地构建与打包输出。
+src-tauri/gen/
+src-tauri/binaries/

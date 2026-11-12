@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "主窗口仅展示本机 Agent 工作台，不开放 Tauri 系统命令。",
+  "windows": ["main"],
+  "permissions": []
+}

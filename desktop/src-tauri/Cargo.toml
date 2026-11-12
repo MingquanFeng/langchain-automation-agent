@@ -1,0 +1,20 @@
+[package]
+name = "automation-agent-desktop"
+version = "0.1.0"
+description = "Automation Agent 的 Tauri 桌面窗口"
+authors = ["Automation Agent"]
+edition = "2021"
+build = "build.rs"
+
+[lib]
+# macOS 主程序与 Tauri 生成代码需要这些 crate 类型。
+name = "automation_agent_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+# 在编译阶段读取 tauri.conf.json 并生成应用上下文。
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# 当前桌面壳只创建 WebView 窗口，不引入文件系统或 Shell 插件权限。
+tauri = { version = "2", features = [] }

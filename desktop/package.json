@@ -1,0 +1,15 @@
+{
+  "name": "automation-agent-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri",
+    "dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
+    "build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
+    "icon": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri icon"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.2"
+  }
+}

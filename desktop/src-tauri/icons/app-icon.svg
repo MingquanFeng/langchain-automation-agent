@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 临时应用图标：后续视觉设计完成后替换，并重新运行 npm run icon。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="220" fill="#14283f"/>
+  <path d="M512 150 835 800H189L512 150Z" fill="#76d7c4"/>
+  <path d="M512 390 675 720H349L512 390Z" fill="#14283f"/>
+  <circle cx="512" cy="790" r="42" fill="#f5eee2"/>
+</svg>
