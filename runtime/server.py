@@ -67,6 +67,7 @@ from .scheduler import list_jobs, start_scheduler, stop_scheduler
 from .tasks import ScheduledTask, add_task, all_tasks, remove_task
 
 logger = logging.getLogger(__name__)
+WORKBENCH_HTML = Path(__file__).resolve().parent.parent / "frontend" / "workbench.html"
 
 
 # ============================================================
@@ -119,8 +120,8 @@ app = FastAPI(title="Automation Agent", version="0.1.0", lifespan=lifespan)
 
 @app.get("/", include_in_schema=False)
 def workbench() -> FileResponse:
-    """返回本地 Agent 调试工作台。"""
-    return FileResponse(Path(__file__).parent / "static" / "index.html")
+    """从共享前端目录返回本地 Agent 调试工作台。"""
+    return FileResponse(WORKBENCH_HTML)
 
 
 # ============================================================

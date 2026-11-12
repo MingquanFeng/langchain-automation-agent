@@ -124,8 +124,9 @@ runtime/
   events.py          事件模型与流归一化
   consumer.py        工作线程中的 agent.stream() 消费器与跨线程背压
   runs.py             WebSocket run 生命周期、取消和清理
-  static/index.html  连续对话调试工作台
   tasks.py           定时任务表，改这里就改 Agent 每天自动做什么
+frontend/
+  workbench.html     浏览器与桌面共用的连续对话工作台
 tests/               单元测试与集成测试（含假模型）
 ```
 

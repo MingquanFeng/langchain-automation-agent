@@ -133,7 +133,7 @@
 
 ## 主线 5：运行时外壳（课件未覆盖，自研部分）
 
-**读源码**：`runtime/runner.py` → `runtime/scheduler.py` → `runtime/tasks.py` → `runtime/events.py` → `runtime/consumer.py` → `runtime/runs.py` → `runtime/server.py` → `runtime/static/index.html`
+**读源码**：`runtime/runner.py` → `runtime/scheduler.py` → `runtime/tasks.py` → `runtime/events.py` → `runtime/consumer.py` → `runtime/runs.py` → `runtime/server.py` → `frontend/workbench.html`
 
 | 位置 | 看什么 |
 |---|---|
@@ -145,7 +145,7 @@
 | `runtime/consumer.py` `StreamConsumer` | 在工作线程运行 `agent.stream()`，把事件送入 asyncio 队列；队列容量与在途上限共同提供背压 | — |
 | `runtime/runs.py` `RunManager` | 管理 WebSocket run 生命周期、取消与清理。**run_id 是一次执行的身份，thread_id 是会话的记忆隔离键** | — |
 | `runtime/server.py` `/ws` | WebSocket 事件流端点。收 `run.start` / `cancel`，推结构化事件；连接断开会取消活跃 run | — |
-| `runtime/static/index.html` | 连续聊天工作台；后续消息沿用当前 `thread_id`，可观察工具事件并取消运行 | — |
+| `frontend/workbench.html` | 浏览器与桌面共用的连续聊天工作台；后续消息沿用当前 `thread_id`，可观察工具事件并取消运行 | — |
 
 ---
 

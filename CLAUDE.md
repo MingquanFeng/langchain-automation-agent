@@ -147,7 +147,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 - `events.py` — 事件模型 + 归一化层。`BaseEvent` 加 10 种事件构成桌面版的事件协议；`StreamNormalizer` 把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件。
 - `consumer.py` — 同步流消费器（桌面版阶段 3）。在**工作线程**里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压：队列容量管「已入队」、`max_pending` 管「在途未入队」。**不要改成等 `future.result()`** —— 事件循环在 resolve 前关闭时那会永久阻塞。
 - `runs.py` — Run Manager（桌面版阶段 4）。管 run 的生命周期：`start` / `get` / `cancel` / `finish` / `active`。**run_id 是一次执行的身份、thread_id 是会话的记忆隔离键，两回事**。第一版单连接单任务 —— 同一 owner 第二次 `start` 抛 `RunBusyError`，由调用方回一条 `run.error`，不静默取消旧的。
-- `static/index.html` — 根路径提供的连续对话调试工作台，复用 `thread_id` 展示对话与运行事件。
+- `frontend/workbench.html` — FastAPI 根路径提供的连续对话调试工作台；浏览器与 Tauri 共用这份文件，复用 `thread_id` 展示对话与运行事件。
 - `tasks.py` — 定时任务表。改这个文件就改 Agent 每天自动做什么。**注意 `TASKS` 是模块级内存字典，不落盘** —— `POST /tasks` 动态加的任务进程重启即消失，只有改代码里的 `TASKS` 列表才是持久定义。
 - `__main__.py` — CLI 入口，唯一子命令 `serve`（默认，起 HTTP 服务 + 可选调度器）。`--no-schedule` / `--reload` / `--host` / `--port` 都在这里解析。**它同时是陷阱 10 的落地文件** —— 调度开关必须在 `import runtime.server` 之前生效，顺序不能改。
 

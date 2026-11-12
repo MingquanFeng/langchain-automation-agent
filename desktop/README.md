@@ -30,7 +30,7 @@ npm run dev
 
 ## 项目边界
 
-- `web/index.html` 是随应用打包的本机连接页，负责服务地址设置、loopback 校验、工作台握手和重试；工作台 iframe 仅允许脚本与原服务来源能力，不允许顶层导航。
+- `web/index.html` 是随应用打包的本机连接页，负责服务地址设置、loopback 校验、工作台握手和重试；它嵌入由 FastAPI 提供的 `frontend/workbench.html`，iframe 仅允许脚本与原服务来源能力，不允许顶层导航。
 - `src-tauri/tauri.conf.json` 配置应用名称、连接页资源、仅允许本机来源的 CSP 和 macOS `.app` 打包图标。
 - `src-tauri/src/lib.rs` 仅创建 Tauri 窗口，不注册系统命令或插件。
 - `src-tauri/capabilities/default.json` 不授予文件系统、Shell 或其他本机权限。

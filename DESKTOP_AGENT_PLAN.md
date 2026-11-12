@@ -290,7 +290,7 @@ Starlette 的 `WebSocket.send` **没有锁** —— 并发发帧会交错。
 | 6 | 异常处理 + 连接断开清理 | P0 | ✅ 已完成（消费器、Run Manager、WebSocket 均处理结束/取消/异常路径；断连会取消活跃 run） |
 | 7 | 单元测试 + 集成测试 | P0 | ✅ 后端覆盖已完成（事件、消费器、Run Manager、WebSocket 均有测试；聊天页面尚无自动化回归测试） |
 | 8 | 文档同步 | P1 | ✅ 已完成（README、CLAUDE、LEARNING、KNOWLEDGE 与本计划已对齐当前实现） |
-| 9 | 连续对话调试工作台（GET `/`） | P1 | ✅ 已完成（`runtime/static/index.html`，通过 WebSocket 展示事件并复用 `thread_id`） |
+| 9 | 连续对话调试工作台（GET `/`） | P1 | ✅ 已完成（`frontend/workbench.html`，通过 WebSocket 展示事件并复用 `thread_id`） |
 
 阶段 3 和 4 有依赖（消费器要用 cancel_event），其余可独立推进。
 
@@ -441,7 +441,7 @@ asyncio.run(main())
 提供一个可独立打开的桌面窗口，让用户在桌面应用里使用现有聊天工作台。桌面版复用
 FastAPI 服务、`/ws` 事件协议、会话记忆和逐次授权逻辑；不复制 Agent 执行与权限判断。
 
-第一版优先把现有 `runtime/static/index.html` 放进 Tauri 桌面窗口使用，避免为桌面端重写一套聊天界面。
+第一版使用共享的 `frontend/workbench.html`，由 FastAPI 根路径提供；Tauri 桌面连接页嵌入同一个页面，避免维护两套聊天界面。
 开发期间先由用户单独启动 `python -m runtime --no-schedule`，桌面应用连接本机服务。Python
 后端托管、安装包和一键启动放在下一阶段处理。
 
