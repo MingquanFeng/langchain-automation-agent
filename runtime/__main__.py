@@ -15,6 +15,10 @@
         HTTP 层只管定时任务与状态查询，不触发 Agent。
         对应 runtime/server.py。
 
+    tui：
+        启动 Textual 终端界面，并连接到已运行的 WebSocket 服务。
+        对应 runtime/tui.py。
+
     注意：
     终端界面由 Textual TUI 承担，
     桌面壳走 WebSocket 事件流。
@@ -22,6 +26,7 @@
 用法：
     python -m runtime              # 起服务（含定时任务）
     python -m runtime --no-schedule # 只起服务
+    python -m runtime tui           # 启动终端界面
 """
 
 from __future__ import annotations
@@ -37,6 +42,9 @@ import uvicorn
 
 # RUNTIME：应用运行配置，提供 host/port 默认值。
 from agent.config import RUNTIME
+
+# TUI 默认地址集中在 runtime.tui；该模块延迟加载 Textual / websockets，可安全用于 serve。
+from runtime.tui import DEFAULT_WS_URL
 
 
 def main() -> None:
@@ -65,14 +73,14 @@ def main() -> None:
     # choices 限定取值范围，
     # 传了别的值 argparse 会直接报错退出。
     #
-    # 注意：
-    # 桌面版改用 WebSocket 事件流，终端界面由 Textual TUI 承担。
+    # serve 是默认值，保留原先不带子命令时启动服务的行为；
+    # tui 则连接已启动的服务，不在终端界面进程里另起一份 Agent。
     parser.add_argument(
         "command",
         nargs="?",
         default="serve",
-        choices=["serve"],
-        help="serve=起 HTTP 服务（默认）",
+        choices=["serve", "tui"],
+        help="serve=启动 HTTP 服务（默认），tui=连接服务并启动终端界面",
     )
 
     # --------------------------------------------------------
@@ -89,6 +97,11 @@ def main() -> None:
     # 不出现就是 False，不需要再写默认值。
     parser.add_argument("--no-schedule", action="store_true", help="不启动定时任务")
     parser.add_argument("--reload", action="store_true", help="代码热重载（开发用）")
+    parser.add_argument(
+        "--ws-url",
+        default=DEFAULT_WS_URL,
+        help="TUI 要连接的 WebSocket 地址",
+    )
     args = parser.parse_args()
 
     # --------------------------------------------------------
@@ -100,6 +113,13 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+
+    # TUI 连接现有服务，必须在服务启动分支之前分派，避免意外启动第二个服务。
+    if args.command == "tui":
+        from runtime.tui import main as run_tui
+
+        run_tui(args.ws_url)
+        return
 
     # --------------------------------------------------------
     # 2. 调度开关的生效时机

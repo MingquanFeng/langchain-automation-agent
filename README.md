@@ -26,7 +26,8 @@
 
 ```bash
 pip install langchain langchain-core langgraph langgraph-checkpoint-sqlite \
-            fastapi uvicorn httpx pydantic python-dotenv apscheduler pytest
+            fastapi uvicorn httpx pydantic python-dotenv apscheduler pytest \
+            textual websockets
 ```
 
 按需补装模型供应商包与追踪工具：
@@ -61,6 +62,15 @@ python -m runtime --reload       # 开发模式热重载
 ```
 
 服务起在 `http://127.0.0.1:8000`。打开根地址即可与 Agent 连续聊天：后续消息自动沿用当前会话记忆，并可实时查看工具调用或取消运行。
+
+Textual 终端界面连接到已启动的服务。先在一个终端启动服务，再在另一个终端运行：
+
+```bash
+python -m runtime --no-schedule
+python -m runtime tui
+```
+
+默认连接 `ws://127.0.0.1:8000/ws`，也可以指定其他地址：`python -m runtime tui --ws-url ws://127.0.0.1:8125/ws`。当前阶段的 TUI 会检查依赖和服务连通性；聊天与事件交互将在后续任务中逐步接入。
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
