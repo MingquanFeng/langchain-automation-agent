@@ -74,7 +74,7 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 | GET | `/` | 连续对话调试工作台 |
 | WS | `/ws` | 桌面版事件流。收 `run.start` / `cancel`，推结构化事件 |
 
-浏览器工作台通过 WebSocket `/ws` 启动和取消交互式任务；Python 调用方可用 `runtime/runner.py` 的 `run_task()`，定时任务由 `runtime/scheduler.py` 触发。当前已有浏览器调试工作台；权限分级、Textual TUI 与 Tauri GUI 仍在路线图中，见 `DESKTOP_AGENT_PLAN.md`。
+浏览器工作台通过 WebSocket `/ws` 启动和取消交互式任务；Python 调用方可用 `runtime/runner.py` 的 `run_task()`，定时任务由 `runtime/scheduler.py` 触发。当前已有浏览器调试工作台；工具集扩张与 Tauri GUI 仍在路线图中，见 `DESKTOP_AGENT_PLAN.md`。
 
 首次使用需 `cp .env.example .env` 并填 `LLM_API_KEY`。环境变量全清单见 `.env.example`。
 
