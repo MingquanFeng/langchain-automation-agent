@@ -4,15 +4,13 @@
   "version": "0.1.0",
   "identifier": "com.fmq.automationagent",
   "build": {
-    "devUrl": "http://127.0.0.1:8000/",
-    "frontendDist": "http://127.0.0.1:8000/"
+    "frontendDist": "../web"
   },
   "app": {
     "windows": [
       {
         "label": "main",
         "title": "Automation Agent",
-        "url": "http://127.0.0.1:8000/",
         "width": 1280,
         "height": 820,
         "minWidth": 900,
@@ -22,7 +20,8 @@
       }
     ],
     "security": {
-      "capabilities": []
+      "capabilities": [],
+      "csp": "default-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src http://127.0.0.1:* http://localhost:*"
     }
   },
   "bundle": {

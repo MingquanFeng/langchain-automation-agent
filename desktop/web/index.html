@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Automation Agent</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #1d2939;
+      background: #f4f6f8;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { display: grid; grid-template-rows: 54px minmax(0, 1fr); }
+    button, input { font: inherit; }
+    .topbar {
+      z-index: 2; display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; padding: 0 20px; border-bottom: 1px solid #e5e8ec; background: #fff;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 650; }
+    .brand-mark {
+      display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px;
+      background: #14283f; color: #76d7c4; font-size: 15px; font-weight: 750;
+    }
+    .top-actions, .connection { display: flex; align-items: center; gap: 10px; }
+    .connection { color: #667085; font-size: 12px; }
+    .signal { width: 7px; height: 7px; border-radius: 50%; background: #98a2b3; }
+    .connection[data-state="connected"] .signal { background: #2d9272; }
+    .connection[data-state="connecting"] .signal { background: #ca8b2a; }
+    .connection[data-state="error"] .signal { background: #c4483c; }
+    #serviceLabel { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .settings-toggle, .primary-button, .secondary-button {
+      min-height: 34px; border: 1px solid #d9dee6; border-radius: 7px; padding: 0 12px;
+      background: #fff; color: #344054; cursor: pointer; font-size: 12px; font-weight: 600;
+    }
+    .settings-toggle:hover, .secondary-button:hover { background: #f7f8fa; }
+    .primary-button { border-color: #24425f; background: #24425f; color: #fff; }
+    .primary-button:hover { background: #193650; }
+    button:disabled { cursor: wait; opacity: .6; }
+    .workspace { position: relative; min-height: 0; }
+    #workbench { display: block; width: 100%; height: 100%; border: 0; background: #f4f6f8; }
+    #workbench[hidden] { display: none; }
+    .setup-card {
+      position: absolute; z-index: 1; top: 50%; left: 50%; width: min(470px, calc(100vw - 32px));
+      transform: translate(-50%, -50%); border: 1px solid #e1e5ea; border-radius: 14px;
+      padding: 24px; background: #fff; box-shadow: 0 18px 60px #15223816;
+    }
+    .workspace[data-mode="app"] .setup-card[data-open="false"] { display: none; }
+    .workspace[data-mode="app"] .setup-card[data-open="true"] {
+      top: 14px; left: auto; right: 14px; transform: none; width: min(430px, calc(100vw - 28px));
+      box-shadow: 0 12px 40px #15223828;
+    }
+    .workspace[data-mode="loading"] .setup-card { top: 50%; }
+    .setup-card h1 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+    .setup-card p { margin: 9px 0 18px; color: #667085; font-size: 13px; line-height: 1.65; }
+    .setup-card label { display: block; margin-bottom: 7px; color: #344054; font-size: 12px; font-weight: 650; }
+    .address-row { display: flex; gap: 8px; }
+    .address-row input {
+      min-width: 0; flex: 1; height: 38px; border: 1px solid #cfd5dd; border-radius: 7px;
+      padding: 0 10px; color: #25364b; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .address-row input:focus { outline: 3px solid #24425f20; border-color: #6b879f; }
+    .setup-status { min-height: 20px; margin: 11px 0 0 !important; font-size: 12px !important; }
+    .setup-status[data-state="error"] { color: #b42318; }
+    .setup-status[data-state="connected"] { color: #28745b; }
+    .scope-note { margin: 14px 0 0 !important; padding-top: 12px; border-top: 1px solid #edf0f3; font-size: 11px !important; }
+    @media (max-width: 620px) {
+      .topbar { padding: 0 12px; }
+      #connectionText { display: none; }
+      #serviceLabel { max-width: 125px; }
+      .settings-toggle { padding: 0 9px; }
+      .setup-card { padding: 20px; }
+      .address-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">A</span><span>Automation Agent</span></div>
+    <div class="top-actions">
+      <div class="connection" id="connection" data-state="connecting" role="status">
+        <span class="signal" aria-hidden="true"></span>
+        <span id="connectionText">正在连接本机服务</span>
+        <span id="serviceLabel"></span>
+      </div>
+      <button class="settings-toggle" id="settingsToggle" type="button" aria-expanded="false">服务设置</button>
+    </div>
+  </header>
+  <main class="workspace" id="workspace" data-mode="loading">
+    <iframe id="workbench" title="Agent 聊天工作台" sandbox="allow-scripts allow-same-origin" hidden></iframe>
+    <section class="setup-card" id="setupCard" data-open="true" aria-labelledby="setupTitle">
+      <h1 id="setupTitle">连接本机 Agent 服务</h1>
+      <p>桌面窗口会打开 FastAPI 提供的现有工作台。服务未启动时，可以先启动服务，再重试连接。</p>
+      <form id="connectionForm">
+        <label for="serviceAddress">服务地址</label>
+        <div class="address-row">
+          <input id="serviceAddress" type="url" value="http://127.0.0.1:8000" spellcheck="false" autocomplete="url" required>
+          <button class="primary-button" id="connectButton" type="submit">连接并打开工作台</button>
+        </div>
+        <p class="setup-status" id="setupStatus" role="status" aria-live="polite">正在检查 http://127.0.0.1:8000</p>
+      </form>
+      <p class="scope-note">为保持本机范围，只接受 <code>http://127.0.0.1</code> 或 <code>http://localhost</code> 地址。连接或重试只打开工作台，不会重发任何 Agent 命令。</p>
+    </section>
+  </main>
+  <script>
+    const DEFAULT_ADDRESS = "http://127.0.0.1:8000";
+    const $ = (selector) => document.querySelector(selector);
+    const workspace = $("#workspace");
+    const frame = $("#workbench");
+    const card = $("#setupCard");
+    const form = $("#connectionForm");
+    const addressInput = $("#serviceAddress");
+    const connectButton = $("#connectButton");
+    const status = $("#setupStatus");
+    const connection = $("#connection");
+    const connectionText = $("#connectionText");
+    const serviceLabel = $("#serviceLabel");
+    const settingsToggle = $("#settingsToggle");
+    const STORAGE_KEY = "automation-agent.desktop.service-url";
+    let currentOrigin = null;
+    let frameLoaded = false;
+    let attemptId = 0;
+    let frameTimer = null;
+
+    function setConnection(state, label, origin = currentOrigin) {
+      connection.dataset.state = state;
+      connectionText.textContent = label;
+      serviceLabel.textContent = origin ? `· ${origin}` : "";
+    }
+
+    function setStatus(state, text) {
+      status.dataset.state = state;
+      status.textContent = text;
+    }
+
+    function showSettings(open) {
+      card.dataset.open = String(open);
+      settingsToggle.setAttribute("aria-expanded", String(open));
+      if (open && currentOrigin) addressInput.value = currentOrigin;
+    }
+
+    function normalizeAddress(value) {
+      let url;
+      try { url = new URL(value.trim()); }
+      catch { throw new Error("请输入有效的本机服务地址，例如 http://127.0.0.1:8000。"); }
+      if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) {
+        throw new Error("服务地址必须使用 http://127.0.0.1 或 http://localhost。");
+      }
+      if (url.username || url.password || (url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) {
+        throw new Error("请只填写协议、主机和端口，不要添加路径、账号、参数或片段。");
+      }
+      return url.origin;
+    }
+
+    function connectToService(rawAddress) {
+      const id = ++attemptId;
+      let origin;
+      try { origin = normalizeAddress(rawAddress); }
+      catch (error) {
+        setStatus("error", error.message);
+        setConnection("error", "服务地址无效");
+        workspace.dataset.mode = frameLoaded ? "app" : "setup";
+        showSettings(true);
+        return;
+      }
+
+      connectButton.disabled = true;
+      connectButton.textContent = "正在连接…";
+      setConnection("connecting", "正在连接本机服务", origin);
+
+      if (frameLoaded && currentOrigin === origin) {
+        setStatus("", "正在重新连接工作台的 WebSocket；不会重发任务。");
+        frame.contentWindow.postMessage({ type: "automation-agent.reconnect", request_id: id }, origin);
+        clearTimeout(frameTimer);
+        frameTimer = setTimeout(() => {
+          if (id === attemptId) {
+            setStatus("error", "工作台没有确认重连。可检查服务状态后再试；任务不会自动重发。");
+            setConnection("error", "连接未确认", origin);
+            connectButton.disabled = false;
+            connectButton.textContent = "保存并连接";
+          }
+        }, 8000);
+      } else {
+        if (frameLoaded && currentOrigin !== origin) {
+          const switchConfirmed = window.confirm("切换服务会断开当前工作台连接，可能取消正在执行的任务。是否继续？");
+          if (!switchConfirmed || id !== attemptId) {
+            connectButton.disabled = false;
+            connectButton.textContent = "保存并连接";
+            setStatus("connected", "仍在使用当前工作台；没有切换服务。");
+            setConnection("connected", "工作台已载入", currentOrigin);
+            return;
+          }
+        }
+
+        currentOrigin = origin;
+        try { localStorage.setItem(STORAGE_KEY, origin); }
+        catch { /* 地址仍可在本次运行中使用；无法保存时下次启动恢复默认值。 */ }
+        setStatus("", `正在载入 ${origin} 的工作台…`);
+        workspace.dataset.mode = "loading";
+        frameLoaded = false;
+        frame.hidden = false;
+        showSettings(true);
+        clearTimeout(frameTimer);
+        frameTimer = setTimeout(() => {
+          if (!frameLoaded && id === attemptId) {
+            setStatus("error", `无法连接 ${origin}。请确认 Agent 服务已启动，然后重试。`);
+            setConnection("error", "连接失败", origin);
+            workspace.dataset.mode = "setup";
+            frame.hidden = true;
+            connectButton.disabled = false;
+            connectButton.textContent = "连接并打开工作台";
+          }
+        }, 8000);
+        frame.src = `${origin}/`;
+      }
+      serviceLabel.textContent = `· ${origin}`;
+      workspace.dataset.mode = frameLoaded ? "app" : "loading";
+      showSettings(true);
+      // 重连的确认事件或首次载入事件会清除按钮的忙碌状态。
+    }
+
+    window.addEventListener("message", (event) => {
+      if (event.source !== frame.contentWindow || event.origin !== currentOrigin) return;
+      const message = event.data;
+      if (message?.type === "automation-agent.workbench.ready") {
+        clearTimeout(frameTimer);
+        frameLoaded = true;
+        workspace.dataset.mode = "app";
+        setConnection("connected", "工作台已载入", currentOrigin);
+        setStatus("connected", "工作台已载入。聊天连接状态显示在工作台左上角。");
+        connectButton.disabled = false;
+        connectButton.textContent = "保存并连接";
+        showSettings(false);
+      } else if (message?.type === "automation-agent.connection" && message.request_id === attemptId) {
+        clearTimeout(frameTimer);
+        connectButton.disabled = false;
+        connectButton.textContent = "保存并连接";
+        if (message.connected) {
+          setConnection("connected", "已连接", currentOrigin);
+          setStatus("connected", "WebSocket 已重新连接；没有重发任务。");
+          showSettings(false);
+        } else {
+          setConnection("error", "连接失败", currentOrigin);
+          setStatus("error", message.error || "WebSocket 重连失败；任务不会自动重发。");
+          showSettings(true);
+        }
+      }
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      connectToService(addressInput.value);
+    });
+
+    settingsToggle.addEventListener("click", () => {
+      const open = card.dataset.open !== "true";
+      showSettings(open);
+      if (open && frameLoaded) setStatus("connected", "修改地址后连接会切换到另一个本机服务。");
+    });
+
+    let savedAddress = DEFAULT_ADDRESS;
+    try { savedAddress = localStorage.getItem(STORAGE_KEY) || DEFAULT_ADDRESS; }
+    catch { /* 某些 WebView 配置可能禁用存储，仍可使用默认地址。 */ }
+    addressInput.value = savedAddress;
+    connectToService(savedAddress);
+  </script>
+</body>
+</html>

@@ -393,7 +393,7 @@ asyncio.run(main())
 | **已完成：1. 事件流后端**（本文） | WebSocket、事件模型、Run Manager、取消机制 | — |
 | **已完成：连续对话调试工作台** | 浏览器聊天界面、实时事件展示、同一会话复用 `thread_id` | 1 |
 | **已完成：2. 权限分级** | 工具风险登记、策略决策、逐次授权协议与浏览器确认界面 | 1 |
-| **下一步：3. 桌面 GUI MVP** | Tauri 桌面窗口复用现有浏览器工作台与 `/ws` 协议；先连接单独启动的本地服务 | 1、2 |
+| **进行中：3. 桌面 GUI MVP** | Tauri 桌面窗口复用现有浏览器工作台与 `/ws` 协议；先连接单独启动的本地服务 | 1、2 |
 | 4. 桌面后端托管与打包 | 桌面应用启动/关闭 Python 服务，处理配置、日志和 macOS 应用打包 | 3 |
 | 5. 工具集扩张 | 先只读（目录树、grep、读任意源码），再可逆写（结构化编辑），最后评估 shell | 2、3 |
 | 6. 长期记忆 | `store` 真用起来；SQLite 持久化、项目级记忆、跨会话上下文 | 5 |
@@ -455,19 +455,18 @@ FastAPI 服务、`/ws` 事件协议、会话记忆和逐次授权逻辑；不复
 
 ### 集成方案结论
 
-- Tauri 主窗口加载本机 FastAPI 页面，默认地址为 `http://127.0.0.1:8000/`；开发时先启动 `python -m runtime --no-schedule`。
-- 现有页面根据 `window.location.href` 生成 WebSocket 地址，并将协议切换为 `ws:` / `wss:`，所以页面由本机 FastAPI 提供时会连到同源 `/ws`，无需复制事件处理或权限逻辑。
-- Tauri v2 的窗口 URL 和 `frontendDist` 都支持外部 HTTP(S) URL；配置成 URL 时不会把前端资源打入应用包，符合首版“连接已运行的本地服务”的定位。参考 [Tauri 配置文档](https://v2.tauri.app/reference/config/)。
-- 首版仅允许 loopback 服务地址，不加载任意远程网站；不授予窗口 Tauri 文件系统、Shell 等本机能力。按最小范围配置内容安全策略和导航来源，并在桌面 WebView 中验证 HTTP 与 WebSocket 连接。参考 [Tauri CSP 文档](https://v2.tauri.app/security/csp/) 与 [Tauri Capability 文档](https://v2.tauri.app/reference/acl/capability/)。
-- 桌面窗口的 URL 由 Tauri 窗口配置提供；默认使用 `127.0.0.1:8000`。首版如需改端口，通过应用配置覆盖服务地址，不改写 Agent 协议。
+- Tauri 主窗口加载随应用打包的连接页，默认打开 `http://127.0.0.1:8000/`；FastAPI 工作台通过同源 `postMessage` 握手后，连接页才显示工作台已载入。开发时先启动 `python -m runtime --no-schedule`。
+- FastAPI 工作台仍从本机服务来源加载，并用同源 `/ws`，因此不复制事件处理或权限逻辑。连接页单独负责地址设置、loopback 校验、连接失败展示和手动重试。
+- 服务地址只接受 `127.0.0.1` / `localhost` 的 HTTP URL，支持自定义端口并保存在桌面 WebView 的 `localStorage`。
+- 连接页的 CSP 限制为应用资源及 loopback HTTP frame；工作台 iframe 使用 sandbox 保留脚本和原服务来源能力，同时阻止顶层导航。Tauri capability 列表为空，不授予窗口文件系统、Shell 或其他本机命令。参考 [Tauri 配置文档](https://v2.tauri.app/reference/config/) 和 [Tauri CSP 文档](https://v2.tauri.app/security/csp/)。
 
 ### 实施任务
 
-1. **[x] 桌面集成方案**：已确认以本机 FastAPI 页面作为 Tauri 主窗口 URL；现有页面按当前来源连接同源 `/ws`。Tauri 支持外部 HTTP(S) 窗口 URL，首版限制 loopback 来源且不给页面本机系统权限；CSP、导航限制和 WebSocket 握手在桌面 WebView 联调时落实验证。
+1. **[x] 桌面集成方案**：以打包的连接页承载地址配置与错误提示，通过受限 loopback iframe 复用 FastAPI 页面和同源 `/ws`；Tauri capability 不开放本机系统命令，CSP 限制嵌入来源。
 2. **[x] Tauri 项目骨架**：在独立 `desktop/` 目录建立 Tauri v2 应用，创建主窗口、应用名称与临时图标、开发命令和本地运行配置；Rust 编译检查已通过，未改动 Agent 核心模块。
-3. **连接本地服务**：桌面窗口打开配置的本机工作台地址；提供服务地址设置或明确的默认地址，并展示连接失败和重试入口。任何重试只重新连接，不自动重发尚未确认结果的 Agent 命令。
-4. **桌面交互验收**：在桌面窗口逐项确认连续对话、`thread_id` 复用、文本流、工具事件、授权允许/拒绝、取消、结束和错误展示与浏览器版一致。
-5. **浏览器回归与文档**：确认原浏览器入口继续可用；补充 Tauri 开发环境安装、启动 FastAPI、启动桌面应用和常见连接问题说明。
+3. **[x] 连接本地服务**：新增随应用打包的连接页，提供可配置 loopback 服务地址、工作台握手、失败展示与重试入口。浏览器工作台增加 WebSocket 手动重连；所有重试只建立连接，不自动重发 Agent 命令。
+4. **进行中：桌面交互验收**：已在 macOS Tauri WebView 验证服务未启动时的错误页、服务启动后的工作台载入和 WebSocket 手动重连；完整 Python 套件 131 项通过。尚需验证连续对话、`thread_id` 复用、文本流、工具事件、授权允许/拒绝、取消和 Agent 错误展示。
+5. **[x] 浏览器回归与文档**：保留原浏览器入口；补充 Tauri 开发环境安装、服务启动、地址配置和连接问题说明。
 
 ### 验收标准
 
