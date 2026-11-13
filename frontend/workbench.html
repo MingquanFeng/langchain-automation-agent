@@ -375,15 +375,7 @@
     .task-progress-track { height: 3px; overflow: hidden; margin-top: 15px; border-radius: 9px; background: #e8edfa; }
     .task-progress-track span { display: block; width: 38%; height: 100%; border-radius: inherit; background: #4d73ed; animation: progress 1.5s ease-in-out infinite alternate; }
     @keyframes progress { to { transform: translateX(160%); } }
-    .capabilities-card { padding-bottom: 11px; }
-    .capability-list, .recent-task-list { display: grid; gap: 5px; margin: 11px 0 0; padding: 0; list-style: none; }
-    .capability-list li { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 5px 0; }
-    .capability-icon { width: 38px; height: 38px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 11px; color: #4777ef; background: linear-gradient(145deg, #edf2ff, #e4ebff); }
-    .capability-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-    .files-icon svg { fill: #77a4ff; stroke: #4777ef; }
-    .capability-list li > span:last-child { min-width: 0; }
-    .capability-list strong { display: block; color: #35425a; font-size: 12px; font-weight: 650; }
-    .capability-list small { display: block; margin-top: 2px; color: #8a96aa; font-size: 9px; white-space: nowrap; }
+    .recent-task-list { display: grid; gap: 5px; margin: 11px 0 0; padding: 0; list-style: none; }
     .recent-card { min-height: 130px; }
     .recent-task-list { gap: 2px; }
     .recent-task { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 0; }
@@ -394,6 +386,20 @@
     .recent-task-copy strong { display: block; overflow: hidden; color: #48566e; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
     .recent-task-copy small { display: block; margin-top: 2px; color: #9aa4b6; font-size: 9px; }
     .recent-empty { padding: 10px 0; color: #9aa4b6; font-size: 10px; }
+    .execution-todo-card { padding-bottom: 12px; }
+    .execution-todo-list { display: grid; gap: 1px; max-height: 230px; overflow: auto; margin: 9px 0 0; padding: 0; list-style: none; }
+    .execution-todo { display: grid; grid-template-columns: 19px minmax(0, 1fr); gap: 7px; padding: 8px 0; border-bottom: 1px solid #edf0f6; }
+    .execution-todo:last-child { border-bottom: 0; }
+    .execution-todo-mark { width: 18px; height: 18px; display: grid; place-items: center; margin-top: 1px; border: 1px solid #d7deeb; border-radius: 50%; color: #8794ab; background: #f8f9fc; font: 10px var(--mono); }
+    .execution-todo[data-state="in_progress"] .execution-todo-mark { border-color: #c9d6ff; color: #416be3; background: #edf2ff; }
+    .execution-todo[data-state="completed"] .execution-todo-mark { border-color: #ccebd9; color: #258568; background: #eaf8f0; }
+    .execution-todo-copy { min-width: 0; }
+    .execution-todo-copy span { display: block; color: #45536c; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+    .execution-todo[data-state="completed"] .execution-todo-copy span { color: #829087; }
+    .execution-todo-copy small { display: block; margin-top: 2px; color: #9aa4b6; font-size: 9px; }
+    .execution-todo[data-state="in_progress"] .execution-todo-copy small { color: #416be3; }
+    .execution-todo-empty { margin: 10px 0 0; color: #929db0; font-size: 10px; line-height: 1.6; }
+    .execution-todo-empty[hidden] { display: none; }
 
     .embedded > body > .topbar { display: none; }
     .embedded main.chat-app { width: min(1580px, calc(100% - 28px)); height: calc(100vh - 28px); min-height: 0; margin: 14px auto; }
@@ -421,7 +427,7 @@
       .embedded main.chat-app { height: calc(100vh - 16px); }
       .sidebar { width: 100%; height: 52px; flex: 0 0 52px; padding: 4px 7px; border-radius: 14px; }
       .embedded .sidebar-bottom { display: none; }
-      .side-nav { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+      .side-nav { width: 100%; height: 100%; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
       .nav-item { width: 100%; height: 42px; min-height: 42px; flex-direction: column; gap: 1px; border-radius: 9px; }
       .nav-item span { display: block; font-size: 8px; }
       .nav-item svg { width: 16px; height: 16px; }
@@ -444,9 +450,6 @@
       .assistant-rail { gap: 7px; padding: 7px; }
       .rail-card { padding: 11px; }
       .task-card { min-height: 130px; }
-      .capability-list { gap: 1px; margin-top: 6px; }
-      .capability-icon { width: 32px; height: 32px; }
-      .capability-list li { padding: 3px 0; }
       .welcome { margin-top: 4px; }
     }
   </style>
@@ -478,9 +481,6 @@
         </button>
         <button class="nav-item" type="button" data-nav-target="recentTasks" aria-label="最近任务" title="最近任务">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span>最近任务</span>
-        </button>
-        <button class="nav-item" type="button" data-nav-target="capabilities" aria-label="能力工具" title="能力工具">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></svg><span>能力工具</span>
         </button>
         <button class="nav-item" type="button" id="sidebarSettingsButton" aria-label="设置" title="设置">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.1.9-1.2 2.1-1.4-.5a7.8 7.8 0 0 1-1.6.9l-.3 1.5h-2.4l-.3-1.5a7.8 7.8 0 0 1-1.6-.9l-1.4.5-1.2-2.1 1.1-.9a7 7 0 0 1 0-1.8l-1.1-.9 1.2-2.1 1.4.5a7.8 7.8 0 0 1 1.6-.9l.3-1.5h2.4l.3 1.5a7.8 7.8 0 0 1 1.6.9l1.4-.5 1.2 2.1-1.1.9a7 7 0 0 1 0 1.8Z" transform="translate(-1 -1)"/></svg><span>设置</span>
@@ -541,17 +541,13 @@
         <div class="task-progress-track" id="taskProgressTrack" hidden><span></span></div>
       </section>
 
-      <section class="rail-card capabilities-card" id="capabilities">
+      <section class="rail-card execution-todo-card" id="executionTodoCard" aria-labelledby="executionTodoHeading">
         <div class="rail-card-head">
-          <h2>能力工具</h2>
-          <span class="rail-card-meta">4 类能力</span>
+          <h2 id="executionTodoHeading">执行清单</h2>
+          <span class="rail-card-meta" id="executionTodoSummary">未创建</span>
         </div>
-        <ul class="capability-list">
-          <li><span class="capability-icon files-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-11Z"/></svg></span><span><strong>文件操作</strong><small>浏览、读取与整理文件</small></span></li>
-          <li><span class="capability-icon data-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5.5C5 4.1 8.1 3 12 3s7 1.1 7 2.5S15.9 8 12 8 5 6.9 5 5.5Z"/><path d="M5 5.5v13C5 19.9 8.1 21 12 21s7-1.1 7-2.5v-13M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/></svg></span><span><strong>数据处理</strong><small>读取或保存 JSON 数据</small></span></li>
-          <li><span class="capability-icon notify-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4"/></svg></span><span><strong>通知推送</strong><small>发送消息与任务摘要</small></span></li>
-          <li><span class="capability-icon approval-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5-3.4 8.1-8 10-4.6-1.9-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span><span><strong>逐项授权</strong><small>写入和外发前由你确认</small></span></li>
-        </ul>
+        <p class="execution-todo-empty" id="executionTodoEmpty">复杂任务拆解后，步骤会显示在这里。</p>
+        <ul class="execution-todo-list" id="executionTodoList" aria-live="polite" aria-relevant="additions text"></ul>
       </section>
 
       <section class="rail-card recent-card" id="recentTasks">
@@ -624,6 +620,10 @@
     const taskStateDescription = $("#taskStateDescription");
     const taskStateIcon = $("#taskStateIcon");
     const taskProgressTrack = $("#taskProgressTrack");
+    const executionTodoCard = $("#executionTodoCard");
+    const executionTodoSummary = $("#executionTodoSummary");
+    const executionTodoEmpty = $("#executionTodoEmpty");
+    const executionTodoList = $("#executionTodoList");
     const recentTaskList = $("#recentTaskList");
     let socket = null;
     let connectPromise = null;
@@ -694,6 +694,49 @@
       taskStateIcon.textContent = stateIcons[state] || "✦";
       taskStateDescription.textContent = description;
       taskProgressTrack.hidden = state !== "running";
+    }
+
+    function renderExecutionTodos(todos) {
+      const executionTodos = Array.isArray(todos)
+        ? todos.filter((todo) => todo && typeof todo.content === "string").map((todo) => ({
+          content: todo.content,
+          status: ["pending", "in_progress", "completed"].includes(todo.status) ? todo.status : "pending",
+        }))
+        : [];
+      executionTodoCard.removeAttribute("data-state");
+      executionTodoList.replaceChildren();
+      executionTodoEmpty.hidden = executionTodos.length > 0;
+      executionTodoEmpty.textContent = executionTodos.length ? "" : "Agent 暂未安排待办步骤。";
+
+      if (!executionTodos.length) {
+        executionTodoSummary.textContent = "空清单";
+        return;
+      }
+
+      const completed = executionTodos.filter((todo) => todo.status === "completed").length;
+      const inProgress = executionTodos.filter((todo) => todo.status === "in_progress").length;
+      executionTodoSummary.textContent = `${completed}/${executionTodos.length} 已完成${inProgress ? ` · ${inProgress} 项进行中` : ""}`;
+
+      const labels = { pending: "待开始", in_progress: "进行中", completed: "已完成" };
+      const marks = { pending: "·", in_progress: "↗", completed: "✓" };
+      for (const todo of executionTodos) {
+        const item = document.createElement("li");
+        item.className = "execution-todo";
+        item.dataset.state = todo.status;
+        const mark = document.createElement("span");
+        mark.className = "execution-todo-mark";
+        mark.setAttribute("aria-hidden", "true");
+        mark.textContent = marks[todo.status];
+        const copy = document.createElement("span");
+        copy.className = "execution-todo-copy";
+        const content = document.createElement("span");
+        content.textContent = todo.content;
+        const status = document.createElement("small");
+        status.textContent = labels[todo.status];
+        copy.append(content, status);
+        item.append(mark, copy);
+        executionTodoList.append(item);
+      }
     }
 
     function renderRecentTasks() {
@@ -967,13 +1010,28 @@
         currentAssistantBubble.textContent += chunk;
         scrollToBottom();
       } else if (event.type === "tool.start") {
-        addToolActivity(event);
+        if (event.name === "write_todos") {
+          renderExecutionTodos(event.args?.todos);
+          toolCards.set(event.call_id, { executionTodo: true });
+        } else {
+          addToolActivity(event);
+        }
         const approval = pendingApprovals.get(event.call_id);
         if (approval && approval.runId === event.run_id && approval.state === "allowed") {
           setApprovalState(approval, "running", "本次调用已获允许，工具正在执行。");
         }
       } else if (event.type === "tool.end" || event.type === "tool.error") {
         let card = toolCards.get(event.call_id);
+        if (card?.executionTodo || event.name === "write_todos") {
+          toolCards.delete(event.call_id);
+          if (event.type === "tool.error") {
+            executionTodoCard.dataset.state = "error";
+            executionTodoSummary.textContent = "更新失败";
+            addNotice(event.message || "执行清单更新失败。", true);
+          }
+          currentAssistantBubble = null;
+          return;
+        }
         if (!card) {
           addToolActivity(event);
           card = toolCards.get(event.call_id);
@@ -1149,6 +1207,9 @@
       currentTask = null;
       currentAssistantBubble = null;
       toolCards.clear();
+      renderExecutionTodos([]);
+      executionTodoSummary.textContent = "未创建";
+      executionTodoEmpty.textContent = "复杂任务拆解后，步骤会显示在这里。";
       pendingApprovals.clear();
       messages.innerHTML = `<div class="welcome" id="welcome"><img class="welcome-mark" src="/assets/automation-agent-logo.png" alt="" aria-hidden="true"><div class="welcome-copy"><h2>你好，我是你的 AI 助手 <span aria-hidden="true">✦</span></h2><p>有什么任务交给我？我可以帮你处理本地文件、整理数据和生成通知。</p><div class="suggestions"><button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。"><span aria-hidden="true">▤</span> 列出数据目录</button><button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。"><span aria-hidden="true">▧</span> 读取报告内容</button></div></div></div>`;
       messages.classList.add("empty-state");
