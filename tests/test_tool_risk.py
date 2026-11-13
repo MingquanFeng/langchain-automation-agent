@@ -19,6 +19,11 @@ def test_read_only_tools_are_allowed_without_write_permission(tool_name):
     assert decide_tool_permission(tool_name, allow_write=False) == "allow"
 
 
+def test_todo_state_tool_is_allowed_without_write_permission():
+    """内部待办状态不是文件写入或外部副作用，不应触发默认拒绝。"""
+    assert decide_tool_permission("write_todos", allow_write=False) == "allow"
+
+
 @pytest.mark.parametrize(
     "tool_name",
     ["write_file", "append_file", "save_json", "notify", "notify_summary"],

@@ -54,7 +54,7 @@ from typing import Any
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
 
-from ..tools.risk import TOOL_RISK_LEVELS, decide_tool_permission
+from ..tools.risk import decide_tool_permission
 
 
 # ============================================================

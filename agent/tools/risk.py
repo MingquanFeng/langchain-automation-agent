@@ -13,21 +13,28 @@ from typing import Iterable, Literal
 # Literal 把合法的风险等级写进类型提示：编辑器和静态类型检查器可以
 # 提前发现拼写错误。运行时仍需用下面的 RISK_LEVELS 再检查一次，
 # 因为 Python 的类型标注本身不会阻止错误字符串进入字典。
-ToolRiskLevel = Literal["read_only", "workspace_write", "external_effect"]
+ToolRiskLevel = Literal[
+    "read_only",
+    "internal_state",
+    "workspace_write",
+    "external_effect",
+]
 PermissionDecision = Literal["allow", "require_approval", "deny"]
 
 # RISK_LEVELS 是运行时校验使用的合法值集合。
 # frozenset 表示这组允许值定义后不应再被调用方修改。
 RISK_LEVELS: frozenset[str] = frozenset({
     "read_only",
+    "internal_state",
     "workspace_write",
     "external_effect",
 })
 
 # 工具名到风险等级的映射，是权限策略读取风险信息的唯一来源。
 #
-# read_only：只读取项目数据，不修改文件，也不向外部发送信息。
-# workspace_write：会在项目数据目录内创建或修改文件。
+# read_only：只读取工作区数据，不修改文件，也不向外部发送信息。
+# internal_state：只更新当前 Agent 运行中的内部任务状态。
+# workspace_write：会在 Agent 工作目录内创建或修改文件。
 # external_effect：会向项目外部发送通知等信息，产生外部副作用。
 #
 # 新增工具时，在工具清单中注册后也要在这里登记；不要再另建一份
@@ -46,6 +53,12 @@ TOOL_RISK_LEVELS: dict[str, ToolRiskLevel] = {
     # 通知工具：可能向 webhook 接收方投递消息。
     "notify": "external_effect",
     "notify_summary": "external_effect",
+}
+
+# 中间件提供的内部状态工具不属于 Agent 的业务工具清单，单独登记，
+# 避免它们被外部副作用闸门误判为未登记工具。不要在这里登记任意业务工具。
+INTERNAL_TOOL_RISK_LEVELS: dict[str, ToolRiskLevel] = {
+    "write_todos": "internal_state",
 }
 
 
@@ -70,10 +83,13 @@ def decide_tool_permission(
     if allow_write:
         return "allow"
 
-    risk_level = TOOL_RISK_LEVELS.get(tool_name or "")
+    name = tool_name or ""
+    risk_level = TOOL_RISK_LEVELS.get(name)
+    if risk_level is None:
+        risk_level = INTERNAL_TOOL_RISK_LEVELS.get(name)
     if risk_level is None:
         return "deny"
-    if risk_level == "read_only":
+    if risk_level in {"read_only", "internal_state"}:
         return "allow"
     return "require_approval"
 

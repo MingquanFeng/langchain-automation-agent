@@ -457,6 +457,64 @@ def test_list_files_hides_memory_database():
     assert "memory.sqlite" not in out
 
 
+def test_list_files_skips_generated_directories_and_secret_files(tmp_path, monkeypatch):
+    """列项目仓库时剪掉生成目录，并隐藏敏感凭据文件。"""
+    from agent.tools import files as files_mod
+
+    monkeypatch.setattr(files_mod, "SANDBOX", tmp_path.resolve())
+
+    visible = tmp_path / "src" / "app.py"
+    visible.parent.mkdir()
+    visible.write_text("print('hello')", encoding="utf-8")
+    (tmp_path / ".env.example").write_text("LLM_API_KEY=replace-me", encoding="utf-8")
+
+    for dirname in (".git", ".next", "node_modules", ".venv", "dist", "build"):
+        generated = tmp_path / dirname / "ignored.txt"
+        generated.parent.mkdir()
+        generated.write_text("generated", encoding="utf-8")
+
+    real_config = tmp_path / "local_config.txt"
+    real_config.write_text("LLM_API_KEY=do-not-list", encoding="utf-8")
+    (tmp_path / ".env").symlink_to(real_config)
+    credentials = tmp_path / ".aws" / "credentials"
+    credentials.parent.mkdir()
+    credentials.write_text("secret", encoding="utf-8")
+
+    from agent.tools.files import list_files
+
+    out = list_files.invoke({"pattern": "*"})
+    assert "src/app.py" in out
+    assert ".env.example" in out
+    assert not any(line.startswith(".env  (") for line in out.splitlines())
+    assert "do-not-list" not in out and "secret" not in out
+    for dirname in (".git", ".next", "node_modules", ".venv", "dist", "build"):
+        assert f"{dirname}/ignored.txt" not in out
+        assert dirname in out  # 结果说明列举时跳过了这些目录。
+    assert "已隐藏敏感配置或密钥文件" in out
+
+
+def test_read_tools_refuse_sensitive_paths_but_allow_env_templates(tmp_path, monkeypatch):
+    """read_file/read_json 拒读密钥路径，且不会被 .env 软链接绕过。"""
+    from agent.tools import files as files_mod
+
+    monkeypatch.setattr(files_mod, "SANDBOX", tmp_path.resolve())
+    secret_target = tmp_path / "local_config.txt"
+    secret_target.write_text('{"LLM_API_KEY":"do-not-read"}', encoding="utf-8")
+    (tmp_path / ".env").symlink_to(secret_target)
+    (tmp_path / "credentials.json").write_text('{"token":"secret"}', encoding="utf-8")
+    (tmp_path / ".env.example").write_text("LLM_API_KEY=replace-me", encoding="utf-8")
+
+    from agent.tools.files import read_file, read_json
+
+    env_result = read_file.invoke({"path": ".env"})
+    credentials_result = read_json.invoke({"path": "credentials.json"})
+    assert "不能读取敏感配置或密钥文件" in env_result
+    assert "不能读取敏感配置或密钥文件" in credentials_result
+    assert "do-not-read" not in env_result
+    assert "secret" not in credentials_result
+    assert "replace-me" in read_file.invoke({"path": ".env.example"})
+
+
 def test_list_files_reports_modification_time():
     """list_files 要带修改时间，模型才能判断哪些文件陈旧。
 

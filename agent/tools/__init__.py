@@ -19,7 +19,7 @@ ALL_TOOLS 是 Agent 能拿到的**全部**工具。
 # ============================================================
 
 # FILE_TOOLS：本地文件读写工具。
-# 来自 files.py，全部被沙箱限制在 data/ 目录内。
+# 来自 files.py，全部被沙箱限制在当前 Agent 工作目录内。
 from .files import FILE_TOOLS
 
 # NOTIFY_TOOLS：通知出口工具。
