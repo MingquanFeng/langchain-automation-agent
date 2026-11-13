@@ -30,6 +30,7 @@ struct RuntimeInfo {
     service_url: String,
     config_path: String,
     log_path: String,
+    working_directory: String,
     status: String,
     error: Option<String>,
 }
@@ -39,6 +40,7 @@ struct RuntimeState {
     child: Mutex<Option<CommandChild>>,
     log_file: Mutex<File>,
     app_home: PathBuf,
+    working_directory: Mutex<PathBuf>,
     started_at: Mutex<Instant>,
     exited: AtomicBool,
     stopping: AtomicBool,
@@ -130,6 +132,47 @@ fn restart_runtime(
 ) -> Result<(), String> {
     stop_runtime(state.inner());
     start_runtime(&app, state.inner())
+}
+
+#[tauri::command]
+fn set_working_directory(
+    path: String,
+    app: tauri::AppHandle,
+    state: State<'_, Arc<RuntimeState>>,
+) -> Result<(), String> {
+    let path = path.trim();
+    if path.is_empty() || path.chars().any(char::is_control) {
+        return Err("请选择有效的工作目录。".into());
+    }
+    let path = fs::canonicalize(path).map_err(|error| format!("无法访问所选目录：{error}"))?;
+    if !path.is_dir() {
+        return Err("所选路径不是文件夹。".into());
+    }
+
+    let settings_path = state.app_home.join("working-directory.txt");
+    fs::write(&settings_path, path.to_string_lossy().as_bytes())
+        .map_err(|error| format!("无法保存工作目录：{error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&settings_path, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("无法限制工作目录配置权限：{error}"))?;
+    }
+    *state
+        .working_directory
+        .lock()
+        .map_err(|_| "无法更新工作目录状态。".to_string())? = path.clone();
+    {
+        let mut info = state.info.lock().expect("runtime info mutex poisoned");
+        info.working_directory = path.to_string_lossy().into_owned();
+    }
+
+    stop_runtime(state.inner());
+    if let Err(error) = start_runtime(&app, state.inner()) {
+        state.fail(error.clone());
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -239,6 +282,18 @@ fn create_runtime_state(app: &tauri::AppHandle) -> Result<Arc<RuntimeState>, Str
     fs::create_dir_all(&logs_dir)
         .map_err(|error| format!("无法创建应用数据目录：{error}"))?;
 
+    let default_working_directory = app_home.join("data");
+    fs::create_dir_all(&default_working_directory)
+        .map_err(|error| format!("无法创建默认工作目录：{error}"))?;
+    let working_directory = fs::read_to_string(app_home.join("working-directory.txt"))
+        .ok()
+        .map(|saved| PathBuf::from(saved.trim()))
+        .and_then(|saved| fs::canonicalize(saved).ok())
+        .filter(|saved| saved.is_dir())
+        .unwrap_or(fs::canonicalize(&default_working_directory).map_err(|error| {
+            format!("无法确定默认工作目录：{error}")
+        })?);
+
     let config_path = app_home.join(".env");
     if !config_path.exists() {
         fs::write(
@@ -272,12 +327,14 @@ fn create_runtime_state(app: &tauri::AppHandle) -> Result<Arc<RuntimeState>, Str
             service_url: String::new(),
             config_path: config_path.to_string_lossy().into_owned(),
             log_path: log_path.to_string_lossy().into_owned(),
+            working_directory: working_directory.to_string_lossy().into_owned(),
             status: "starting".into(),
             error: None,
         }),
         child: Mutex::new(None),
         log_file: Mutex::new(log_file),
         app_home,
+        working_directory: Mutex::new(working_directory),
         started_at: Mutex::new(Instant::now()),
         exited: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
@@ -291,6 +348,11 @@ fn start_runtime(app: &tauri::AppHandle, state: &Arc<RuntimeState>) -> Result<()
         .port();
     let service_url = format!("http://127.0.0.1:{port}");
     let port_arg = port.to_string();
+    let working_directory = state
+        .working_directory
+        .lock()
+        .map_err(|_| "无法读取 Agent 工作目录。".to_string())?
+        .clone();
 
     let command = app
         .shell()
@@ -298,6 +360,7 @@ fn start_runtime(app: &tauri::AppHandle, state: &Arc<RuntimeState>) -> Result<()
         .map_err(|error| format!("找不到已打包的 Python sidecar：{error}"))?
         .args(["--host", "127.0.0.1", "--port", &port_arg, "--no-schedule"])
         .env("AUTOMATION_AGENT_HOME", &state.app_home)
+        .env("__CLI_DATA_DIR__", &working_directory)
         .set_process_group(true)
         .kill_on_drop(true);
     let (mut receiver, child) = command
@@ -445,11 +508,13 @@ fn stop_runtime(state: &RuntimeState) {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             runtime_info,
             read_runtime_log,
             restart_runtime,
-            save_model_api_key
+            save_model_api_key,
+            set_working_directory
         ])
         .setup(|app| {
             let state = create_runtime_state(app.handle())

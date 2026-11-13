@@ -16,8 +16,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# 当前桌面壳只创建 WebView 窗口，不引入文件系统或 Shell 插件权限。
+# 目录通过系统文件选择框授权；应用不开放通用文件系统或 Shell 权限。
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 libc = "0.2"

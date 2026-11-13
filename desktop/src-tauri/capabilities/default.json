@@ -3,5 +3,5 @@
   "identifier": "main-window",
   "description": "主窗口只调用托管服务状态命令，不开放通用 Shell 或文件系统能力。",
   "windows": ["main"],
-  "permissions": []
+  "permissions": ["dialog:allow-open"]
 }

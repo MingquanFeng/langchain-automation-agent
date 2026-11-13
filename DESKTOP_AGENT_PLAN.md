@@ -487,13 +487,13 @@ FastAPI 服务、`/ws` 事件协议、会话记忆和逐次授权逻辑；不复
 ### 已确定的打包方式
 
 - **PyInstaller 单文件 sidecar + Tauri `externalBin`**：构建机使用项目运行环境生成与当前 macOS 架构匹配的 Python 可执行文件，由桌面应用随包携带。Tauri sidecar 按目标架构命名；构建流程写入 `desktop/src-tauri/binaries/`。
-- sidecar 由 Rust 侧调用并管理进程，不通过 WebView 的 Shell 插件 API 启动；连接页只能读取运行状态、读取最近日志和请求重启。
-- 桌面运行时配置、SQLite 和记忆工具数据放到系统应用支持目录；日志写入同目录的 `logs/runtime.log`。现有终端启动方式继续使用项目根目录的 `.env` 与 `data/`。
+- sidecar 由 Rust 侧调用并管理进程，不通过 WebView 的 Shell 插件 API 启动；连接页只读取运行状态和最近日志，并可选择文件工具工作目录、请求重启。
+- 桌面运行时配置和会话记忆放到系统应用支持目录；文件工具可选工作目录，默认仍是应用支持目录下的 `data/`；日志写入同目录的 `logs/runtime.log`。现有终端启动方式继续使用项目根目录的 `.env` 与 `data/`。
 
 ### 实施任务
 
 1. **[x] 确定 Python 托管原型**：添加 PyInstaller 打包入口与 macOS 目标架构脚本，并配置 Tauri sidecar。
-2. **[x] 隔离桌面配置和数据**：支持通过 `AUTOMATION_AGENT_HOME` 指向应用支持目录，首次启动创建 `.env`，数据工具和 SQLite 默认落到该目录。
+2. **[x] 隔离桌面配置和数据**：支持通过 `AUTOMATION_AGENT_HOME` 指向应用支持目录，首次启动创建 `.env`；SQLite 留在应用支持目录，文件工具可配置独立工作目录。
 3. **[x] 启动、监控和停止服务**：Rust 侧分配空闲 loopback 端口、启动 sidecar、检查 `/health`；退出时发 `SIGTERM`，超时后回收进程组。
 4. **[x] 日志、配置位置和恢复界面**：展示 `.env` 与日志路径、读取最近日志，并在启动失败时允许重启托管服务。
 5. **进行中：macOS `.app` 启动验收**：Apple Silicon `.app` 已构建成功（67.84 MiB），产物内含 Python sidecar；托管服务启动、UI 连接及关闭回收尚未手动验收。

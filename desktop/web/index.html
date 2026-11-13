@@ -48,7 +48,7 @@
     #workbench[hidden] { display: none; }
     .setup-card {
       position: absolute; z-index: 1; top: 50%; left: 50%; width: min(470px, calc(100vw - 32px));
-      transform: translate(-50%, -50%); border: 1px solid #e1e5ea; border-radius: 14px;
+      max-height: calc(100% - 24px); overflow: auto; transform: translate(-50%, -50%); border: 1px solid #e1e5ea; border-radius: 14px;
       padding: 24px; background: #fff; box-shadow: 0 18px 60px #15223816;
     }
     .workspace[data-mode="app"] .setup-card[data-open="false"] { display: none; }
@@ -181,7 +181,7 @@
       </div>
       <div class="desktop-settings-option">
         <span aria-hidden="true">⌘</span>
-        <div><strong>服务设置</strong><small>管理地址、启动日志与 Agent 服务。</small></div>
+        <div><strong>服务设置</strong><small>管理地址、日志和 Agent 服务。</small></div>
         <button class="secondary-button" id="setupServiceSettings" type="button">服务设置</button>
       </div>
       <p class="model-note">API Key 保存在本机配置文件中；模型和服务设置需要重启后生效。</p>
@@ -221,10 +221,12 @@
     const runtimeLog = $("#runtimeLog");
     const STORAGE_KEY = "automation-agent.desktop.service-url";
     const nativeInvoke = window.__TAURI__?.core?.invoke;
+    const openDirectoryDialog = window.__TAURI__?.dialog?.open;
     connection.hidden = true;
     modelToggle.hidden = true;
     settingsToggle.hidden = true;
     let currentOrigin = null;
+    let currentWorkingDirectory = "";
     let frameLoaded = false;
     let attemptId = 0;
     let frameTimer = null;
@@ -249,6 +251,19 @@
     function setModelStatus(state, text) {
       modelStatus.dataset.state = state;
       modelStatus.textContent = text;
+    }
+
+    function setWorkingDirectory(path) {
+      currentWorkingDirectory = path || "";
+      syncWorkingDirectoryToFrame();
+    }
+
+    function syncWorkingDirectoryToFrame() {
+      if (!frameLoaded || !currentOrigin) return;
+      frame.contentWindow.postMessage({
+        type: "automation-agent.working-directory",
+        path: currentWorkingDirectory,
+      }, currentOrigin);
     }
 
     function openModelDialog() {
@@ -364,11 +379,14 @@
       } else if (message?.type === "automation-agent.open-model-settings") {
         if (desktopSettingsDialog.open) desktopSettingsDialog.close();
         openModelDialog();
+      } else if (message?.type === "automation-agent.choose-working-directory") {
+        void chooseWorkingDirectory();
       } else if (message?.type === "automation-agent.workbench.ready") {
         clearTimeout(frameTimer);
         frameLoaded = true;
         updateSettingsEntry();
         workspace.dataset.mode = "app";
+        syncWorkingDirectoryToFrame();
         setConnection("connecting", "正在连接 Agent", currentOrigin);
         setStatus("", "工作台已载入，正在建立 Agent 连接…");
         showSettings(false);
@@ -455,6 +473,7 @@
         const info = await nativeInvoke("runtime_info");
         runtimeDetails.hidden = false;
         runtimeDetails.textContent = `配置文件：${info.configPath}\n启动日志：${info.logPath}`;
+        if (info.workingDirectory) setWorkingDirectory(info.workingDirectory);
         if (info.status === "ready") {
           restartRuntimeButton.hidden = true;
           runtimeActions.hidden = false;
@@ -487,6 +506,61 @@
       addressInput.disabled = false;
       connectButton.disabled = false;
       showSettings(true);
+    }
+
+    async function chooseWorkingDirectory() {
+      if (!nativeInvoke || !openDirectoryDialog) {
+        setStatus("error", "目录选择仅在桌面应用中可用。");
+        if (frameLoaded) showSettings(true);
+        return;
+      }
+      const previousOrigin = currentOrigin;
+      try {
+        const selected = await openDirectoryDialog({
+          directory: true,
+          multiple: false,
+          title: "选择 Agent 工作目录",
+          ...(currentWorkingDirectory ? { defaultPath: currentWorkingDirectory } : {}),
+        });
+        if (typeof selected !== "string" || !selected || selected === currentWorkingDirectory) return;
+        if (frameLoaded && !window.confirm("更换工作目录需要重启本机 Agent 服务，正在执行的任务可能被中断。是否继续？")) return;
+
+        clearTimeout(frameTimer);
+        attemptId += 1;
+        currentOrigin = null;
+        frameLoaded = false;
+        updateSettingsEntry();
+        frame.hidden = true;
+        frame.src = "about:blank";
+        workspace.dataset.mode = "loading";
+        addressInput.value = "";
+        addressInput.placeholder = "正在等待本机服务分配端口…";
+        addressInput.disabled = true;
+        connectButton.disabled = true;
+
+        await nativeInvoke("set_working_directory", { path: selected });
+        setWorkingDirectory(selected);
+        await waitForManagedRuntime();
+      } catch (error) {
+        setStatus("error", `切换工作目录失败：${error.message || error}`);
+        showSettings(true);
+        try {
+          const info = await nativeInvoke("runtime_info");
+          if (info.workingDirectory) setWorkingDirectory(info.workingDirectory);
+          if (info.status === "failed" || info.status === "stopped") {
+            workspace.dataset.mode = "setup";
+            frame.hidden = true;
+            runtimeActions.hidden = false;
+            restartRuntimeButton.hidden = false;
+            addressInput.value = info.serviceUrl || DEFAULT_ADDRESS;
+            addressInput.disabled = false;
+            connectButton.disabled = false;
+            showSettings(true);
+          } else if (info.status === "ready" && previousOrigin) {
+            connectToService(previousOrigin);
+          }
+        } catch { /* 保留上方错误状态。 */ }
+      }
     }
 
     restartRuntimeButton.addEventListener("click", async () => {

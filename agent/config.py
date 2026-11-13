@@ -78,23 +78,7 @@ def set_cli_override(name: str, value: str) -> None:
 
 
 # ============================================================
-# 2. 定义项目目录
-# ============================================================
-
-# __file__：当前 config.py 文件路径。
-# resolve()：转换为规范化的绝对路径。
-# parent.parent：向上查找两级目录。
-# 假设文件位于 project/agent/config.py，
-# 则 ROOT 指向 project 目录。
-# 普通项目运行仍使用 project/data；桌面版使用 app support/data。
-DATA_DIR = (APP_HOME / "data") if APP_HOME is not None else (ROOT / "data")
-
-# 创建数据目录，包括桌面版首次启动时尚不存在的父目录。
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# ============================================================
-# 3. 环境变量读取辅助函数
+# 2. 环境变量读取辅助函数
 # ============================================================
 
 def _env(name: str, default: str = "") -> str:
@@ -125,6 +109,20 @@ def _env(name: str, default: str = "") -> str:
     if cli is not None:
         return cli.strip()
     return os.getenv(name, default).strip()
+
+
+# ============================================================
+# 3. 定义 Agent 文件工具的工作目录
+# ============================================================
+
+# 会话记忆始终留在应用支持目录；普通项目则留在项目 data/。
+_MEMORY_DIR = APP_HOME / "data" if APP_HOME is not None else ROOT / "data"
+_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+
+# 普通项目运行仍使用项目 data/；桌面版可通过命令行覆盖选择文件工具工作目录。
+_DEFAULT_DATA_DIR = _MEMORY_DIR
+DATA_DIR = Path(_env("DATA_DIR", str(_DEFAULT_DATA_DIR))).expanduser().resolve()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
@@ -315,7 +313,7 @@ class RuntimeConfig:
         default_factory=lambda: Path(
             _env(
                 "SQLITE_PATH",
-                str(DATA_DIR / "memory.sqlite")
+                str(_MEMORY_DIR / "memory.sqlite")
             )
         )
     )

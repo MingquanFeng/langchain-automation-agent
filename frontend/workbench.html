@@ -224,14 +224,10 @@
     .composer:focus-within { border-color: #aebff3; box-shadow: 0 0 0 3px #315fe80d, 0 5px 18px #26354d0a; }
     .composer textarea { display: block; width: 100%; min-height: 58px; max-height: 180px; padding: 2px 2px 8px; resize: vertical; border: 0; outline: 0; box-shadow: none; font-size: 13px; }
     .composer textarea:focus { border: 0; box-shadow: none; }
-    .composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .composer-hint { color: #929baa; font-size: 10px; }
     .composer-controls { display: flex; align-items: center; gap: 11px; }
     .send-button { min-width: 76px; border: 0; border-radius: 7px; background: var(--blue); color: white; padding: 8px 12px; font-size: 11px; font-weight: 650; }
     .send-button:hover:not(:disabled) { background: #244ed0; }
     .cancel-inline { border: 1px solid #f0d4d2; border-radius: 7px; background: #fff9f8; color: #a44848; padding: 7px 10px; font-size: 10px; }
-    .chat-foot { padding: 7px 2px 0; text-align: center; color: #929baa; font-size: 9px; }
-    .chat-foot .warning { color: #a65d17; }
     .hidden { display: none !important; }
 
     @media (max-width: 760px) {
@@ -246,7 +242,6 @@
       main.chat-app { width: calc(100% - 20px); height: calc(100vh - 78px); min-height: 500px; margin: 10px auto; }
       .messages { padding: 18px 12px; }
       .composer-wrap { padding: 10px; }
-      .composer-hint { display: none; }
       .composer-controls { gap: 7px; }
       .activity { margin-left: 30px; }
       .approval-card { margin-left: 30px; }
@@ -342,20 +337,23 @@
     .approval-card { border-radius: 12px; }
     .run-notice { font-size: 9px; }
     .composer-wrap { flex: 0 0 auto; border-top: 1px solid #e8ecf4; padding: 12px 15px 9px; background: #fff; }
-    .composer { display: flex; align-items: center; gap: 9px; border-color: #e1e6f1; border-radius: 14px; padding: 8px 9px 8px 13px; box-shadow: 0 5px 18px #293c660a; }
-    .composer-clip { flex: 0 0 auto; color: #7d8cac; font-size: 18px; transform: rotate(-35deg); }
+    .composer { position: relative; display: flex; align-items: center; gap: 9px; border-color: #e1e6f1; border-radius: 14px; padding: 8px 9px 8px 13px; box-shadow: 0 5px 18px #293c660a; }
+    .working-directory-button {
+      flex: 0 0 auto; max-width: 156px; height: 36px; display: inline-flex; align-items: center; gap: 6px;
+      border: 1px solid transparent; border-radius: 10px; padding: 0 8px; color: #7383a1; background: #f6f8fc;
+      cursor: pointer; font-size: 10px; font-weight: 650; transition: background .15s, border-color .15s, color .15s;
+    }
+    .working-directory-button:hover:not(:disabled) { border-color: #dce5fb; color: #315fe8; background: #eef3ff; }
+    .working-directory-button:focus-visible { outline: 3px solid #9bb2ff; outline-offset: 2px; }
+    .working-directory-button svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .working-directory-button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .working-directory-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .composer textarea { flex: 1; width: 100%; min-width: 0; min-height: 45px; max-height: 130px; padding: 8px 2px; border: 0; resize: vertical; color: #2f3d56; font-size: 13px; line-height: 1.55; }
     .composer textarea:focus { border: 0; box-shadow: none; }
     .composer textarea::placeholder { color: #99a4b9; }
     .composer-controls { flex: 0 0 auto; gap: 7px; }
     .send-button { width: 42px; height: 42px; display: grid; place-items: center; min-width: 42px; border-radius: 12px; padding: 0; box-shadow: 0 4px 12px #315fe837; }
     .send-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-    .composer-bottom { display: flex; justify-content: space-between; gap: 10px; padding: 7px 4px 0; }
-    .composer-hint { color: #8b97ac; font-size: 10px; }
-    .composer-shortcuts { color: #9aa5b8; font-size: 10px; }
-    .composer-shortcuts kbd { border: 1px solid #e3e8f1; border-radius: 4px; padding: 1px 4px; background: #fafbfe; font: 9px var(--sans); }
-    .composer-shortcuts i { margin: 0 4px; color: #c3cada; font-style: normal; }
-    .chat-foot { padding: 5px 0 0; color: #9aa4b6; font-size: 9px; }
 
     .assistant-rail { min-height: 0; display: flex; flex-direction: column; gap: 11px; overflow: auto; padding: 10px; background: rgb(250 251 255 / 58%); }
     .rail-card { flex: 0 0 auto; padding: 15px 14px; border: 1px solid #e2e7f2; border-radius: 15px; background: rgb(255 255 255 / 88%); box-shadow: 0 5px 18px #34487308; }
@@ -429,7 +427,6 @@
       .nav-item svg { width: 16px; height: 16px; }
       .conversation-column { flex: 1; }
       .assistant-rail { top: 8px; right: 8px; bottom: 66px; width: min(300px, calc(100vw - 32px)); }
-      .composer-shortcuts { display: none; }
       .messages { padding: 13px 11px; }
       .welcome { grid-template-columns: 43px minmax(0, 1fr); gap: 0 10px; margin: 6px 0 18px; }
       .welcome-mark { width: 42px; height: 42px; border-radius: 13px; }
@@ -438,11 +435,10 @@
       .suggestions { flex-wrap: nowrap; overflow-x: auto; }
       .suggestion { flex: 0 0 auto; }
       .composer-wrap { padding: 9px 10px 7px; }
-      .composer-clip { display: none; }
+      .working-directory-button { width: 36px; justify-content: center; padding: 0; }
+      .working-directory-button span { display: none; }
       .composer textarea { min-height: 40px; }
       .send-button { width: 37px; height: 37px; min-width: 37px; }
-      .composer-hint { max-width: 65%; text-align: left; }
-      .chat-foot { display: none; }
     }
     @media (max-height: 720px) and (min-width: 701px) {
       .assistant-rail { gap: 7px; padding: 7px; }
@@ -517,18 +513,17 @@
         </div>
         <div class="composer-wrap">
           <form class="composer" id="chatForm">
-            <span class="composer-clip" aria-hidden="true">↗</span>
-            <textarea id="messageInput" required rows="2" placeholder="输入你的任务…（Enter 发送，Shift + Enter 换行）"></textarea>
+            <button class="working-directory-button" id="workingDirectoryButton" type="button" aria-label="选择工作目录" title="选择工作目录">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 9h17"/></svg>
+              <span id="workingDirectoryName">工作目录</span>
+            </button>
+            <span class="working-directory-status" id="workingDirectoryAnnouncement" aria-live="polite"></span>
+            <textarea id="messageInput" required rows="2" placeholder="输入你的任务…"></textarea>
             <div class="composer-controls">
               <button class="cancel-inline hidden" id="cancelButton" type="button">取消</button>
               <button class="send-button" id="sendButton" type="submit" aria-label="发送任务"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 3-7.5 18-3.8-7.7L2 9.5 21 3Z"/><path d="M9.7 13.3 21 3"/></svg></button>
             </div>
           </form>
-          <div class="composer-bottom">
-            <span class="composer-hint" id="composerHint">写入文件或发送通知前会逐次请求确认</span>
-            <span class="composer-shortcuts"><kbd>Enter</kbd> 发送 <i>·</i> <kbd>Shift + Enter</kbd> 换行</span>
-          </div>
-          <div class="chat-foot" id="writeHint">未允许的写入或通知操作不会执行。</div>
         </div>
       </section>
     </section>
@@ -592,7 +587,7 @@
         <span class="settings-option-icon" aria-hidden="true">⌘</span>
         <div class="settings-option-copy">
           <strong>服务设置</strong>
-          <span>查看本机地址与启动日志，或重启 Agent 服务。</span>
+          <span>查看本机地址和服务日志。</span>
         </div>
         <button id="openServiceSettingsButton" type="button">管理服务</button>
       </div>
@@ -609,8 +604,10 @@
     const connectionText = $("#connectionText");
     const connectionHost = $("#connectionHost");
     const retryConnectionButton = $("#retryConnectionButton");
-    const composerHint = $("#composerHint");
     const sendButton = $("#sendButton");
+    const workingDirectoryButton = $("#workingDirectoryButton");
+    const workingDirectoryName = $("#workingDirectoryName");
+    const workingDirectoryAnnouncement = $("#workingDirectoryAnnouncement");
     const cancelButton = $("#cancelButton");
     const newChatButton = $("#newChatButton");
     const sidebarSettingsButton = $("#sidebarSettingsButton");
@@ -637,6 +634,23 @@
     const recentTasks = [];
     const toolCards = new Map();
     const pendingApprovals = new Map();
+    let currentWorkingDirectory = "";
+
+    function setWorkingDirectory(path) {
+      currentWorkingDirectory = typeof path === "string" ? path : "";
+      const pathParts = currentWorkingDirectory.split(/[\\/]/).filter(Boolean);
+      const directoryName = pathParts[pathParts.length - 1] || "工作目录";
+      workingDirectoryName.textContent = directoryName;
+      workingDirectoryButton.title = currentWorkingDirectory
+        ? `工作目录：${currentWorkingDirectory}；点击更改`
+        : "选择工作目录";
+      workingDirectoryButton.setAttribute("aria-label", currentWorkingDirectory
+        ? `选择工作目录，当前为 ${currentWorkingDirectory}`
+        : "选择工作目录");
+      workingDirectoryAnnouncement.textContent = currentWorkingDirectory
+        ? `当前工作目录：${currentWorkingDirectory}`
+        : "尚未收到工作目录信息";
+    }
 
     // 把协议风险等级转换成界面上的简短说明，帮助用户快速判断操作影响。
     const riskLabels = {
@@ -940,7 +954,6 @@
       if (event.type === "run.start") {
         activeRunId = event.run_id;
         threadId = event.thread_id || threadId;
-        composerHint.textContent = "继续发送消息即可沿用本次会话记忆";
         if (currentTask) {
           currentTask.state = "running";
           renderRecentTasks();
@@ -1139,7 +1152,6 @@
       pendingApprovals.clear();
       messages.innerHTML = `<div class="welcome" id="welcome"><img class="welcome-mark" src="/assets/automation-agent-logo.png" alt="" aria-hidden="true"><div class="welcome-copy"><h2>你好，我是你的 AI 助手 <span aria-hidden="true">✦</span></h2><p>有什么任务交给我？我可以帮你处理本地文件、整理数据和生成通知。</p><div class="suggestions"><button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。"><span aria-hidden="true">▤</span> 列出数据目录</button><button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。"><span aria-hidden="true">▧</span> 读取报告内容</button></div></div></div>`;
       messages.classList.add("empty-state");
-      composerHint.textContent = "写入或通知操作会逐次请求确认";
       setBusy(false);
       setTaskState("idle", "随时待命，开始你的任务吧。");
       input.focus();
@@ -1211,6 +1223,14 @@
     ));
     sidebarRetryButton.addEventListener("click", () => retryConnectionButton.click());
 
+    workingDirectoryButton.addEventListener("click", () => {
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: "automation-agent.choose-working-directory" }, "*");
+      } else {
+        addNotice("工作目录只能在桌面应用中选择。", true);
+      }
+    });
+
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
@@ -1231,7 +1251,12 @@
 
     if (window.parent !== window) {
       window.addEventListener("message", (event) => {
-        if (event.source !== window.parent || event.data?.type !== "automation-agent.reconnect") return;
+        if (event.source !== window.parent) return;
+        if (event.data?.type === "automation-agent.working-directory") {
+          setWorkingDirectory(event.data.path);
+          return;
+        }
+        if (event.data?.type !== "automation-agent.reconnect") return;
         const requestId = event.data.request_id;
         connect().then(() => {
           window.parent.postMessage({ type: "automation-agent.connection", request_id: requestId, connected: true }, "*");
