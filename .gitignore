@@ -5,6 +5,8 @@ __pycache__/
 .venv/
 .DS_Store
 .pytest_cache/
+desktop/build/
+desktop/src-tauri/binaries/automation-agent-runtime-*
 
 # PyCharm 的本地配置，不进版本库。
 # .run/ 是 JetBrains 的共享运行配置目录，要提交。

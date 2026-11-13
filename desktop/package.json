@@ -5,8 +5,12 @@
   "type": "module",
   "scripts": {
     "tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri",
+    "build:runtime": "python3 scripts/build_runtime.py",
+    "predev": "npm run build:runtime",
     "dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
+    "prebuild": "npm run build:runtime",
     "build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
+    "postbuild": "node scripts/move_app_to_desktop.mjs",
     "icon": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri icon"
   },
   "devDependencies": {

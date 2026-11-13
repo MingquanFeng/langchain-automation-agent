@@ -23,16 +23,17 @@
       gap: 16px; padding: 0 20px; border-bottom: 1px solid #e5e8ec; background: #fff;
     }
     .brand { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 650; }
-    .brand-mark {
-      display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px;
-      background: #14283f; color: #76d7c4; font-size: 15px; font-weight: 750;
-    }
+    .brand-logo { display: block; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 8px; object-fit: cover; }
     .top-actions, .connection { display: flex; align-items: center; gap: 10px; }
     .connection { color: #667085; font-size: 12px; }
+    .connection[hidden], button[hidden] { display: none; }
     .signal { width: 7px; height: 7px; border-radius: 50%; background: #98a2b3; }
     .connection[data-state="connected"] .signal { background: #2d9272; }
     .connection[data-state="connecting"] .signal { background: #ca8b2a; }
     .connection[data-state="error"] .signal { background: #c4483c; }
+    .connection-retry { min-height: 28px; border: 1px solid #d9dee6; border-radius: 7px; padding: 0 9px; background: #fff; color: #344054; cursor: pointer; font-size: 11px; font-weight: 600; }
+    .connection-retry:hover:not(:disabled) { background: #f7f8fa; }
+    .connection-retry:disabled { cursor: wait; opacity: .6; }
     #serviceLabel { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .settings-toggle, .primary-button, .secondary-button {
       min-height: 34px; border: 1px solid #d9dee6; border-radius: 7px; padding: 0 12px;
@@ -57,6 +58,9 @@
     }
     .workspace[data-mode="loading"] .setup-card { top: 50%; }
     .setup-card h1 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+    .setup-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .settings-dismiss { min-height: 30px; border: 1px solid #d9dee6; border-radius: 7px; padding: 0 10px; background: #fff; color: #526075; cursor: pointer; font-size: 11px; font-weight: 600; }
+    .settings-dismiss:hover { background: #f7f8fa; }
     .setup-card p { margin: 9px 0 18px; color: #667085; font-size: 13px; line-height: 1.65; }
     .setup-card label { display: block; margin-bottom: 7px; color: #344054; font-size: 12px; font-weight: 650; }
     .address-row { display: flex; gap: 8px; }
@@ -69,11 +73,42 @@
     .setup-status[data-state="error"] { color: #b42318; }
     .setup-status[data-state="connected"] { color: #28745b; }
     .scope-note { margin: 14px 0 0 !important; padding-top: 12px; border-top: 1px solid #edf0f3; font-size: 11px !important; }
+    .runtime-details { margin: 10px 0 0 !important; color: #667085; font-size: 11px !important; line-height: 1.65; overflow-wrap: anywhere; }
+    .runtime-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .runtime-log { max-height: 220px; overflow: auto; margin: 10px 0 0; padding: 10px; border-radius: 7px; background: #101828; color: #e4e7ec; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .model-dialog { width: min(420px, calc(100vw - 32px)); border: 1px solid #e1e5ea; border-radius: 14px; padding: 0; color: #1d2939; box-shadow: 0 24px 80px #15223835; }
+    .model-dialog::backdrop { background: #15223870; backdrop-filter: blur(2px); }
+    .model-form { padding: 24px; }
+    .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+    .dialog-heading h1 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+    .dialog-close { width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: #667085; cursor: pointer; font-size: 20px; line-height: 1; }
+    .dialog-close:hover { background: #f2f4f7; }
+    .model-description { margin: 8px 0 18px; color: #667085; font-size: 13px; line-height: 1.6; }
+    .model-description strong { color: #344054; font-weight: 650; }
+    .model-form label { display: block; margin-bottom: 7px; color: #344054; font-size: 12px; font-weight: 650; }
+    .model-form input { width: 100%; height: 40px; border: 1px solid #cfd5dd; border-radius: 7px; padding: 0 11px; color: #25364b; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .model-form input:focus { outline: 3px solid #24425f20; border-color: #6b879f; }
+    .model-form .primary-button { margin-top: 12px; }
+    .model-status { min-height: 20px; margin: 10px 0 0; color: #667085; font-size: 12px; line-height: 1.5; }
+    .model-status[data-state="error"] { color: #b42318; }
+    .model-status[data-state="saved"] { color: #28745b; }
+    .model-note { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid #edf0f3; color: #667085; font-size: 11px; line-height: 1.6; }
+    .desktop-settings-dialog { width: min(450px, calc(100vw - 32px)); border: 1px solid #e1e5ea; border-radius: 14px; padding: 0; color: #1d2939; box-shadow: 0 24px 80px #15223835; }
+    .desktop-settings-dialog::backdrop { background: #15223870; backdrop-filter: blur(2px); }
+    .desktop-settings-panel { padding: 24px; }
+    .desktop-settings-panel h1 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+    .desktop-settings-panel > p { margin: 7px 0 16px; color: #667085; font-size: 12px; line-height: 1.6; }
+    .desktop-settings-option { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid #edf0f3; }
+    .desktop-settings-option > span:first-child { width: 36px; height: 36px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; color: #416ce7; background: #edf2ff; }
+    .desktop-settings-option div { min-width: 0; flex: 1; }
+    .desktop-settings-option strong { display: block; color: #344054; font-size: 12px; }
+    .desktop-settings-option small { display: block; margin-top: 3px; color: #8a96aa; font-size: 10px; }
     @media (max-width: 620px) {
       .topbar { padding: 0 12px; }
       #connectionText { display: none; }
       #serviceLabel { max-width: 125px; }
       .settings-toggle { padding: 0 9px; }
+      .connection-retry { padding: 0 7px; }
       .setup-card { padding: 20px; }
       .address-row { flex-direction: column; }
     }
@@ -81,21 +116,27 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true">A</span><span>Automation Agent</span></div>
+    <div class="brand"><img class="brand-logo" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true"><span>Automation Agent</span></div>
     <div class="top-actions">
-      <div class="connection" id="connection" data-state="connecting" role="status">
+      <div class="connection" id="connection" data-state="connecting" role="status" hidden>
         <span class="signal" aria-hidden="true"></span>
         <span id="connectionText">正在连接本机服务</span>
         <span id="serviceLabel"></span>
+        <button class="connection-retry" id="retryWorkbenchButton" type="button" hidden>重试</button>
       </div>
-      <button class="settings-toggle" id="settingsToggle" type="button" aria-expanded="false">服务设置</button>
+      <button class="settings-toggle" id="modelToggle" type="button" hidden>配置模型</button>
+      <button class="settings-toggle" id="settingsToggle" type="button" aria-expanded="false" hidden>服务设置</button>
+      <button class="settings-toggle" id="setupSettingsToggle" type="button" hidden>设置</button>
     </div>
   </header>
   <main class="workspace" id="workspace" data-mode="loading">
     <iframe id="workbench" title="Agent 聊天工作台" sandbox="allow-scripts allow-same-origin" hidden></iframe>
     <section class="setup-card" id="setupCard" data-open="true" aria-labelledby="setupTitle">
-      <h1 id="setupTitle">连接本机 Agent 服务</h1>
-      <p>桌面窗口会打开 FastAPI 提供的现有工作台。服务未启动时，可以先启动服务，再重试连接。</p>
+      <div class="setup-heading">
+        <h1 id="setupTitle">连接本机 Agent 服务</h1>
+        <button class="settings-dismiss" id="closeServiceSettings" type="button" hidden>完成</button>
+      </div>
+      <p>桌面应用会启动并管理本机 Agent 服务，再打开现有工作台。服务启动失败时可查看日志并重试。</p>
       <form id="connectionForm">
         <label for="serviceAddress">服务地址</label>
         <div class="address-row">
@@ -104,9 +145,48 @@
         </div>
         <p class="setup-status" id="setupStatus" role="status" aria-live="polite">正在检查 http://127.0.0.1:8000</p>
       </form>
-      <p class="scope-note">为保持本机范围，只接受 <code>http://127.0.0.1</code> 或 <code>http://localhost</code> 地址。连接或重试只打开工作台，不会重发任何 Agent 命令。</p>
+      <div class="runtime-actions" id="runtimeActions" hidden>
+        <button class="secondary-button" id="restartRuntime" type="button">重启本机服务</button>
+        <button class="secondary-button" id="toggleRuntimeLog" type="button">查看启动日志</button>
+      </div>
+      <p class="runtime-details" id="runtimeDetails" hidden></p>
+      <pre class="runtime-log" id="runtimeLog" hidden></pre>
+      <p class="scope-note">桌面服务只监听本机地址。模型与服务选项统一从工作台侧栏“设置”进入；API Key 保存后重启桌面应用生效。连接或重试不会重发 Agent 命令。</p>
     </section>
   </main>
+  <dialog class="model-dialog" id="modelDialog" aria-labelledby="modelTitle">
+    <form class="model-form" id="modelForm">
+      <div class="dialog-heading">
+        <div>
+          <h1 id="modelTitle">配置模型</h1>
+          <p class="model-description">默认模型：<strong>MiniMax-M3</strong></p>
+        </div>
+        <button class="dialog-close" id="closeModelDialog" type="button" aria-label="关闭">×</button>
+      </div>
+      <label for="modelApiKey">MiniMax API Key</label>
+      <input id="modelApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="输入 API Key" required>
+      <button class="primary-button" id="saveModelKey" type="submit">保存 API Key</button>
+      <p class="model-status" id="modelStatus" role="status" aria-live="polite"></p>
+      <p class="model-note">只需填写 API Key。模型供应商、模型名和服务地址使用项目现有 `.env` 配置项；保存后重启桌面应用生效。</p>
+    </form>
+  </dialog>
+  <dialog class="desktop-settings-dialog" id="desktopSettingsDialog" aria-labelledby="desktopSettingsTitle">
+    <div class="desktop-settings-panel">
+      <h1 id="desktopSettingsTitle">设置</h1>
+      <p>管理模型凭证和本机 Agent 服务。</p>
+      <div class="desktop-settings-option">
+        <span aria-hidden="true">✦</span>
+        <div><strong>配置模型</strong><small>默认 MiniMax-M3，只需录入 API Key。</small></div>
+        <button class="secondary-button" id="setupModelSettings" type="button">配置模型</button>
+      </div>
+      <div class="desktop-settings-option">
+        <span aria-hidden="true">⌘</span>
+        <div><strong>服务设置</strong><small>管理地址、启动日志与 Agent 服务。</small></div>
+        <button class="secondary-button" id="setupServiceSettings" type="button">服务设置</button>
+      </div>
+      <p class="model-note">API Key 保存在本机配置文件中；模型和服务设置需要重启后生效。</p>
+    </div>
+  </dialog>
   <script>
     const DEFAULT_ADDRESS = "http://127.0.0.1:8000";
     const $ = (selector) => document.querySelector(selector);
@@ -120,17 +200,45 @@
     const connection = $("#connection");
     const connectionText = $("#connectionText");
     const serviceLabel = $("#serviceLabel");
+    const retryWorkbenchButton = $("#retryWorkbenchButton");
+    const modelToggle = $("#modelToggle");
+    const modelDialog = $("#modelDialog");
+    const modelForm = $("#modelForm");
+    const modelApiKey = $("#modelApiKey");
+    const saveModelKeyButton = $("#saveModelKey");
+    const modelStatus = $("#modelStatus");
+    const closeModelDialog = $("#closeModelDialog");
+    const closeServiceSettingsButton = $("#closeServiceSettings");
     const settingsToggle = $("#settingsToggle");
+    const setupSettingsToggle = $("#setupSettingsToggle");
+    const desktopSettingsDialog = $("#desktopSettingsDialog");
+    const setupModelSettingsButton = $("#setupModelSettings");
+    const setupServiceSettingsButton = $("#setupServiceSettings");
+    const runtimeActions = $("#runtimeActions");
+    const restartRuntimeButton = $("#restartRuntime");
+    const toggleRuntimeLogButton = $("#toggleRuntimeLog");
+    const runtimeDetails = $("#runtimeDetails");
+    const runtimeLog = $("#runtimeLog");
     const STORAGE_KEY = "automation-agent.desktop.service-url";
+    const nativeInvoke = window.__TAURI__?.core?.invoke;
+    connection.hidden = true;
+    modelToggle.hidden = true;
+    settingsToggle.hidden = true;
     let currentOrigin = null;
     let frameLoaded = false;
     let attemptId = 0;
     let frameTimer = null;
 
+    function updateSettingsEntry() {
+      setupSettingsToggle.hidden = !nativeInvoke || frameLoaded;
+    }
+    updateSettingsEntry();
+
     function setConnection(state, label, origin = currentOrigin) {
       connection.dataset.state = state;
       connectionText.textContent = label;
       serviceLabel.textContent = origin ? `· ${origin}` : "";
+      retryWorkbenchButton.hidden = !frameLoaded || state === "connected" || state === "connecting";
     }
 
     function setStatus(state, text) {
@@ -138,9 +246,23 @@
       status.textContent = text;
     }
 
+    function setModelStatus(state, text) {
+      modelStatus.dataset.state = state;
+      modelStatus.textContent = text;
+    }
+
+    function openModelDialog() {
+      if (!nativeInvoke) return;
+      setModelStatus("", "");
+      modelApiKey.value = "";
+      modelDialog.showModal();
+      modelApiKey.focus();
+    }
+
     function showSettings(open) {
       card.dataset.open = String(open);
       settingsToggle.setAttribute("aria-expanded", String(open));
+      closeServiceSettingsButton.hidden = !open || !frameLoaded;
       if (open && currentOrigin) addressInput.value = currentOrigin;
     }
 
@@ -155,6 +277,24 @@
         throw new Error("请只填写协议、主机和端口，不要添加路径、账号、参数或片段。");
       }
       return url.origin;
+    }
+
+    function requestWorkbenchReconnect(id = ++attemptId) {
+      if (!frameLoaded || !currentOrigin) return;
+      clearTimeout(frameTimer);
+      connectButton.disabled = true;
+      connectButton.textContent = "正在连接…";
+      setConnection("connecting", "正在连接 Agent", currentOrigin);
+      setStatus("", "正在连接工作台；不会重发任务。");
+      frame.contentWindow.postMessage({ type: "automation-agent.reconnect", request_id: id }, currentOrigin);
+      frameTimer = setTimeout(() => {
+        if (id === attemptId) {
+          setStatus("error", "工作台没有确认连接。可检查服务状态后重试；任务不会自动重发。");
+          setConnection("error", "Agent 未连接", currentOrigin);
+          connectButton.disabled = false;
+          connectButton.textContent = "保存并连接";
+        }
+      }, 8000);
     }
 
     function connectToService(rawAddress) {
@@ -174,17 +314,7 @@
       setConnection("connecting", "正在连接本机服务", origin);
 
       if (frameLoaded && currentOrigin === origin) {
-        setStatus("", "正在重新连接工作台的 WebSocket；不会重发任务。");
-        frame.contentWindow.postMessage({ type: "automation-agent.reconnect", request_id: id }, origin);
-        clearTimeout(frameTimer);
-        frameTimer = setTimeout(() => {
-          if (id === attemptId) {
-            setStatus("error", "工作台没有确认重连。可检查服务状态后再试；任务不会自动重发。");
-            setConnection("error", "连接未确认", origin);
-            connectButton.disabled = false;
-            connectButton.textContent = "保存并连接";
-          }
-        }, 8000);
+        requestWorkbenchReconnect(id);
       } else {
         if (frameLoaded && currentOrigin !== origin) {
           const switchConfirmed = window.confirm("切换服务会断开当前工作台连接，可能取消正在执行的任务。是否继续？");
@@ -203,6 +333,7 @@
         setStatus("", `正在载入 ${origin} 的工作台…`);
         workspace.dataset.mode = "loading";
         frameLoaded = false;
+        updateSettingsEntry();
         frame.hidden = false;
         showSettings(true);
         clearTimeout(frameTimer);
@@ -227,15 +358,31 @@
     window.addEventListener("message", (event) => {
       if (event.source !== frame.contentWindow || event.origin !== currentOrigin) return;
       const message = event.data;
-      if (message?.type === "automation-agent.workbench.ready") {
+      if (message?.type === "automation-agent.open-settings") {
+        if (desktopSettingsDialog.open) desktopSettingsDialog.close();
+        showSettings(true);
+      } else if (message?.type === "automation-agent.open-model-settings") {
+        if (desktopSettingsDialog.open) desktopSettingsDialog.close();
+        openModelDialog();
+      } else if (message?.type === "automation-agent.workbench.ready") {
         clearTimeout(frameTimer);
         frameLoaded = true;
+        updateSettingsEntry();
         workspace.dataset.mode = "app";
-        setConnection("connected", "工作台已载入", currentOrigin);
-        setStatus("connected", "工作台已载入。聊天连接状态显示在工作台左上角。");
-        connectButton.disabled = false;
-        connectButton.textContent = "保存并连接";
+        setConnection("connecting", "正在连接 Agent", currentOrigin);
+        setStatus("", "工作台已载入，正在建立 Agent 连接…");
         showSettings(false);
+        requestWorkbenchReconnect(++attemptId);
+      } else if (message?.type === "automation-agent.workbench.connection") {
+        setConnection(message.state, message.label || "Agent 状态已更新", currentOrigin);
+        if (message.state === "connected") {
+          clearTimeout(frameTimer);
+          setStatus("connected", "Agent 已连接。重连不会重发任务。");
+          connectButton.disabled = false;
+          connectButton.textContent = "保存并连接";
+        } else if (message.state === "error" || message.state === "idle") {
+          setStatus("error", "Agent 连接已断开，可点击顶部“重试”重新连接；不会重发任务。");
+        }
       } else if (message?.type === "automation-agent.connection" && message.request_id === attemptId) {
         clearTimeout(frameTimer);
         connectButton.disabled = false;
@@ -252,9 +399,132 @@
       }
     });
 
+    retryWorkbenchButton.addEventListener("click", () => requestWorkbenchReconnect());
+
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       connectToService(addressInput.value);
+    });
+
+    closeServiceSettingsButton.addEventListener("click", () => showSettings(false));
+
+    modelToggle.addEventListener("click", openModelDialog);
+
+    setupSettingsToggle.addEventListener("click", () => desktopSettingsDialog.showModal());
+    setupModelSettingsButton.addEventListener("click", () => {
+      desktopSettingsDialog.close();
+      openModelDialog();
+    });
+    setupServiceSettingsButton.addEventListener("click", () => {
+      desktopSettingsDialog.close();
+      showSettings(true);
+    });
+
+    closeModelDialog.addEventListener("click", () => modelDialog.close());
+    modelDialog.addEventListener("close", () => { modelApiKey.value = ""; });
+
+    modelForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const apiKey = modelApiKey.value.trim();
+      if (!apiKey) {
+        setModelStatus("error", "请输入 MiniMax API Key。");
+        return;
+      }
+      if (!nativeInvoke) {
+        setModelStatus("error", "请在桌面应用中配置 API Key。");
+        return;
+      }
+
+      saveModelKeyButton.disabled = true;
+      saveModelKeyButton.textContent = "正在保存…";
+      try {
+        await nativeInvoke("save_model_api_key", { apiKey });
+        modelApiKey.value = "";
+        setModelStatus("saved", "已保存。重启桌面应用后，新配置会生效。");
+      } catch (error) {
+        setModelStatus("error", `保存失败：${error.message || error}`);
+      } finally {
+        saveModelKeyButton.disabled = false;
+        saveModelKeyButton.textContent = "保存 API Key";
+      }
+    });
+
+    async function waitForManagedRuntime() {
+      const deadline = Date.now() + 95000;
+      while (Date.now() < deadline) {
+        const info = await nativeInvoke("runtime_info");
+        runtimeDetails.hidden = false;
+        runtimeDetails.textContent = `配置文件：${info.configPath}\n启动日志：${info.logPath}`;
+        if (info.status === "ready") {
+          restartRuntimeButton.hidden = true;
+          runtimeActions.hidden = false;
+          addressInput.value = info.serviceUrl;
+          addressInput.disabled = false;
+          connectButton.disabled = false;
+          connectToService(info.serviceUrl);
+          return;
+        }
+        if (info.status === "failed" || info.status === "stopped") {
+          setStatus("error", `${info.error || "本机 Agent 服务未启动。"}可查看启动日志后重试。`);
+          setConnection("error", "本机服务启动失败");
+          workspace.dataset.mode = "setup";
+          frame.hidden = true;
+          runtimeActions.hidden = false;
+          restartRuntimeButton.hidden = false;
+          addressInput.value = info.serviceUrl || DEFAULT_ADDRESS;
+          addressInput.disabled = false;
+          connectButton.disabled = false;
+          showSettings(true);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      setStatus("error", "等待本机 Agent 服务启动超时。可查看启动日志后重试。");
+      setConnection("error", "本机服务启动超时");
+      runtimeActions.hidden = false;
+      restartRuntimeButton.hidden = false;
+      addressInput.value = DEFAULT_ADDRESS;
+      addressInput.disabled = false;
+      connectButton.disabled = false;
+      showSettings(true);
+    }
+
+    restartRuntimeButton.addEventListener("click", async () => {
+      if (!nativeInvoke) return;
+      restartRuntimeButton.disabled = true;
+      setStatus("connecting", "正在重新启动本机 Agent 服务…");
+      runtimeLog.hidden = true;
+      addressInput.value = "";
+      addressInput.placeholder = "正在等待本机服务分配端口…";
+      addressInput.disabled = true;
+      connectButton.disabled = true;
+      try {
+        await nativeInvoke("restart_runtime");
+        await waitForManagedRuntime();
+      } catch (error) {
+        setStatus("error", `重启服务失败：${error.message || error}`);
+      } finally {
+        restartRuntimeButton.disabled = false;
+      }
+    });
+
+    toggleRuntimeLogButton.addEventListener("click", async () => {
+      if (!nativeInvoke) return;
+      if (!runtimeLog.hidden) {
+        runtimeLog.hidden = true;
+        toggleRuntimeLogButton.textContent = "查看启动日志";
+        return;
+      }
+      toggleRuntimeLogButton.disabled = true;
+      try {
+        runtimeLog.textContent = await nativeInvoke("read_runtime_log");
+        runtimeLog.hidden = false;
+        toggleRuntimeLogButton.textContent = "隐藏启动日志";
+      } catch (error) {
+        setStatus("error", `读取启动日志失败：${error.message || error}`);
+      } finally {
+        toggleRuntimeLogButton.disabled = false;
+      }
     });
 
     settingsToggle.addEventListener("click", () => {
@@ -263,11 +533,38 @@
       if (open && frameLoaded) setStatus("connected", "修改地址后连接会切换到另一个本机服务。");
     });
 
-    let savedAddress = DEFAULT_ADDRESS;
-    try { savedAddress = localStorage.getItem(STORAGE_KEY) || DEFAULT_ADDRESS; }
-    catch { /* 某些 WebView 配置可能禁用存储，仍可使用默认地址。 */ }
-    addressInput.value = savedAddress;
-    connectToService(savedAddress);
+    async function boot() {
+      if (nativeInvoke) {
+        runtimeActions.hidden = false;
+        restartRuntimeButton.hidden = true;
+        addressInput.value = "";
+        addressInput.placeholder = "正在等待本机服务分配端口…";
+        addressInput.disabled = true;
+        connectButton.disabled = true;
+        setStatus("connecting", "正在启动桌面托管的 Agent 服务…");
+        setConnection("connecting", "正在启动本机服务");
+        try {
+          await waitForManagedRuntime();
+        } catch (error) {
+          runtimeActions.hidden = false;
+          setStatus("error", `无法读取本机服务状态：${error.message || error}`);
+          setConnection("error", "本机服务状态不可用");
+          addressInput.value = DEFAULT_ADDRESS;
+          addressInput.disabled = false;
+          connectButton.disabled = false;
+          showSettings(true);
+        }
+        return;
+      }
+
+      let savedAddress = DEFAULT_ADDRESS;
+      try { savedAddress = localStorage.getItem(STORAGE_KEY) || DEFAULT_ADDRESS; }
+      catch { /* 某些 WebView 配置可能禁用存储，仍可使用默认地址。 */ }
+      addressInput.value = savedAddress;
+      connectToService(savedAddress);
+    }
+
+    void boot();
   </script>
 </body>
 </html>

@@ -30,7 +30,18 @@ from dotenv import load_dotenv
 # 所以 os.environ["SCHEDULER_ENABLED"] = "0" 这种写法会被 .env 里的
 # SCHEDULER_ENABLED=1 顶回去 —— 命令行开关传不进来。
 # 命令行开关要通过下面的「命令行覆盖通道」写，见 set_cli_override()。
-load_dotenv(override=True)
+ROOT = Path(__file__).resolve().parent.parent
+
+# 桌面版把配置和运行数据放在系统分配的应用支持目录，不写入 .app 或源码目录。
+# 未设置时继续使用项目根目录，保持 REPL、HTTP 服务和测试的既有行为。
+_APP_HOME_VALUE = os.getenv("AUTOMATION_AGENT_HOME", "").strip()
+APP_HOME = Path(_APP_HOME_VALUE).expanduser().resolve() if _APP_HOME_VALUE else None
+
+if APP_HOME is None:
+    load_dotenv(override=True)
+else:
+    APP_HOME.mkdir(parents=True, exist_ok=True)
+    load_dotenv(dotenv_path=APP_HOME / ".env", override=True)
 
 # 命令行覆盖通道的键名前缀。
 #
@@ -75,15 +86,11 @@ def set_cli_override(name: str, value: str) -> None:
 # parent.parent：向上查找两级目录。
 # 假设文件位于 project/agent/config.py，
 # 则 ROOT 指向 project 目录。
-ROOT = Path(__file__).resolve().parent.parent
+# 普通项目运行仍使用 project/data；桌面版使用 app support/data。
+DATA_DIR = (APP_HOME / "data") if APP_HOME is not None else (ROOT / "data")
 
-# 使用 Path 的 / 运算符拼接路径。
-# 最终得到 project/data。
-DATA_DIR = ROOT / "data"
-
-# 创建数据目录。
-# exist_ok=True：目录已存在时不报错。
-DATA_DIR.mkdir(exist_ok=True)
+# 创建数据目录，包括桌面版首次启动时尚不存在的父目录。
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================

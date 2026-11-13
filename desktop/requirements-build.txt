@@ -1,0 +1,2 @@
+# Install this in the same Python environment that contains the project's runtime dependencies.
+pyinstaller>=6.19,<7

@@ -68,6 +68,7 @@ from .tasks import ScheduledTask, add_task, all_tasks, remove_task
 
 logger = logging.getLogger(__name__)
 WORKBENCH_HTML = Path(__file__).resolve().parent.parent / "frontend" / "workbench.html"
+WORKBENCH_LOGO = Path(__file__).resolve().parent.parent / "frontend" / "automation-agent-logo.png"
 
 
 # ============================================================
@@ -122,6 +123,12 @@ app = FastAPI(title="Automation Agent", version="0.1.0", lifespan=lifespan)
 def workbench() -> FileResponse:
     """从共享前端目录返回本地 Agent 调试工作台。"""
     return FileResponse(WORKBENCH_HTML)
+
+
+@app.get("/assets/automation-agent-logo.png", include_in_schema=False)
+def workbench_logo() -> FileResponse:
+    """返回工作台使用的品牌图标。"""
+    return FileResponse(WORKBENCH_LOGO, media_type="image/png")
 
 
 # ============================================================
@@ -405,6 +412,18 @@ async def _handle_run_start(
     # 写权限默认关闭 —— 只读是默认态，要写必须显式开。
     allow_write = bool(payload.get("allow_write", False))
 
+    # Agent 在首次调用时才惰性初始化。配置缺失（例如桌面版尚未填 API Key）
+    # 必须转换成协议错误；否则异常会逃出 WebSocket handler，连接关闭后 UI 会一直显示运行中。
+    try:
+        agent = get_agent()
+    except Exception as exc:
+        logger.error("Agent 初始化失败（%s）；请检查模型配置和 API Key。", type(exc).__name__)
+        await queue.put(RunError(
+            run_id="",
+            message="Agent 初始化失败。请检查桌面应用支持目录中的 .env，确认 LLM_API_KEY、模型供应商和模型名称。",
+        ))
+        return
+
     ctx = AgentContext(
         task_name=task_name,
         # WebSocket 是 HTTP 层触发的，用 api。
@@ -419,7 +438,7 @@ async def _handle_run_start(
             instruction=instruction,
             task_name=task_name,
             thread_id=thread_id,
-            agent=get_agent(),
+            agent=agent,
             queue=queue,
             loop=asyncio.get_running_loop(),
             ctx=ctx,

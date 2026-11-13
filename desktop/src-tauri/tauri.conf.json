@@ -7,10 +7,11 @@
     "frontendDist": "../web"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
-        "title": "Automation Agent",
+        "title": "",
         "width": 1280,
         "height": 820,
         "minWidth": 900,
@@ -20,13 +21,14 @@
       }
     ],
     "security": {
-      "capabilities": [],
+      "capabilities": ["main-window"],
       "csp": "default-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src http://127.0.0.1:* http://localhost:*"
     }
   },
   "bundle": {
     "active": true,
     "targets": ["app"],
+    "externalBin": ["binaries/automation-agent-runtime"],
     "category": "DeveloperTool",
     "shortDescription": "Automation Agent 桌面工作台",
     "longDescription": "通过本机 Agent 服务运行连续对话、查看工具事件并处理逐次授权。",
