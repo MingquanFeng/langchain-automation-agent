@@ -17,10 +17,10 @@
   不做额外加工，适合日报、清单类内容。
 
 项目约定：
-通知一律走 notify / notify_summary，不要直接 print。
-print 只在本模块内部做降级输出使用。
-直接 print 会绕过渠道配置（webhook 地址、投递格式），
-消息就散落在日志里，使用方收不到。
+只有用户明确要求外部通知或推送时，才调用 notify / notify_summary。
+普通进度和最终结果直接回复当前聊天，不调用通知工具。
+确实需要通知时一律走工具，不要由 Agent 直接 print；print 只在本模块内部
+作为未配置 webhook 时的降级输出使用。
 
 注意：
 notify / notify_summary 都属于有外部副作用的工具，
@@ -139,7 +139,7 @@ def _deliver(channel: str, text: str, title: str) -> str:
 
 @tool(parse_docstring=True)
 def notify(text: str, title: str = "Agent 通知") -> str:
-    """把一条消息推送给用户。这是 Agent 汇报结果的主要出口。
+    """按用户的明确要求，把一条消息发送到外部通知渠道。
 
     Args:
         text: 消息正文，Agent 应该在正文里给出结论而不是过程。
@@ -150,14 +150,13 @@ def notify(text: str, title: str = "Agent 通知") -> str:
     # 不从参数传入：
     # 同一套工具在不同任务里应该走同一条投递路径。
     #
-    # 提示词（graph.py 的 SYSTEM_PROMPT）要求
-    # 每一步做完就推一条，不要攒到最后。
+    # 提示词要求普通结果直接回复聊天；只有用户明确要求外部通知时才调用。
     return _deliver(RUNTIME.notify_channel, text, title)
 
 
 @tool(parse_docstring=True)
 def notify_summary(items: str, title: str = "每日汇总") -> str:
-    """推送一条结构化汇总。
+    """按用户的明确要求，把结构化汇总发送到外部通知渠道。
 
     Args:
         items: 已经整理好的多行文本，一次推一整份清单。
@@ -168,9 +167,8 @@ def notify_summary(items: str, title: str = "每日汇总") -> str:
 
     # 同样的投递逻辑，同样的渠道。
     #
-    # 单独分一个工具，是为了让模型在提示词里有一个明确的
-    # 「汇总」入口：调它等于声明"这是一份完整结果"，
-    # 而不是过程中的又一条进展汇报。
+    # 单独分一个工具，是为了在用户明确要求推送整份清单时，
+    # 与单条 notify 区分；不能仅因任务结果是汇总就自动调用。
     return _deliver(RUNTIME.notify_channel, items, title)
 
 

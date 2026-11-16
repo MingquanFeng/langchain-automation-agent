@@ -291,6 +291,20 @@ def test_context_injected_into_system_prompt():
     assert "prompt-test" in joined
     # override 是替换语义，这段断言守住「原系统提示词不能被冲掉」
     assert "自动化日常事务助手" in joined
+    # 普通任务必须在聊天中回答，不能再沿用旧规则自动调用通知工具。
+    assert "普通进度和最终结果直接回复当前聊天" in joined
+    assert "只有用户明确要求" in joined
+
+
+def test_notification_tool_descriptions_require_explicit_user_request():
+    """模型看到的两个通知工具描述都必须声明“明确要求”边界。"""
+    descriptions = {
+        tool.name: tool.description
+        for tool in ALL_TOOLS
+        if tool.name in {"notify", "notify_summary"}
+    }
+    assert set(descriptions) == {"notify", "notify_summary"}
+    assert all("用户的明确要求" in description for description in descriptions.values())
 
 
 # ---------- 6. 记忆 ----------
