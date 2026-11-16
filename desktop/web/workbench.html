@@ -320,8 +320,16 @@
     .history-clear, .history-refresh, .history-close, .history-action { min-height: 32px; border: 1px solid #dce3f0; border-radius: 8px; padding: 0 10px; color: #52627e; background: #fff; font-size: 10px; font-weight: 650; white-space: nowrap; }
     .history-clear { color: #a14b4b; border-color: #f0d9d9; }
     .history-close { width: 32px; padding: 0; color: #77849b; background: #f4f6fa; font-size: 19px; }
-    .history-status { min-height: 37px; padding: 11px 23px 0; color: #8290a7; font-size: 10px; }
-    .history-list { display: grid; gap: 10px; overflow: auto; padding: 0 18px 18px; }
+    .history-content { min-height: 0; flex: 1; display: grid; align-content: start; gap: 20px; overflow: auto; padding: 14px 18px 18px; }
+    .history-section { display: grid; gap: 9px; }
+    .history-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .history-section-head h3 { margin: 0; color: #4a5871; font-size: 12px; }
+    .history-status { color: #8290a7; font-size: 10px; }
+    .history-session-list, .history-list { display: grid; gap: 10px; }
+    .history-session-item { min-width: 0; padding: 13px 14px; border: 1px solid #e2e7f2; border-radius: 13px; background: #fff; box-shadow: 0 4px 13px #34487308; }
+    .history-session-title { overflow: hidden; color: #34425c; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .history-session-meta { margin-top: 3px; color: #929db0; font-size: 9px; }
+    .history-session-preview { display: -webkit-box; overflow: hidden; margin-top: 8px; color: #63718a; font-size: 10px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
     .history-item { min-width: 0; padding: 14px; border: 1px solid #e2e7f2; border-radius: 13px; background: #fff; box-shadow: 0 4px 13px #34487308; }
     .history-item-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .history-item-title { min-width: 0; overflow: hidden; color: #34425c; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
@@ -337,7 +345,7 @@
     .history-item-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
     .history-action:hover:not(:disabled), .history-clear:hover:not(:disabled) { background: #f4f6fb; }
     .history-action.danger { color: #a14b4b; border-color: #f0d9d9; }
-    .history-load-more { min-height: 34px; margin: 0 18px 17px; border: 1px solid #dce3f0; border-radius: 8px; color: #52627e; background: #fff; font-size: 10px; font-weight: 650; }
+    .history-load-more { min-height: 34px; border: 1px solid #dce3f0; border-radius: 8px; color: #52627e; background: #fff; font-size: 10px; font-weight: 650; }
     .history-empty { padding: 30px 12px; color: #8995aa; text-align: center; font-size: 11px; }
 
     .conversation-column { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -625,18 +633,33 @@
     <section class="history-panel">
       <header class="history-panel-head">
         <div>
-          <h2 id="historyTitle">运行历史</h2>
-          <p>按时间查看任务状态与结果。恢复会话只加载已保存的对话，不会重新发送任务。</p>
+          <h2 id="historyTitle">历史会话与运行记录</h2>
+          <p>会话列表来自已保存的 Checkpointer，运行记录提供任务状态与结果。恢复会话不会重新发送任务。</p>
         </div>
         <div class="history-head-actions">
           <button class="history-refresh" id="refreshHistoryButton" type="button">刷新</button>
           <button class="history-clear" id="clearHistoryButton" type="button">清空运行记录</button>
-          <button class="history-close" id="closeHistoryButton" type="button" aria-label="关闭运行历史">×</button>
+          <button class="history-close" id="closeHistoryButton" type="button" aria-label="关闭历史记录">×</button>
         </div>
       </header>
-      <div class="history-status" id="historyStatus" role="status" aria-live="polite">正在加载运行记录…</div>
-      <div class="history-list" id="historyList"></div>
-      <button class="history-load-more" id="historyLoadMoreButton" type="button" hidden>加载更早记录</button>
+      <div class="history-content">
+        <section class="history-section" aria-labelledby="sessionHistoryTitle">
+          <div class="history-section-head">
+            <h3 id="sessionHistoryTitle">历史会话</h3>
+            <div class="history-status" id="sessionHistoryStatus" role="status" aria-live="polite">正在加载会话…</div>
+          </div>
+          <div class="history-session-list" id="sessionHistoryList"></div>
+          <button class="history-load-more" id="sessionHistoryLoadMoreButton" type="button" hidden>加载更早会话</button>
+        </section>
+        <section class="history-section" aria-labelledby="runHistoryTitle">
+          <div class="history-section-head">
+            <h3 id="runHistoryTitle">运行记录</h3>
+            <div class="history-status" id="historyStatus" role="status" aria-live="polite">正在加载运行记录…</div>
+          </div>
+          <div class="history-list" id="historyList"></div>
+          <button class="history-load-more" id="historyLoadMoreButton" type="button" hidden>加载更早记录</button>
+        </section>
+      </div>
     </section>
   </dialog>
 
@@ -658,6 +681,9 @@
     const sidebarSettingsButton = $("#sidebarSettingsButton");
     const settingsDialog = $("#settingsDialog");
     const historyDialog = $("#historyDialog");
+    const sessionHistoryList = $("#sessionHistoryList");
+    const sessionHistoryStatus = $("#sessionHistoryStatus");
+    const sessionHistoryLoadMoreButton = $("#sessionHistoryLoadMoreButton");
     const historyList = $("#historyList");
     const historyStatus = $("#historyStatus");
     const refreshHistoryButton = $("#refreshHistoryButton");
@@ -692,6 +718,9 @@
     const toolCards = new Map();
     const pendingApprovals = new Map();
     let currentWorkingDirectory = "";
+    let sessionHistoryOffset = 0;
+    let sessionHistoryHasMore = false;
+    let sessionHistoryLoading = false;
     let historyOffset = 0;
     let historyHasMore = false;
     let historyLoading = false;
@@ -845,6 +874,98 @@
       return new Error(body.detail || fallback);
     }
 
+    function updateHistoryControls() {
+      refreshHistoryButton.disabled = sessionHistoryLoading || historyLoading;
+      sessionHistoryLoadMoreButton.disabled = sessionHistoryLoading;
+      historyLoadMoreButton.disabled = historyLoading;
+      clearHistoryButton.disabled = historyLoading || historyOffset === 0;
+    }
+
+    function renderHistoryThread(session) {
+      const item = document.createElement("article");
+      item.className = "history-session-item";
+
+      const title = document.createElement("div");
+      title.className = "history-session-title";
+      title.textContent = session.title || "未命名会话";
+
+      const meta = document.createElement("div");
+      meta.className = "history-session-meta";
+      meta.textContent = `${session.message_count || 0} 条消息 · 会话 ${session.thread_id.slice(-8)}`;
+
+      const preview = document.createElement("div");
+      preview.className = "history-session-preview";
+      preview.textContent = session.preview || "没有可预览的消息";
+
+      const actions = document.createElement("div");
+      actions.className = "history-item-actions";
+      const restore = document.createElement("button");
+      restore.type = "button";
+      restore.className = "history-action";
+      restore.textContent = "打开并继续对话";
+      restore.disabled = Boolean(activeRunId);
+      restore.addEventListener("click", () => recoverThread({
+        thread_id: session.thread_id,
+        instruction: session.title,
+      }));
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "history-action danger";
+      remove.textContent = "删除会话";
+      remove.addEventListener("click", async () => {
+        if (!window.confirm("删除整个会话会清除 Checkpointer 记忆和关联运行记录，且无法恢复。继续吗？")) return;
+        try {
+          const response = await fetch(serviceUrl(`/threads?thread_id=${encodeURIComponent(session.thread_id)}`), { method: "DELETE" });
+          if (!response.ok) throw await apiError(response, "删除会话失败");
+          if (threadId === session.thread_id) newChatButton.click();
+          await Promise.all([loadThreadHistory(true), loadRunHistory(true)]);
+        } catch (error) {
+          sessionHistoryStatus.textContent = error.message;
+        }
+      });
+
+      actions.append(restore, remove);
+      item.append(title, meta, preview, actions);
+      return item;
+    }
+
+    async function loadThreadHistory(reset = false) {
+      if (sessionHistoryLoading) return;
+      if (reset) {
+        sessionHistoryOffset = 0;
+        sessionHistoryHasMore = false;
+        sessionHistoryList.replaceChildren();
+      }
+      sessionHistoryLoading = true;
+      updateHistoryControls();
+      sessionHistoryStatus.textContent = sessionHistoryOffset ? `已加载 ${sessionHistoryOffset} 个会话，正在读取更多…` : "正在加载会话…";
+      try {
+        const response = await fetch(serviceUrl(`/threads?limit=50&offset=${sessionHistoryOffset}`));
+        if (!response.ok) throw await apiError(response, "读取会话列表失败");
+        const payload = await response.json();
+        if (!Array.isArray(payload.threads)) throw new Error("会话列表格式无效");
+        for (const session of payload.threads) sessionHistoryList.append(renderHistoryThread(session));
+        sessionHistoryOffset += payload.threads.length;
+        sessionHistoryHasMore = Boolean(payload.has_more);
+        sessionHistoryLoadMoreButton.hidden = !sessionHistoryHasMore;
+        if (sessionHistoryOffset === 0) {
+          const empty = document.createElement("div");
+          empty.className = "history-empty";
+          empty.textContent = "暂无历史会话。已保存的 Checkpointer 会话会显示在这里。";
+          sessionHistoryList.append(empty);
+          sessionHistoryStatus.textContent = "暂无历史会话";
+        } else {
+          sessionHistoryStatus.textContent = `已加载 ${sessionHistoryOffset} 个会话${sessionHistoryHasMore ? "，可继续向前翻阅" : ""}`;
+        }
+      } catch (error) {
+        sessionHistoryStatus.textContent = error.message;
+      } finally {
+        sessionHistoryLoading = false;
+        updateHistoryControls();
+      }
+    }
+
     function renderHistoryRun(run) {
       const item = document.createElement("article");
       item.className = "history-item";
@@ -918,7 +1039,7 @@
           const response = await fetch(serviceUrl(`/threads?thread_id=${encodeURIComponent(run.thread_id)}`), { method: "DELETE" });
           if (!response.ok) throw await apiError(response, "删除会话失败");
           if (threadId === run.thread_id) newChatButton.click();
-          await loadRunHistory(true);
+          await Promise.all([loadThreadHistory(true), loadRunHistory(true)]);
         } catch (error) {
           historyStatus.textContent = error.message;
         }
@@ -936,9 +1057,7 @@
         historyList.replaceChildren();
       }
       historyLoading = true;
-      historyLoadMoreButton.disabled = true;
-      refreshHistoryButton.disabled = true;
-      clearHistoryButton.disabled = true;
+      updateHistoryControls();
       historyStatus.textContent = historyOffset ? `已加载 ${historyOffset} 条记录，正在读取更多…` : "正在加载运行记录…";
       try {
         const response = await fetch(serviceUrl(`/runs?limit=50&offset=${historyOffset}`));
@@ -963,9 +1082,7 @@
         historyStatus.textContent = error.message;
       } finally {
         historyLoading = false;
-        historyLoadMoreButton.disabled = false;
-        refreshHistoryButton.disabled = false;
-        clearHistoryButton.disabled = historyOffset === 0;
+        updateHistoryControls();
       }
     }
 
@@ -1533,7 +1650,8 @@
         }
         if (targetId === "history") {
           historyDialog.showModal();
-          loadRunHistory(true);
+          void loadThreadHistory(true);
+          void loadRunHistory(true);
           return;
         }
         const compactLayout = window.matchMedia("(max-width: 860px)").matches;
@@ -1543,7 +1661,13 @@
     });
 
     closeHistoryButton.addEventListener("click", () => historyDialog.close());
-    refreshHistoryButton.addEventListener("click", () => loadRunHistory(true));
+    refreshHistoryButton.addEventListener("click", () => {
+      void loadThreadHistory(true);
+      void loadRunHistory(true);
+    });
+    sessionHistoryLoadMoreButton.addEventListener("click", () => {
+      if (sessionHistoryHasMore) void loadThreadHistory(false);
+    });
     historyLoadMoreButton.addEventListener("click", () => {
       if (historyHasMore) loadRunHistory(false);
     });

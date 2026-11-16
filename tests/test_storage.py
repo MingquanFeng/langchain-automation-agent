@@ -27,7 +27,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 # AIMessage：构造不依赖网络的模型结果。
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 # InMemorySaver：集成测试中的会话状态只放内存，不触碰真实记忆库。
 from langgraph.checkpoint.memory import InMemorySaver
@@ -380,5 +380,57 @@ def test_websocket_does_not_start_when_run_record_cannot_be_written(
         assert "无法保存运行记录" in events[-1]["message"]
         assert client.app.state.run_manager.active() == []
 
+    assert isolated_server_store.list_runs() == []
+
+
+def test_checkpoint_thread_history_lists_sessions_without_run_rows(
+    isolated_server_store, monkeypatch
+):
+    """历史会话直接从 Checkpointer 列出，不依赖新版运行记录表。"""
+    import runtime.server as server_mod
+
+    from agent.graph import build_agent
+
+    memory = InMemorySaver()
+    test_agent = build_agent(
+        model=FakeModel(messages=iter([
+            AIMessage(content="第一段回答"),
+            AIMessage(content="第二段回答"),
+        ])),
+        checkpointer=memory,
+    )
+    for thread_id, question in (
+        ("thread-history-old", "第一段历史提问"),
+        ("thread-history-new", "第二段历史提问"),
+    ):
+        test_agent.invoke(
+            {"messages": [HumanMessage(content=question)]},
+            {"configurable": {"thread_id": thread_id}},
+        )
+    monkeypatch.setattr(server_mod, "get_agent", lambda: test_agent)
+
+    with TestClient(server_mod.app) as client:
+        first_page = client.get("/threads?limit=1&offset=0")
+        second_page = client.get("/threads?limit=1&offset=1")
+
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+    first_payload = first_page.json()
+    second_payload = second_page.json()
+    assert first_payload["has_more"] is True
+    assert second_payload["has_more"] is False
+    sessions = first_payload["threads"] + second_payload["threads"]
+    assert {session["thread_id"] for session in sessions} == {
+        "thread-history-old",
+        "thread-history-new",
+    }
+    assert {session["title"] for session in sessions} == {
+        "第一段历史提问",
+        "第二段历史提问",
+    }
+    assert {session["preview"] for session in sessions} == {
+        "第一段回答",
+        "第二段回答",
+    }
     assert isolated_server_store.list_runs() == []
 

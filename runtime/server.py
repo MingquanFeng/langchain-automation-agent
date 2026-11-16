@@ -246,16 +246,8 @@ def _checkpoint_message_text(content: object) -> str:
     return str(content)
 
 
-def _serialize_checkpoint_messages(thread_id: str) -> dict:
-    """读取会话最新状态中的对话消息，不返回系统提示或内部思考内容。"""
-    try:
-        agent = get_agent()
-        snapshot = agent.get_state({"configurable": {"thread_id": thread_id}})
-    except Exception as exc:
-        logger.exception("读取会话检查点失败：%s", thread_id)
-        raise HTTPException(status_code=503, detail="暂时无法读取会话内容") from exc
-
-    raw_messages = (snapshot.values or {}).get("messages", []) if snapshot else []
+def _serialize_checkpoint_message_list(raw_messages: list) -> list[dict]:
+    """把 Checkpointer 消息转为工作台可展示的内容，过滤内部控制消息。"""
     messages: list[dict] = []
     for message in raw_messages:
         if isinstance(message, dict):
@@ -301,6 +293,21 @@ def _serialize_checkpoint_messages(thread_id: str) -> dict:
             item["name"] = str(name)
         messages.append(item)
 
+    return messages
+
+
+def _serialize_checkpoint_messages(thread_id: str) -> dict:
+    """读取会话最新状态中的对话消息，不返回系统提示或内部思考内容。"""
+    try:
+        agent = get_agent()
+        snapshot = agent.get_state({"configurable": {"thread_id": thread_id}})
+    except Exception as exc:
+        logger.exception("读取会话检查点失败：%s", thread_id)
+        raise HTTPException(status_code=503, detail="暂时无法读取会话内容") from exc
+
+    raw_messages = (snapshot.values or {}).get("messages", []) if snapshot else []
+    messages = _serialize_checkpoint_message_list(raw_messages)
+
     limit = 500
     return {
         "thread_id": thread_id,
@@ -308,6 +315,70 @@ def _serialize_checkpoint_messages(thread_id: str) -> dict:
         "message_count": len(messages),
         "truncated": len(messages) > limit,
     }
+
+
+@app.get("/threads")
+def list_checkpoint_threads(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=10000),
+) -> dict:
+    """分页列出已保存的会话，支持运行记录表尚无条目的旧会话。"""
+    try:
+        agent = get_agent()
+        checkpointer = getattr(agent, "checkpointer", None)
+        list_checkpoints = getattr(checkpointer, "list", None)
+        if not callable(list_checkpoints):
+            raise HTTPException(status_code=501, detail="当前 Checkpointer 不支持列出会话")
+
+        threads: list[dict] = []
+        seen_thread_ids: set[str] = set()
+        matched = 0
+        has_more = False
+        # Checkpointer.list(None) 按 checkpoint_id 从新到旧返回。
+        # 每个 thread 第一次出现的检查点就是该会话最新状态。
+        for checkpoint_tuple in list_checkpoints(None):
+            configurable = (checkpoint_tuple.config or {}).get("configurable", {})
+            thread_id = configurable.get("thread_id")
+            if not isinstance(thread_id, str) or not thread_id or thread_id in seen_thread_ids:
+                continue
+            seen_thread_ids.add(thread_id)
+
+            checkpoint = checkpoint_tuple.checkpoint or {}
+            channel_values = checkpoint.get("channel_values", {})
+            messages = _serialize_checkpoint_message_list(channel_values.get("messages", []))
+            user_messages = [message for message in messages if message["role"] == "user"]
+            if not user_messages:
+                continue
+
+            if matched < offset:
+                matched += 1
+                continue
+            if len(threads) >= limit:
+                has_more = True
+                break
+
+            latest_message = next(
+                (message for message in reversed(messages) if message["role"] in ("user", "assistant")),
+                user_messages[-1],
+            )
+            threads.append({
+                "thread_id": thread_id,
+                "title": user_messages[0]["content"],
+                "preview": latest_message["content"],
+                "message_count": len(messages),
+            })
+
+        return {
+            "threads": threads,
+            "limit": limit,
+            "offset": offset,
+            "has_more": has_more,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("列出会话检查点失败")
+        raise HTTPException(status_code=503, detail="暂时无法读取会话列表") from exc
 
 
 @app.get("/threads/messages")
