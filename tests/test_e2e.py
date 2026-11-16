@@ -97,18 +97,35 @@ def tool_call(name: str, args: dict, call_id: str = "c1") -> AIMessage:
 
 
 @pytest.mark.parametrize("tool", ALL_TOOLS, ids=lambda t: t.name)
-def test_tool_is_callable(tool):
+def test_tool_is_callable(tool, tmp_path, monkeypatch):
     """每个工具都能被 invoke，且返回字符串（而不是抛异常）。"""
+    # 文件类工具统一落到 pytest 临时目录，测试结束后自动清理，不污染项目 data/。
+    from agent.tools import files as files_mod
+
+    monkeypatch.setattr(files_mod, "SANDBOX", tmp_path.resolve())
     args = {
         "path": "probe.txt",
         "content": "hello",
         "data": {"a": 1},
         "pattern": "*",
+        "query": "probe",
+        "old_text": "hello",
+        "new_text": "world",
+        "backup_id": "20000101T000000Z-000000000000",
         "text": "t",
         "title": "x",
         "items": "y",
     }
-    result = tool.invoke(args)
+    if tool.name in {"edit_file", "restore_file_backup"}:
+        result = tool.invoke({
+            "name": tool.name,
+            "args": args,
+            "id": "probe-call",
+            "type": "tool_call",
+        })
+        result = result.content
+    else:
+        result = tool.invoke(args)
     assert isinstance(result, str)
 
 
@@ -154,14 +171,15 @@ def test_agent_builds_with_full_middleware_stack():
 # 而不是模型回一句「我写好了」就结束。
 
 
-def test_write_tool_actually_runs(tmp_path):
+def test_write_tool_actually_runs(tmp_path, monkeypatch):
     """write_file 被真实执行，产物落在 data/ 沙箱内且内容正确。
 
-    注意：
-    tmp_path 这个 fixture 其实用不上 ——
-    文件工具的沙箱在模块导入时就固定成 data/ 了，
-    临时目录改不了它，所以断言要查 SANDBOX 下面的路径。
+    测试临时替换文件工具模块的 SANDBOX，保证真实写入链路仍被覆盖，
+    同时不在项目 data/ 留下 report.md。
     """
+    from agent.tools import files as files_mod
+
+    monkeypatch.setattr(files_mod, "SANDBOX", tmp_path.resolve())
     model = make_model(
         tool_call("write_file", {"path": "out/report.md", "content": "今日要点三条。"}),
         AIMessage(content="已写入。"),
@@ -173,8 +191,8 @@ def test_write_tool_actually_runs(tmp_path):
         context=AgentContext(task_name="t", allow_write=True),
     )
     assert "messages" in result
-    assert (SANDBOX / "out" / "report.md").exists()
-    assert "今日要点三条" in (SANDBOX / "out" / "report.md").read_text(encoding="utf-8")
+    assert (tmp_path / "out" / "report.md").exists()
+    assert "今日要点三条" in (tmp_path / "out" / "report.md").read_text(encoding="utf-8")
 
 
 # ---------- 4. 只读闸门 ----------
@@ -629,12 +647,13 @@ def test_write_file_leaves_no_temp_file():
 # 但 thread_id 的隔离规则一直在。
 
 
-def test_run_task_isolates_threads(monkeypatch):
+def test_run_task_isolates_threads(monkeypatch, tmp_path):
     """run_task 默认每次新会话；显式传 thread_id 才复用。
 
     回归防护：曾经硬编码成固定会话 ID，导致所有任务共享同一份记忆。
     """
     from runtime import runner
+    from runtime.storage import RuntimeStore
 
     seen: list[str] = []
 
@@ -644,6 +663,11 @@ def test_run_task_isolates_threads(monkeypatch):
             return {"messages": [AIMessage(content="ok")]}
 
     monkeypatch.setattr(runner, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(
+        runner,
+        "get_runtime_store",
+        lambda: RuntimeStore(tmp_path / "runtime.sqlite3"),
+    )
 
     runner.run_task(instruction="第一次")
     runner.run_task(instruction="第二次")

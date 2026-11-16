@@ -126,6 +126,43 @@ def _install_write_agent(monkeypatch, *, call_id="write-1"):
     return target
 
 
+def _install_edit_agent(monkeypatch, tmp_path, *, call_id="edit-1"):
+    """让 WebSocket run 编辑临时工作区文件，并把备份也隔离到临时目录。"""
+    from agent.graph import build_agent
+    from agent.tools import edits as edits_mod
+    from agent.tools import files as files_mod
+    from fakes import FakeModel
+    from langchain_core.messages import AIMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    workspace = tmp_path / "edit-workspace"
+    backups = tmp_path / "edit-backups"
+    workspace.mkdir()
+    target = workspace / "settings.txt"
+    target.write_text("mode=old\n", encoding="utf-8")
+    monkeypatch.setattr(files_mod, "SANDBOX", workspace.resolve())
+    monkeypatch.setattr(edits_mod, "BACKUP_DIR", backups.resolve())
+    tool_call = AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "edit_file",
+            "args": {
+                "path": "settings.txt",
+                "old_text": "mode=old",
+                "new_text": "mode=new",
+            },
+            "id": call_id,
+            "type": "tool_call",
+        }],
+    )
+    agent = build_agent(
+        model=FakeModel(messages=iter([tool_call, AIMessage(content="完成")])),
+        checkpointer=InMemorySaver(),
+    )
+    monkeypatch.setattr(server_mod, "get_agent", lambda: agent)
+    return target, backups
+
+
 # ---------- 正常流程 ----------
 
 
@@ -266,6 +303,35 @@ def test_write_tool_waits_for_matching_approval(client, monkeypatch):
         assert any(event["type"] == "tool.start" and event["call_id"] == "write-1" for event in events)
     finally:
         target.unlink(missing_ok=True)
+
+
+def test_edit_approval_exposes_diff_then_writes_and_backs_up(client, monkeypatch, tmp_path):
+    """编辑审批只传安全 diff；批准后才写入，并保留可恢复备份。"""
+    target, backups = _install_edit_agent(monkeypatch, tmp_path)
+
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "run.start", "instruction": "修改设置"})
+        approval = _drain_until(ws, {"approval.request"})[-1]
+        assert approval["name"] == "edit_file"
+        assert approval["args"]["path"] == "settings.txt"
+        assert "-mode=old" in approval["args"]["diff"]
+        assert "+mode=new" in approval["args"]["diff"]
+        assert "old_text" not in approval["args"]
+        assert "new_text" not in approval["args"]
+        assert target.read_text(encoding="utf-8") == "mode=old\n"
+        assert not backups.exists()
+
+        ws.send_json({
+            "type": "approval.respond",
+            "run_id": approval["run_id"],
+            "call_id": approval["call_id"],
+            "approved": True,
+        })
+        events = _drain_until(ws, {"run.end", "run.cancelled", "run.error"})
+
+    assert events[-1]["type"] == "run.end"
+    assert target.read_text(encoding="utf-8") == "mode=new\n"
+    assert len(list(backups.glob("*.json"))) == 1
 
 
 def test_only_the_run_owner_can_approve_a_tool_call(client, monkeypatch):

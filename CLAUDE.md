@@ -140,7 +140,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
   - **沙箱越界不抛异常，返回一句给模型看的中文说明**（`_resolve_safe`）。`_resolve()` 仍然抛 `ValueError`，但那是给 Python 调用方用的；工具层用它会让 `ToolRetryMiddleware`（默认 `retry_on=(Exception,)`）把同一个错参数重试 3 次、空耗约 3 秒，模型最后收到的还是 `failed after 3 attempts ... Please try again.` 这种没法照做的英文提示。
 - `middleware/custom.py` — L4 守卫层的自定义部分。三个中间件分别负责只读拦截、上下文注入、耗时统计。
 - `middleware/pii.py` — PII 脱敏。配置 langchain 内置的 `PIIMiddleware`，脱敏四种类型：邮箱、信用卡、手机号、身份证号。开关是 `.env` 的 `PII_MASKING`（默认开）。
-- `middleware/events.py` — 事件桥接。用 `wrap_tool_call` 把工具执行过程发成 `custom` 流事件（`tool.start` / `tool.end` / `tool.error`），供桌面版的工具卡片用。**8 个工具函数一行都不用改**。它装配在栈的**最外层** —— 包住整个「工具调用 + 重试」，所以一次调用只发一对事件，`duration_ms` 是用户真正等待的时间。
+- `middleware/events.py` — 事件桥接。用 `wrap_tool_call` 把工具执行过程发成 `custom` 流事件（`tool.start` / `tool.end` / `tool.error`），供桌面版的工具卡片用。**14 个工具函数一行都不用改**。它装配在栈的**最外层** —— 包住整个「工具调用 + 重试」，所以一次调用只发一对事件，`duration_ms` 是用户真正等待的时间。结构化编辑会在这里先生成安全 diff，再进入逐次审批。
 
 ### runtime/ — 运行时外壳
 

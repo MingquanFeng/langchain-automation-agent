@@ -4,7 +4,7 @@
 对应课件 05 章（courseware/langChain/尚硅谷-05-Tools.pdf）：@tool 装饰器定义工具，docstring 即给模型的工具说明。
 
 主要职责：
-1. 提供 Agent 工作目录内的文件列举、读取、写入、JSON 读写能力。
+1. 提供 Agent 工作目录内的目录树、文件搜索、内容搜索、读取、写入和 JSON 能力。
 2. 用沙箱把所有读写限制在配置的工作目录内，防止 Agent 越界。
 3. 对大文件、二进制文件和运行时自己的记忆库做保护，避免撑爆上下文。
 4. 阻止读取 `.env` 和常见密钥文件，避免凭据进入模型上下文。
@@ -28,11 +28,17 @@ from __future__ import annotations
 # datetime：标准库，取文件的修改时间并格式化成可读文本。
 from datetime import datetime
 
+# dataclass：保存一次目录扫描中被过滤和被截断的统计信息。
+from dataclasses import dataclass, field
+
 # json：标准库，处理 JSON 序列化与反序列化。
 import json
 
 # os：标准库，os.replace 用于原子替换文件。
 import os
+
+# stat：原子覆盖已有文件时保留原权限位，避免编辑脚本后丢失可执行权限。
+import stat
 
 # Path：标准库的路径对象，负责路径拼接、规范化、目录创建。
 from pathlib import Path
@@ -84,6 +90,15 @@ DEFAULT_READ_LINES = 200
 # 目录里堆了几千个文件时，全列出来既撑上下文又淹没有用信息。
 # 截断后告诉模型总共多少个，让它自己缩小 pattern。
 MAX_LIST_ROWS = 200
+
+# 目录树和搜索工具的硬上限。调用方可缩小结果，不能通过参数无限放大输出。
+MAX_TREE_DEPTH = 8
+MAX_TREE_ENTRIES = 500
+MAX_SEARCH_RESULTS = 200
+
+# 正文搜索每个文件最多读取 200KB，与 read_file 的单次读取边界一致。
+# 单行预览再截到 300 字符，避免压缩后的巨型 JSON 一行占满上下文。
+MAX_SEARCH_LINE_CHARS = 300
 
 # 列举项目仓库时跳过常见版本控制、依赖和构建产物目录。
 # 这些目录仍在工作区边界内，但不会被默认递归扫描。
@@ -247,41 +262,101 @@ def _is_sensitive_path(path: str, resolved: Path) -> bool:
     return _is_sensitive_file(requested) or _is_sensitive_file(resolved)
 
 
-def _list_matching_files(
-    root: Path,
-    pattern: str,
-) -> tuple[list[Path], set[str], bool]:
-    """列出匹配文件，并在遍历时剪掉常见生成目录。"""
-    matches: list[Path] = []
-    skipped_dirs: set[str] = set()
-    skipped_sensitive = False
+@dataclass
+class _ScanStats:
+    """一次扫描的过滤统计，供多个只读工具统一生成结果说明。"""
 
-    for current, dirnames, filenames in os.walk(root):
-        excluded = {name for name in dirnames if name in LIST_IGNORED_DIR_NAMES}
-        skipped_dirs.update(excluded)
-        dirnames[:] = sorted(name for name in dirnames if name not in excluded)
+    skipped_dirs: set[str] = field(default_factory=set)
+    skipped_sensitive: bool = False
+    truncated_files: int = 0
+    binary_files: int = 0
 
+
+def _scan_root(path: str) -> tuple[Path | None, str]:
+    """校验扫描根目录，并拒绝敏感目录、普通文件和越界路径。"""
+    root, err = _resolve_safe(path)
+    if root is None:
+        return None, err
+    if _is_sensitive_path(path, root) or root.name.lower() in SENSITIVE_DIR_NAMES:
+        return None, "出于安全原因，不能扫描敏感配置或密钥目录。"
+    if not root.exists():
+        return None, f"目录不存在：{path}"
+    if not root.is_dir():
+        return None, f"{path} 是文件，不是目录。"
+    return root, ""
+
+
+def _walk_visible(root: Path, stats: _ScanStats):
+    """遍历可见目录，原地剪掉隐藏目录、依赖产物、敏感目录和软链接目录。"""
+    for current, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        kept_dirs = []
+        for name in sorted(dirnames):
+            candidate = Path(current) / name
+            excluded = (
+                name.startswith(".")
+                or name in LIST_IGNORED_DIR_NAMES
+                or name.lower() in SENSITIVE_DIR_NAMES
+                or candidate.is_symlink()
+            )
+            if not excluded:
+                try:
+                    resolved = candidate.resolve()
+                    excluded = not (
+                        resolved.is_relative_to(root)
+                        and resolved.is_relative_to(SANDBOX)
+                    )
+                except (OSError, RuntimeError):
+                    excluded = True
+            if excluded:
+                stats.skipped_dirs.add(name)
+                if name.lower() in SENSITIVE_DIR_NAMES:
+                    stats.skipped_sensitive = True
+                continue
+            kept_dirs.append(name)
+        dirnames[:] = kept_dirs
+        # 返回 os.walk 自己的 dirnames 列表，调用方可清空它来限制遍历深度。
+        yield Path(current), dirnames, sorted(filenames)
+
+
+def _iter_visible_files(root: Path, stats: _ScanStats):
+    """产生扫描根目录内可读取的普通文件，不跟随越界软链接。"""
+    for current, _, filenames in _walk_visible(root, stats):
         for filename in filenames:
-            candidate = Path(current) / filename
+            candidate = current / filename
             if _is_hidden(candidate):
                 continue
             try:
                 if not candidate.is_file():
                     continue
                 resolved = candidate.resolve()
-                if not resolved.is_relative_to(root):
+                if not (
+                    resolved.is_relative_to(root)
+                    and resolved.is_relative_to(SANDBOX)
+                ):
                     continue
             except (OSError, RuntimeError):
                 continue
             if _is_sensitive_file(candidate) or _is_sensitive_file(resolved):
-                skipped_sensitive = True
+                stats.skipped_sensitive = True
                 continue
-            relative = candidate.relative_to(root)
-            if relative.match(pattern):
-                matches.append(candidate)
+            yield candidate
+
+
+def _list_matching_files(
+    root: Path,
+    pattern: str,
+) -> tuple[list[Path], set[str], bool]:
+    """列出匹配文件，并在遍历时剪掉常见生成目录。"""
+    matches: list[Path] = []
+    stats = _ScanStats()
+
+    for candidate in _iter_visible_files(root, stats):
+        relative = candidate.relative_to(root)
+        if relative.match(pattern):
+            matches.append(candidate)
 
     matches.sort()
-    return matches, skipped_dirs, skipped_sensitive
+    return matches, stats.skipped_dirs, stats.skipped_sensitive
 
 
 def _list_filter_note(skipped_dirs: set[str], skipped_sensitive: bool) -> str:
@@ -292,6 +367,24 @@ def _list_filter_note(skipped_dirs: set[str], skipped_sensitive: bool) -> str:
     if skipped_sensitive:
         notes.append("出于安全原因，已隐藏敏感配置或密钥文件")
     return f"\n\n（{'；'.join(notes)}。）" if notes else ""
+
+
+def _scan_filter_note(stats: _ScanStats) -> str:
+    """为新扫描工具复用既有过滤说明，并补充大文件截断数量。"""
+    note = _list_filter_note(stats.skipped_dirs, stats.skipped_sensitive)
+    extras = []
+    if stats.truncated_files:
+        extras.append(
+            f"有 {stats.truncated_files} 个大文件只搜索了前 {MAX_READ_BYTES} 字节"
+        )
+    if stats.binary_files:
+        extras.append(f"已跳过 {stats.binary_files} 个二进制文件")
+    if not extras:
+        return note
+    extra = "；".join(extras)
+    if not note:
+        return f"\n\n（{extra}。）"
+    return note[:-2] + f"；{extra}。）"
 
 
 def _describe(target: Path) -> str:
@@ -324,7 +417,8 @@ def _read_text(target: Path) -> str:
     size = target.stat().st_size
 
     # 只读前 MAX_READ_BYTES 字节，避免大文件把内存和上下文一起撑爆。
-    raw = target.read_bytes()[:MAX_READ_BYTES]
+    with target.open("rb") as handle:
+        raw = handle.read(MAX_READ_BYTES)
 
     # 二进制判定：只看开头 8KB 里有没有 NUL 字节。
     #
@@ -359,7 +453,8 @@ def _read_lines(target: Path, offset: int, limit: int) -> str:
         选中的行 + 一句行号说明，让模型知道读到哪儿了、还剩多少。
     """
     size = target.stat().st_size
-    raw = target.read_bytes()[:MAX_READ_BYTES]
+    with target.open("rb") as handle:
+        raw = handle.read(MAX_READ_BYTES)
 
     if b"\x00" in raw[:8192]:
         return f"{target.name} 是二进制文件（{size} 字节），无法作为文本读取。"
@@ -415,7 +510,10 @@ def _atomic_write(target: Path, text: str) -> None:
     """
     tmp = target.with_name(target.name + TMP_SUFFIX)
     try:
+        existing_mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else None
         tmp.write_text(text, encoding="utf-8")
+        if existing_mode is not None:
+            os.chmod(tmp, existing_mode)
         os.replace(tmp, target)
     except BaseException:
         # 失败时清掉半截临时文件，别留在目录里误导模型。
@@ -426,6 +524,205 @@ def _atomic_write(target: Path, text: str) -> None:
 # ============================================================
 # 3. 给模型调用的工具
 # ============================================================
+
+@tool(parse_docstring=True)
+def directory_tree(
+    path: str = ".",
+    max_depth: int = 3,
+    max_entries: int = MAX_LIST_ROWS,
+) -> str:
+    """展示工作目录内的目录树，并过滤隐藏目录、依赖产物和敏感文件。
+
+    Args:
+        path: 要查看的目录，相对于工作目录。默认查看整个工作目录。
+        max_depth: 最深展示层级，范围 1-8。1 只展示指定目录的直接子项。
+        max_entries: 最多返回多少个目录和文件，范围 1-500。
+
+    Returns:
+        缩进后的目录和文件列表；目录以 [D] 标识，文件以 [F] 标识。
+    """
+    root, err = _scan_root(path)
+    if root is None:
+        return err
+    if not 1 <= max_depth <= MAX_TREE_DEPTH:
+        return f"max_depth 必须在 1-{MAX_TREE_DEPTH} 之间。"
+    if not 1 <= max_entries <= MAX_TREE_ENTRIES:
+        return f"max_entries 必须在 1-{MAX_TREE_ENTRIES} 之间。"
+
+    stats = _ScanStats()
+    label = "." if root == SANDBOX else str(root.relative_to(SANDBOX))
+    lines = [f"[D] {label}/"]
+    truncated = False
+
+    for current, dirnames, filenames in _walk_visible(root, stats):
+        depth = len(current.relative_to(root).parts)
+        entries = [
+            (name, True) for name in dirnames
+        ] + [
+            (name, False) for name in filenames
+        ]
+        entries.sort(key=lambda item: (not item[1], item[0].casefold()))
+
+        for name, is_dir in entries:
+            candidate = current / name
+            if not is_dir:
+                if _is_hidden(candidate):
+                    continue
+                try:
+                    resolved = candidate.resolve()
+                    if not (
+                        candidate.is_file()
+                        and resolved.is_relative_to(root)
+                        and resolved.is_relative_to(SANDBOX)
+                    ):
+                        continue
+                except (OSError, RuntimeError):
+                    continue
+                if _is_sensitive_file(candidate) or _is_sensitive_file(resolved):
+                    stats.skipped_sensitive = True
+                    continue
+
+            entry_depth = depth + 1
+            if entry_depth > max_depth:
+                continue
+            marker = "[D]" if is_dir else "[F]"
+            suffix = "/" if is_dir else ""
+            lines.append(f"{'  ' * entry_depth}{marker} {name}{suffix}")
+            if len(lines) - 1 >= max_entries:
+                truncated = True
+                break
+
+        if truncated:
+            break
+        if depth + 1 >= max_depth:
+            dirnames[:] = []
+
+    if len(lines) == 1:
+        lines.append("  （目录为空或内容均已过滤）")
+    if truncated:
+        lines.append(f"\n（已达到 {max_entries} 项上限，请缩小 path 或 max_depth。）")
+    return "\n".join(lines) + _scan_filter_note(stats)
+
+
+@tool(parse_docstring=True)
+def search_files(query: str, path: str = ".", max_results: int = 100) -> str:
+    """按名称片段搜索工作目录内的文件，匹配不区分大小写。
+
+    Args:
+        query: 文件名或相对路径中要查找的文字，例如 'config'、'report.md'。
+        path: 搜索起点，相对于工作目录。默认搜索整个工作目录。
+        max_results: 最多返回多少个匹配文件，范围 1-200。
+
+    Returns:
+        匹配文件的相对路径、大小和修改时间。
+    """
+    needle = query.strip()
+    if not needle:
+        return "query 不能为空。"
+    if len(needle) > 200:
+        return "query 不能超过 200 个字符。"
+    if not 1 <= max_results <= MAX_SEARCH_RESULTS:
+        return f"max_results 必须在 1-{MAX_SEARCH_RESULTS} 之间。"
+    root, err = _scan_root(path)
+    if root is None:
+        return err
+
+    stats = _ScanStats()
+    folded = needle.casefold()
+    matches = []
+    has_more = False
+    for candidate in _iter_visible_files(root, stats):
+        relative = str(candidate.relative_to(root))
+        if folded not in relative.casefold():
+            continue
+        if len(matches) >= max_results:
+            has_more = True
+            break
+        matches.append(candidate)
+
+    if not matches:
+        return f"没有找到名称包含 {query!r} 的文件。" + _scan_filter_note(stats)
+    output = "\n".join(_describe(candidate) for candidate in matches)
+    if has_more:
+        output += f"\n\n（匹配超过 {max_results} 个，只返回前 {max_results} 个。）"
+    return output + _scan_filter_note(stats)
+
+
+@tool(parse_docstring=True)
+def search_text(
+    query: str,
+    path: str = ".",
+    pattern: str = "*",
+    case_sensitive: bool = False,
+    max_results: int = 100,
+) -> str:
+    """在工作目录的文本文件中搜索字面量，并返回文件、行号和内容预览。
+
+    Args:
+        query: 要查找的原文，不作为正则表达式解释。
+        path: 搜索起点，相对于工作目录。默认搜索整个工作目录。
+        pattern: 文件 glob，例如 '*.py' 或 'src/*.ts'。默认搜索全部文件。
+        case_sensitive: 是否区分大小写，默认不区分。
+        max_results: 最多返回多少处匹配，范围 1-200。
+
+    Returns:
+        每行一处「相对路径:行号: 内容预览」，并说明过滤和截断情况。
+    """
+    needle = query if case_sensitive else query.casefold()
+    if not query:
+        return "query 不能为空。"
+    if len(query) > 500:
+        return "query 不能超过 500 个字符。"
+    if not 1 <= max_results <= MAX_SEARCH_RESULTS:
+        return f"max_results 必须在 1-{MAX_SEARCH_RESULTS} 之间。"
+    root, err = _scan_root(path)
+    if root is None:
+        return err
+
+    stats = _ScanStats()
+    results = []
+    has_more = False
+    for candidate in _iter_visible_files(root, stats):
+        relative_to_root = candidate.relative_to(root)
+        if not relative_to_root.match(pattern):
+            continue
+        try:
+            size = candidate.stat().st_size
+            with candidate.open("rb") as handle:
+                raw = handle.read(MAX_READ_BYTES)
+        except OSError:
+            continue
+        if b"\x00" in raw[:8192]:
+            stats.binary_files += 1
+            continue
+        if size > MAX_READ_BYTES:
+            stats.truncated_files += 1
+
+        text = raw.decode("utf-8", errors="replace")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            haystack = line if case_sensitive else line.casefold()
+            if needle not in haystack:
+                continue
+            if len(results) >= max_results:
+                has_more = True
+                break
+            preview = line.strip().replace("\t", "    ")
+            if len(preview) > MAX_SEARCH_LINE_CHARS:
+                preview = preview[:MAX_SEARCH_LINE_CHARS] + "…"
+            relative = candidate.relative_to(SANDBOX)
+            results.append(f"{relative}:{line_number}: {preview}")
+        if has_more:
+            break
+
+    if not results:
+        return (
+            f"没有在匹配 {pattern!r} 的文本文件中找到 {query!r}。"
+            + _scan_filter_note(stats)
+        )
+    output = "\n".join(results)
+    if has_more:
+        output += f"\n\n（匹配超过 {max_results} 处，只返回前 {max_results} 处。）"
+    return output + _scan_filter_note(stats)
 
 @tool(parse_docstring=True)
 def list_files(pattern: str = "*", max_results: int = MAX_LIST_ROWS) -> str:
@@ -439,6 +736,8 @@ def list_files(pattern: str = "*", max_results: int = MAX_LIST_ROWS) -> str:
     Returns:
         每行一个「相对路径  (字节数, 修改时间)」，以及必要时的截断提示。
     """
+    if not 1 <= max_results <= MAX_LIST_ROWS:
+        return f"max_results 必须在 1-{MAX_LIST_ROWS} 之间。"
     target = _resolve(".")
 
     matches, skipped_dirs, skipped_sensitive = _list_matching_files(target, pattern)
@@ -598,4 +897,14 @@ def read_json(path: str) -> str:
 #
 # 顺序不影响功能，但保持「只读在前、写操作在后」，
 # 方便人一眼扫过去。
-FILE_TOOLS = [list_files, read_file, write_file, append_file, save_json, read_json]
+FILE_TOOLS = [
+    directory_tree,
+    search_files,
+    search_text,
+    list_files,
+    read_file,
+    read_json,
+    write_file,
+    append_file,
+    save_json,
+]

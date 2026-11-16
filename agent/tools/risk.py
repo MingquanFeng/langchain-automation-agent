@@ -42,13 +42,19 @@ RISK_LEVELS: frozenset[str] = frozenset({
 TOOL_RISK_LEVELS: dict[str, ToolRiskLevel] = {
     # 只读文件工具：可在只读任务中直接使用。
     "list_files": "read_only",
+    "directory_tree": "read_only",
+    "search_files": "read_only",
+    "search_text": "read_only",
     "read_file": "read_only",
     "read_json": "read_only",
+    "list_file_backups": "read_only",
 
     # 文件写入工具：会修改 data/ 沙箱内的项目数据。
     "write_file": "workspace_write",
     "append_file": "workspace_write",
     "save_json": "workspace_write",
+    "edit_file": "workspace_write",
+    "restore_file_backup": "workspace_write",
 
     # 通知工具：可能向 webhook 接收方投递消息。
     "notify": "external_effect",

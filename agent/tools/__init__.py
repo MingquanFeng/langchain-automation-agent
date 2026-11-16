@@ -4,7 +4,7 @@ Agent 工具集合的统一导出入口。
 对应课件 05 章（courseware/langChain/尚硅谷-05-Tools.pdf）：@tool 定义工具，docstring 就是给模型看的说明。
 
 主要职责：
-1. 汇总文件工具和通知工具。
+1. 汇总文件、结构化编辑和通知工具。
 2. 提供 ALL_TOOLS 列表，供 graph.py 注入 create_agent。
 3. 作为「Agent 能调用哪些工具」的唯一白名单。
 
@@ -21,6 +21,9 @@ ALL_TOOLS 是 Agent 能拿到的**全部**工具。
 # FILE_TOOLS：本地文件读写工具。
 # 来自 files.py，全部被沙箱限制在当前 Agent 工作目录内。
 from .files import FILE_TOOLS
+
+# EDIT_TOOLS：带 diff 审批、备份和恢复能力的结构化编辑工具。
+from .edits import EDIT_TOOLS
 
 # NOTIFY_TOOLS：通知出口工具。
 # 来自 notify.py，webhook 未配置时降级为终端输出。
@@ -42,11 +45,11 @@ from .risk import (
 # 也是模型能看到的工具全集。
 #
 # * 是列表解包：
-# 把 FILE_TOOLS 和 NOTIFY_TOOLS 里的元素摊平到同一个列表。
+# 把 FILE_TOOLS、EDIT_TOOLS 和 NOTIFY_TOOLS 里的元素摊平到同一个列表。
 #
 # 用 *FILE_TOOLS, *NOTIFY_TOOLS 而不是直接拼接 +，
 # 是因为 + 只能连接两个列表，解包的方式可以继续加第三组。
-ALL_TOOLS = [*FILE_TOOLS, *NOTIFY_TOOLS]
+ALL_TOOLS = [*FILE_TOOLS, *EDIT_TOOLS, *NOTIFY_TOOLS]
 
 # 启动时校验工具清单和风险登记表完全一致。
 # 新增、移除或重命名工具却未同步风险表时，尽早失败，避免权限策略漏项。
@@ -65,12 +68,13 @@ validate_tool_risk_levels(ALL_TOOLS)
 #
 # 它不会禁止其他代码显式导入未列出的公开对象。
 #
-# FILE_TOOLS 和 NOTIFY_TOOLS 一并导出，
+# FILE_TOOLS、EDIT_TOOLS 和 NOTIFY_TOOLS 一并导出，
 # 是为了让调用方能只装配某一组工具
 # （比如只给只读任务挂文件工具，不给通知工具）。
 __all__ = [
     "ALL_TOOLS",
     "FILE_TOOLS",
+    "EDIT_TOOLS",
     "NOTIFY_TOOLS",
     "TOOL_RISK_LEVELS",
     "ToolRiskLevel",

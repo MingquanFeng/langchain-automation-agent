@@ -275,7 +275,7 @@ result = get_weather.invoke({"city": "北京"})
 
 装饰之后：函数名 → 工具名；docstring → 工具描述；类型注解 → 参数 JSON Schema；函数体多出 `.invoke()`。
 
-**项目里怎么用**：`agent/tools/files.py` 6 个 + `agent/tools/notify.py` 2 个，统一登记到 `agent/tools/__init__.py` 的 `ALL_TOOLS`。
+**项目里怎么用**：`agent/tools/files.py` 9 个 + `agent/tools/notify.py` 2 个，统一登记到 `agent/tools/__init__.py` 的 `ALL_TOOLS`。
 
 **坑**
 - 📘 05 章：**没有 docstring 会直接报错** —— `ValueError: Function must have a docstring if description not provided.`
@@ -315,7 +315,7 @@ rprint(convert_to_openai_tool(get_weather))
 
 **坑**
 - 📘 05 章：**要用 Google 风格的参数说明，必须显式开 `parse_docstring=True`**。开了之后 `description` 只剩首行，参数说明落到 `properties.<arg>.description`。
-- 🧩 **项目的 8 个工具全部开了 `parse_docstring=True`**（`files.py` 6 个 + `notify.py` 2 个），
+- 🧩 **项目的 14 个工具全部开了 `parse_docstring=True`**（`files.py` 9 个 + `edits.py` 3 个 + `notify.py` 2 个），
   docstring 一律写成 Google 风格（首行概括 + `Args:` 逐参数说明）。
   效果实测：`read_file` 的 `offset` 参数在 schema 里带上了
   `'description': '起始行号，从 0 开始。用来接着上次读到的位置继续读。'` ——
@@ -438,14 +438,14 @@ def _resolve(path: str) -> Path:
 
 | # | 守则 | 项目现状 |
 |---|---|---|
-| 1 | **清晰的描述** —— docstring 要写清功能与参数 | ✅ 达标：8 个工具全开 `parse_docstring=True`，docstring 一律 Google 风格，参数说明进了 schema 的 `properties.<arg>.description` |
-| 2 | **功能单一** —— 一个工具只做一件事 | ✅ 达标，8 个工具职责不重叠 |
+| 1 | **清晰的描述** —— docstring 要写清功能与参数 | ✅ 达标：14 个工具全开 `parse_docstring=True`，docstring 一律 Google 风格，参数说明进了 schema 的 `properties.<arg>.description` |
+| 2 | **功能单一** —— 一个工具只做一件事 | ✅ 达标，14 个工具职责不重叠 |
 | 3 | **如何处理工具失败？三层防护**：① 工具内部处理 → ② Agent 级重试（提示词）→ ③ 调用级重试 | ✅ 三层都有：① 工具内部返回说明文字而非抛异常；② `SYSTEM_PROMPT` 第 5 条；③ `ToolRetryMiddleware` |
 | 4 | **返回字符串** —— 别返回 dict | ✅ 全部返回 `str`，`tests/test_e2e.py` 有参数化用例守着 |
 | 5 | **选择同步 vs 异步** —— IO 密集型该用 async | ⚠️ `notify.py` 仍是同步调用，但已改成复用 `httpx.Client`（连接池复用，不再每次新建 TCP/TLS）。真正改 async 需要整条调用链异步化 —— `agent.invoke()` 是同步的，async 工具在同步路径下不会被执行 |
 
 > ⚠️ **常见误引**：「工具数量 2-5 个最佳」这句话在 **07 章**（📘 07 章 P21「只给 Agent 需要的工具，工具太多会混淆。一般 2-5 个工具最佳」），**不在 05 章**。
-> 按这条标准，本项目 8 个工具偏多，模型选错工具的概率会上升。
+> 按这条标准，本项目 14 个工具偏多，模型选错工具的概率会上升。
 
 **🧩 项目自注的补充**（`graph.py:225-234`），课件没讲但很重要：
 > 对发送消息、修改文件、写入数据库等**有副作用的工具，自动重试可能造成重复操作**。
@@ -1001,7 +1001,7 @@ PIIMiddleware("id_card_cn",  strategy="redact", detector=ID_CARD_CN_PATTERN, ...
 | `tool.end` | 成功返回后 | `name` / `call_id` / `ok` / `duration_ms` / `result_preview` |
 | `tool.error` | 失败后 | `name` / `call_id` / `message` / `duration_ms` |
 
-**8 个工具函数一行都不用改** —— 事件全部从中间件这一层发出去。
+**14 个工具函数一行都不用改** —— 事件全部从中间件这一层发出去。
 
 **装配在中间件栈的最外层**（`agent/graph.py` 的 `middleware` 列表第一项）。
 wrap-style 钩子是洋葱结构，第一个定义的最外层，所以它包住的是

@@ -14,7 +14,13 @@ def test_every_registered_tool_has_a_risk_level():
     assert {tool.name for tool in ALL_TOOLS} == set(TOOL_RISK_LEVELS)
 
 
-@pytest.mark.parametrize("tool_name", ["list_files", "read_file", "read_json"])
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "directory_tree", "search_files", "search_text", "list_files", "read_file",
+        "read_json", "list_file_backups",
+    ],
+)
 def test_read_only_tools_are_allowed_without_write_permission(tool_name):
     assert decide_tool_permission(tool_name, allow_write=False) == "allow"
 
@@ -26,7 +32,10 @@ def test_todo_state_tool_is_allowed_without_write_permission():
 
 @pytest.mark.parametrize(
     "tool_name",
-    ["write_file", "append_file", "save_json", "notify", "notify_summary"],
+    [
+        "write_file", "append_file", "save_json", "edit_file", "restore_file_backup",
+        "notify", "notify_summary",
+    ],
 )
 def test_side_effect_tools_require_approval_by_default(tool_name):
     assert decide_tool_permission(tool_name, allow_write=False) == "require_approval"

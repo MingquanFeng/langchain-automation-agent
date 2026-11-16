@@ -21,7 +21,7 @@
 | `tool.end` | 调用成功返回后 | `name` / `call_id` / `ok` / `duration_ms` / `result_preview` |
 | `tool.error` | 调用抛异常时 | `name` / `call_id` / `message` |
 
-**8 个工具函数一行都不用改** —— 事件全部从中间件这一层发出去。
+**14 个工具函数一行都不用改** —— 事件全部从中间件这一层发出去。
 
 注意：
 1. `get_stream_writer()` 只能在图的执行上下文里调用，
@@ -55,6 +55,10 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
 
 from ..tools.risk import decide_tool_permission
+from ..tools.edits import (
+    discard_approval_preview,
+    prepare_approval_preview,
+)
 from ..context import check_cancelled
 
 
@@ -142,19 +146,49 @@ class EventBridgeMiddleware(AgentMiddleware):
             name,
             allow_write=bool(getattr(ctx, "allow_write", False)),
         )
+        # 结构化编辑在批准前只计算差异并保存内存快照，不产生文件副作用。
+        # 发送给客户端的是安全展示参数，避免把完整 old/new 文本重复塞进事件。
+        try:
+            approval_preview = prepare_approval_preview(name, call_id, args, ctx)
+        except Exception as exc:
+            approval_preview = None
+            preview_error = f"无法生成编辑预览：{type(exc).__name__}: {exc}"
+        else:
+            preview_error = approval_preview.error
+        event_args = approval_preview.args if approval_preview is not None else {}
+        if preview_error:
+            discard_approval_preview(ctx, call_id)
+            self._emit({
+                "type": "tool.error",
+                "name": name,
+                "call_id": call_id,
+                "message": preview_error,
+            })
+            return ToolMessage(
+                content=preview_error,
+                name=name,
+                tool_call_id=call_id,
+                status="error",
+            )
+
         if decision != "allow":
             approval_handler = getattr(ctx, "approval_handler", None)
             approved = False
             if decision == "require_approval" and callable(approval_handler):
                 try:
-                    approved = approval_handler(name, call_id, args) is True
+                    approved = approval_handler(name, call_id, event_args) is True
                 except Exception:
                     # 授权通道出错时按拒绝处理，不能继续执行有副作用的工具。
                     approved = False
 
             # 用户批准与取消可能同时到达；等待结束后必须再次检查。
-            check_cancelled(ctx)
+            try:
+                check_cancelled(ctx)
+            except Exception:
+                discard_approval_preview(ctx, call_id)
+                raise
             if not approved:
+                discard_approval_preview(ctx, call_id)
                 if decision == "deny":
                     message = f"工具 {name or '<未知>'} 没有风险登记，按默认拒绝策略未执行。"
                 elif callable(approval_handler):
@@ -178,7 +212,7 @@ class EventBridgeMiddleware(AgentMiddleware):
             "type": "tool.start",
             "name": name,
             "call_id": call_id,
-            "args": args,
+            "args": event_args,
         })
 
         started = time.perf_counter()
@@ -193,6 +227,9 @@ class EventBridgeMiddleware(AgentMiddleware):
             })
             # 继续往外抛 —— 中间件不吞异常。
             raise
+        finally:
+            # handler 正常消费后为空；校验层提前返回或异常时也不能残留快照。
+            discard_approval_preview(ctx, call_id)
 
         duration_ms = int((time.perf_counter() - started) * 1000)
 

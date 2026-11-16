@@ -206,6 +206,7 @@
     .approval-args { margin: 0 14px 10px; border-top: 1px solid #f0e8dc; padding-top: 8px; }
     .approval-args summary { width: fit-content; color: #8a6b45; cursor: pointer; font-size: 10px; }
     .approval-args pre { max-height: 160px; overflow: auto; margin: 7px 0 0; color: #667184; font: 10px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .approval-args pre.approval-diff { max-height: 300px; border: 1px solid #e3e7ef; border-radius: 7px; background: #f8fafc; padding: 9px 10px; color: #48566a; white-space: pre; overflow-wrap: normal; }
     .approval-status { min-height: 17px; padding: 0 14px 9px; color: #8a6b45; font-size: 10px; }
     .approval-card[data-state="allowed"], .approval-card[data-state="running"], .approval-card[data-state="done"] { border-color: #cfe3db; border-left-color: var(--green); background: #fbfefc; }
     .approval-card[data-state="allowed"] .approval-status, .approval-card[data-state="running"] .approval-status, .approval-card[data-state="done"] .approval-status { color: #33735e; }
@@ -774,6 +775,8 @@
       write_file: "将创建或覆盖数据目录中的文件。",
       append_file: "将内容追加到数据目录中的文件。",
       save_json: "将创建或覆盖数据目录中的 JSON 文件。",
+      edit_file: "将按差异预览修改现有文本；批准后会先保存可恢复备份。",
+      restore_file_backup: "将按反向差异恢复文件；恢复前的当前状态也会保存为备份。",
       notify: "将消息发送到已配置的通知渠道。",
       notify_summary: "将摘要发送到已配置的通知渠道。",
     };
@@ -1317,24 +1320,30 @@
       tool.className = "approval-tool";
       tool.textContent = event.name || "未知工具";
 
-      // 始终显示一行参数摘要；完整参数可展开查看，长文本不会挤满聊天记录。
+      // 结构化编辑展示路径、统计和 unified diff；其他工具仍显示参数摘要。
       const argsPreview = document.createElement("div");
       argsPreview.className = "approval-preview";
       const argumentEntries = Object.entries(event.args || {});
-      argsPreview.textContent = argumentEntries.length
-        ? `参数：${argumentEntries.slice(0, 3).map(([key, value]) => {
-          const preview = typeof value === "string" ? value : JSON.stringify(value);
-          const shortValue = preview.length > 72 ? `${preview.slice(0, 72)}…` : preview;
-          return `${key}=${shortValue}`;
-        }).join(" · ")}${argumentEntries.length > 3 ? " · …" : ""}`
-        : "本次调用没有额外参数。";
+      const diffText = typeof event.args?.diff === "string" ? event.args.diff : "";
+      if (diffText) {
+        argsPreview.textContent = `${event.args.path || "文件"} · ${event.args.summary || "内容将发生变化"}`;
+      } else {
+        argsPreview.textContent = argumentEntries.length
+          ? `参数：${argumentEntries.slice(0, 3).map(([key, value]) => {
+            const preview = typeof value === "string" ? value : JSON.stringify(value);
+            const shortValue = preview.length > 72 ? `${preview.slice(0, 72)}…` : preview;
+            return `${key}=${shortValue}`;
+          }).join(" · ")}${argumentEntries.length > 3 ? " · …" : ""}`
+          : "本次调用没有额外参数。";
+      }
 
       const argsDetails = document.createElement("details");
       argsDetails.className = "approval-args";
       const argsSummary = document.createElement("summary");
-      argsSummary.textContent = "查看本次调用参数";
+      argsSummary.textContent = diffText ? "查看变更差异" : "查看本次调用参数";
       const args = document.createElement("pre");
-      args.textContent = JSON.stringify(event.args || {}, null, 2);
+      if (diffText) args.className = "approval-diff";
+      args.textContent = diffText || JSON.stringify(event.args || {}, null, 2);
       argsDetails.append(argsSummary, args);
 
       const status = document.createElement("div");
