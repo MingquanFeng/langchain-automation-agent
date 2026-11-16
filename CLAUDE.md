@@ -72,10 +72,12 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 列出调度器已注册的 job 与下次运行时间 |
 | GET | `/runs` | 分页查询 Agent 历史运行记录 |
-| GET | `/` | 连续对话调试工作台 |
+| GET | `/threads/messages?thread_id=...` | 查询 Checkpointer 会话消息 |
+| DELETE | `/runs/{run_id}` / `/runs` | 删除或清空运行记录 |
+| DELETE | `/threads?thread_id=...` | 删除会话记忆及关联运行记录 |
 | WS | `/ws` | 桌面版事件流。收 `run.start` / `cancel`，推结构化事件 |
 
-浏览器工作台通过 WebSocket `/ws` 启动和取消交互式任务；Python 调用方可用 `runtime/runner.py` 的 `run_task()`，定时任务由 `runtime/scheduler.py` 触发。当前已有浏览器调试工作台；工具集扩张与 Tauri GUI 仍在路线图中，见 `DESKTOP_AGENT_PLAN.md`。
+Tauri 从应用包内加载 `desktop/web/workbench.html`，通过 loopback HTTP API 与 WebSocket `/ws` 连接 sidecar；Python 调用方可用 `runtime/runner.py` 的 `run_task()`，定时任务由 `runtime/scheduler.py` 触发。FastAPI 不再托管聊天页面；运行历史支持会话恢复与记录清理，后续运行可靠性、工具集扩张和长期记忆见 `DESKTOP_AGENT_PLAN.md`。
 
 首次使用需 `cp .env.example .env` 并填 `LLM_API_KEY`。环境变量全清单见 `.env.example`。
 
@@ -144,11 +146,11 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 - `runner.py` — `run_task()` 同步调用入口；`get_agent()` 提供共享 Agent 单例。定时任务和 Python 调用方走 `run_task()`，WebSocket 消费器则用同一单例运行 `agent.stream()`。
 - `scheduler.py` — APScheduler 封装。**LangGraph 1.x 本地没有内置 cron**（`langgraph_sdk` 也未导出 cron，那是云端 LangGraph Platform 的能力），所以定时触发必须自己接 APScheduler。cron 表达式按 `SCHEDULER_TIMEZONE` 解释，用 `CronTrigger.from_crontab`，即标准 5 段格式。
-- `server.py` — FastAPI。定时任务增删查、调度状态、探活、根路径工作台与 **`/ws` 事件流端点**。`/ws` 收 `run.start` / `cancel` / `approval.respond` 命令，推 `run.start` / `approval.request` / `model.text` / `tool.*` / `run.end` / `run.cancelled` / `run.error` 事件。**单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，并发发帧会交错，所以所有消息都进同一个队列由唯一的推送任务发出。
+- `server.py` — FastAPI。定时任务与运行历史 API、调度状态、探活、桌面 WebView 的 loopback CORS 和 **`/ws` 事件流端点**。`/ws` 收 `run.start` / `cancel` / `approval.respond` 命令，推 `run.start` / `approval.request` / `model.text` / `tool.*` / `run.end` / `run.cancelled` / `run.error` 事件。**单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，并发发帧会交错，所以所有消息都进同一个队列由唯一的推送任务发出。
 - `events.py` — 事件模型 + 归一化层。`BaseEvent` 加 10 种事件构成桌面版的事件协议；`StreamNormalizer` 把 `agent.stream()` 的 `(模式名, 载荷)` 二元组变成事件。
 - `consumer.py` — 同步流消费器（桌面版阶段 3）。在**工作线程**里跑 `agent.stream()`，把归一化后的事件投进 asyncio 队列。两层上限做背压：队列容量管「已入队」、`max_pending` 管「在途未入队」。**不要改成等 `future.result()`** —— 事件循环在 resolve 前关闭时那会永久阻塞。
 - `runs.py` — Run Manager（桌面版阶段 4）。管 run 的生命周期：`start` / `get` / `cancel` / `finish` / `active`。**run_id 是一次执行的身份、thread_id 是会话的记忆隔离键，两回事**。第一版单连接单任务 —— 同一 owner 第二次 `start` 抛 `RunBusyError`，由调用方回一条 `run.error`，不静默取消旧的。
-- `frontend/workbench.html` — FastAPI 根路径提供的连续对话调试工作台；浏览器与 Tauri 共用这份文件，复用 `thread_id` 展示对话与运行事件。
+- `desktop/web/workbench.html` — 随 Tauri 应用打包的连续对话工作台；通过 loopback API 和 `/ws` 连接 sidecar，复用 `thread_id` 展示对话与运行事件。
 - `tasks.py` — 定时任务表。改这个文件就改 Agent 每天自动做什么。**注意 `TASKS` 是模块级内存字典，不落盘** —— `POST /tasks` 动态加的任务进程重启即消失，只有改代码里的 `TASKS` 列表才是持久定义。
 - `__main__.py` — CLI 入口，唯一子命令 `serve`（默认，起 HTTP 服务 + 可选调度器）。`--no-schedule` / `--reload` / `--host` / `--port` 都在这里解析。**它同时是陷阱 10 的落地文件** —— 调度开关必须在 `import runtime.server` 之前生效，顺序不能改。
 
@@ -267,9 +269,10 @@ langchain 1.x 的 `ModelFallbackMiddleware`（模型降级）、`HumanInTheLoopM
 
 ## 约定
 
+- **新增代码必须沿用仓库现有的注释格式**：模块文件先用中文模块文档说明职责、调用关系和关键边界；按功能用编号标题分段；关键导入、配置项、状态字段、数据库/并发/错误处理等非显然逻辑要用中文注释写清用途和原因；公开类与函数要有说明参数、返回值和重要行为的 docstring。新增文件需对照同目录相邻模块的注释密度与排版，不能只留一行模块说明或只写少量零散注释。修改现有文件时也要保持该文件原有的注释风格。
 - **记忆隔离靠 `thread_id`**。定时任务用 `cron-{任务名}` 作为 thread_id，保留跨天记忆；`runner.run_task()` 不传 thread_id 时生成随机 `task-{uuid}`。**同一个 thread_id 就共享同一份记忆**，客户端想续聊就显式传同一个值。
 - **新增工具要登记两处**：加入 `agent/tools/__init__.py` 的 `ALL_TOOLS`，并在 `agent/tools/risk.py` 声明风险等级。工具清单与风险表在导入时自动校验；不能再维护独立的 `WRITE_TOOLS` 名单。
-- **权限决策由 `agent/tools/risk.py` 集中定义**：只读等级自动放行；有副作用的等级返回 `require_approval`；无风险登记返回 `deny`。`TaskGateMiddleware` 负责拦截未授权调用。浏览器工作台通过 `approval.request` / `approval.respond` 逐次确认；旧 Python API、定时任务和旧 WebSocket 客户端显式设置 `allow_write=True` 时仍保持整轮授权兼容。
+- **权限决策由 `agent/tools/risk.py` 集中定义**：只读等级自动放行；有副作用的等级返回 `require_approval`；无风险登记返回 `deny`。`TaskGateMiddleware` 负责拦截未授权调用。桌面工作台通过 `approval.request` / `approval.respond` 逐次确认；旧 Python API、定时任务和旧 WebSocket 客户端显式设置 `allow_write=True` 时仍保持整轮授权兼容。
 - **通知出口是 `notify` / `notify_summary`**，不是直接 print。SYSTEM_PROMPT 要求 Agent 每步做完就推送，不要攒到最后。
 - **PII 脱敏默认开着**（`.env` 的 `PII_MASKING=1`）。它脱敏**用户指令**与**工具结果**
   （文件工具读出来的内容走后者，是最主要的泄露通道），但**不脱敏模型输出** ——

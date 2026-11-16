@@ -1683,7 +1683,7 @@ model.text 是归一化层滤过思考块的正文，那才是用户该看到的
 {"type": "approval.respond", "run_id": "...", "call_id": "...", "approved": true}
 ```
 
-浏览器工作台省略 `allow_write`，服务端因此按只读默认策略运行；遇到有副作用的工具时，客户端必须对 `approval.request` 中匹配的 `run_id` / `call_id` 应答。仅 run 所属连接可以批准，错误、未知或重复应答返回 `recoverable=true` 的 `run.error`，不会结束当前 run。旧客户端显式传 `allow_write=true` 时仍保持整轮授权兼容，Python API 与定时任务也沿用该设置。
+桌面工作台省略 `allow_write`，服务端因此按只读默认策略运行；遇到有副作用的工具时，客户端必须对 `approval.request` 中匹配的 `run_id` / `call_id` 应答。仅 run 所属连接可以批准，错误、未知或重复应答返回 `recoverable=true` 的 `run.error`，不会结束当前 run。旧客户端显式传 `allow_write=true` 时仍保持整轮授权兼容，Python API 与定时任务也沿用该设置。
 
 **协议**（服务端 → 客户端）：一条一个 JSON 事件。
 `run.start` / `model.text` / `tool.start` / `tool.end` / `tool.error` /
@@ -1703,7 +1703,7 @@ model.text 是归一化层滤过思考块的正文，那才是用户该看到的
 全都回一条 `run.error`，客户端不会一直转圈等。
 
 **坑**
-- 🧩 **WebSocket 默认逐次确认**：浏览器工作台不传 `allow_write`，服务端按 False（只读默认态）创建上下文；有副作用的工具通过 `approval_handler` 请求本次授权。
+- 🧩 **WebSocket 默认逐次确认**：桌面工作台不传 `allow_write`，服务端按 False（只读默认态）创建上下文；有副作用的工具通过 `approval_handler` 请求本次授权。
   `AgentContext` dataclass 自己的默认值是 `True`，所以端点仍必须显式传 `allow_write`，不能省。旧客户端显式传 `allow_write=true` 仍按整轮授权兼容。
 - 🧩 **端点内部调 `get_agent()` 拿进程内的 Agent 单例** ——
   测试必须替换 `runtime.server.get_agent`（而不是 `runtime.runner.get_agent`，

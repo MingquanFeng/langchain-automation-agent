@@ -165,6 +165,10 @@ class RuntimeStore:
                     "CREATE INDEX IF NOT EXISTS idx_agent_runs_started_at "
                     "ON agent_runs(started_at DESC)"
                 )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_agent_runs_thread_id "
+                    "ON agent_runs(thread_id)"
+                )
 
             # 指令和输出可能包含用户数据；POSIX 下数据库文件仅允许当前用户读写。
             if os.name != "nt":
@@ -370,6 +374,60 @@ class RuntimeStore:
                 (limit, offset),
             ).fetchall()
         return [self._serialize_run(row) for row in rows]
+
+    def delete_run(self, run_id: str) -> bool:
+        """删除一条运行记录，不修改它所属会话的 Checkpointer。"""
+        self.initialize()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM agent_runs WHERE run_id = ?", (run_id,)
+            )
+            return cursor.rowcount > 0
+
+    def is_run_running(self, run_id: str) -> bool:
+        """判断运行记录是否仍处于执行态。"""
+        self.initialize()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM agent_runs WHERE run_id = ? AND status = 'running'",
+                (run_id,),
+            ).fetchone()
+        return row is not None
+
+    def has_running_run_for_thread(self, thread_id: str) -> bool:
+        """判断会话是否有 WebSocket、CLI、API 或定时任务仍在执行。"""
+        self.initialize()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM agent_runs WHERE thread_id = ? AND status = 'running' LIMIT 1",
+                (thread_id,),
+            ).fetchone()
+        return row is not None
+
+    def has_running_runs(self) -> bool:
+        """判断是否存在运行中的持久化任务。"""
+        self.initialize()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM agent_runs WHERE status = 'running' LIMIT 1"
+            ).fetchone()
+        return row is not None
+
+    def delete_runs_for_thread(self, thread_id: str) -> int:
+        """删除会话关联的全部运行记录；Checkpointer 由服务层单独清理。"""
+        self.initialize()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM agent_runs WHERE thread_id = ?", (thread_id,)
+            )
+            return cursor.rowcount
+
+    def clear_runs(self) -> int:
+        """清空运行记录，保留任务定义与会话 Checkpointer。"""
+        self.initialize()
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM agent_runs")
+            return cursor.rowcount
 
     @staticmethod
     def _serialize_run(row: sqlite3.Row) -> dict:

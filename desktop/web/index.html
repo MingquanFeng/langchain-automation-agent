@@ -130,18 +130,18 @@
     </div>
   </header>
   <main class="workspace" id="workspace" data-mode="loading">
-    <iframe id="workbench" title="Agent 聊天工作台" sandbox="allow-scripts allow-same-origin" hidden></iframe>
+    <iframe id="workbench" title="Agent 聊天工作台" hidden></iframe>
     <section class="setup-card" id="setupCard" data-open="true" aria-labelledby="setupTitle">
       <div class="setup-heading">
         <h1 id="setupTitle">连接本机 Agent 服务</h1>
         <button class="settings-dismiss" id="closeServiceSettings" type="button" hidden>完成</button>
       </div>
-      <p>桌面应用会启动并管理本机 Agent 服务，再打开现有工作台。服务启动失败时可查看日志并重试。</p>
+      <p>桌面应用会启动并管理本机 Agent 服务，再连接桌面内置工作台。服务启动失败时可查看日志并重试。</p>
       <form id="connectionForm">
         <label for="serviceAddress">服务地址</label>
         <div class="address-row">
           <input id="serviceAddress" type="url" value="http://127.0.0.1:8000" spellcheck="false" autocomplete="url" required>
-          <button class="primary-button" id="connectButton" type="submit">连接并打开工作台</button>
+          <button class="primary-button" id="connectButton" type="submit">保存并连接</button>
         </div>
         <p class="setup-status" id="setupStatus" role="status" aria-live="polite">正在检查 http://127.0.0.1:8000</p>
       </form>
@@ -263,7 +263,7 @@
       frame.contentWindow.postMessage({
         type: "automation-agent.working-directory",
         path: currentWorkingDirectory,
-      }, currentOrigin);
+      }, window.location.origin);
     }
 
     function openModelDialog() {
@@ -301,7 +301,11 @@
       connectButton.textContent = "正在连接…";
       setConnection("connecting", "正在连接 Agent", currentOrigin);
       setStatus("", "正在连接工作台；不会重发任务。");
-      frame.contentWindow.postMessage({ type: "automation-agent.reconnect", request_id: id }, currentOrigin);
+      frame.contentWindow.postMessage({
+        type: "automation-agent.reconnect",
+        request_id: id,
+        service_url: currentOrigin,
+      }, window.location.origin);
       frameTimer = setTimeout(() => {
         if (id === attemptId) {
           setStatus("error", "工作台没有确认连接。可检查服务状态后重试；任务不会自动重发。");
@@ -345,7 +349,7 @@
         currentOrigin = origin;
         try { localStorage.setItem(STORAGE_KEY, origin); }
         catch { /* 地址仍可在本次运行中使用；无法保存时下次启动恢复默认值。 */ }
-        setStatus("", `正在载入 ${origin} 的工作台…`);
+        setStatus("", "正在载入桌面内置工作台…");
         workspace.dataset.mode = "loading";
         frameLoaded = false;
         updateSettingsEntry();
@@ -354,15 +358,15 @@
         clearTimeout(frameTimer);
         frameTimer = setTimeout(() => {
           if (!frameLoaded && id === attemptId) {
-            setStatus("error", `无法连接 ${origin}。请确认 Agent 服务已启动，然后重试。`);
+            setStatus("error", "无法载入桌面工作台。请重启桌面应用后重试。");
             setConnection("error", "连接失败", origin);
             workspace.dataset.mode = "setup";
             frame.hidden = true;
             connectButton.disabled = false;
-            connectButton.textContent = "连接并打开工作台";
+            connectButton.textContent = "保存并连接";
           }
         }, 8000);
-        frame.src = `${origin}/`;
+        frame.src = "./workbench.html";
       }
       serviceLabel.textContent = `· ${origin}`;
       workspace.dataset.mode = frameLoaded ? "app" : "loading";
@@ -371,7 +375,7 @@
     }
 
     window.addEventListener("message", (event) => {
-      if (event.source !== frame.contentWindow || event.origin !== currentOrigin) return;
+      if (event.source !== frame.contentWindow || event.origin !== window.location.origin) return;
       const message = event.data;
       if (message?.type === "automation-agent.open-settings") {
         if (desktopSettingsDialog.open) desktopSettingsDialog.close();

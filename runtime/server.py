@@ -27,7 +27,6 @@ import json
 
 # logging：标准库的日志模块。
 import logging
-from pathlib import Path
 
 # uuid：生成连接 id。
 import uuid
@@ -39,7 +38,7 @@ from contextlib import asynccontextmanager
 # FastAPI：Web 框架。
 # WebSocket / WebSocketDisconnect：桌面版的事件流端点。
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from starlette.middleware.cors import CORSMiddleware
 
 # BaseModel / Field：Pydantic 模型与字段声明，
 # FastAPI 用它做请求体校验和 OpenAPI 文档。
@@ -56,7 +55,7 @@ from agent.context import AgentContext
 from .runner import get_agent
 
 # BaseEvent / RunError / RunStart：事件模型。
-from .events import BaseEvent, RunError, RunStart
+from .events import BaseEvent, RunError, RunStart, THINK_RE
 
 # RunBusyError / RunManager：run 的生命周期管理。
 from .runs import RunBusyError, RunManager
@@ -69,8 +68,6 @@ from .storage import get_runtime_store
 from .tasks import ScheduledTask, add_task, all_tasks, configure_persistence, remove_task
 
 logger = logging.getLogger(__name__)
-WORKBENCH_HTML = Path(__file__).resolve().parent.parent / "frontend" / "workbench.html"
-WORKBENCH_LOGO = Path(__file__).resolve().parent.parent / "frontend" / "automation-agent-logo.png"
 
 
 # ============================================================
@@ -125,18 +122,13 @@ async def lifespan(app: FastAPI):
 # 这是 FastAPI 0.135+ 推荐的写法，
 # 不要再用 @app.on_event("startup") / @app.on_event("shutdown")。
 app = FastAPI(title="Automation Agent", version="0.1.0", lifespan=lifespan)
-
-
-@app.get("/", include_in_schema=False)
-def workbench() -> FileResponse:
-    """从共享前端目录返回本地 Agent 调试工作台。"""
-    return FileResponse(WORKBENCH_HTML)
-
-
-@app.get("/assets/automation-agent-logo.png", include_in_schema=False)
-def workbench_logo() -> FileResponse:
-    """返回工作台使用的品牌图标。"""
-    return FileResponse(WORKBENCH_LOGO, media_type="image/png")
+app.add_middleware(
+    CORSMiddleware,
+    # Tauri 本地 WebView 用应用源直接访问 loopback HTTP API；普通浏览器工作台已迁入桌面包。
+    allow_origins=["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"],
+    allow_methods=["GET", "DELETE"],
+    allow_headers=["*"],
+)
 
 
 # ============================================================
@@ -234,6 +226,150 @@ def list_agent_runs(
     return app.state.runtime_store.list_runs(limit=limit, offset=offset)
 
 
+def _checkpoint_message_text(content: object) -> str:
+    """将 Checkpointer 消息正文转成可展示的纯文本。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            block["text"]
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ]
+        if parts:
+            return "".join(parts)
+        return "[包含非文本内容]" if content else ""
+    if content is None:
+        return ""
+    return str(content)
+
+
+def _serialize_checkpoint_messages(thread_id: str) -> dict:
+    """读取会话最新状态中的对话消息，不返回系统提示或内部思考内容。"""
+    try:
+        agent = get_agent()
+        snapshot = agent.get_state({"configurable": {"thread_id": thread_id}})
+    except Exception as exc:
+        logger.exception("读取会话检查点失败：%s", thread_id)
+        raise HTTPException(status_code=503, detail="暂时无法读取会话内容") from exc
+
+    raw_messages = (snapshot.values or {}).get("messages", []) if snapshot else []
+    messages: list[dict] = []
+    for message in raw_messages:
+        if isinstance(message, dict):
+            message_type = message.get("type") or message.get("role")
+            content = message.get("content")
+            name = message.get("name")
+            tool_calls = message.get("tool_calls") or []
+        else:
+            message_type = getattr(message, "type", "")
+            content = getattr(message, "content", None)
+            name = getattr(message, "name", None)
+            tool_calls = getattr(message, "tool_calls", []) or []
+
+        if message_type in ("human", "user"):
+            role = "user"
+        elif message_type in ("ai", "assistant"):
+            role = "assistant"
+        elif message_type == "tool":
+            role = "tool"
+        else:
+            # 不把 system / developer / function 等内部控制消息展示给用户。
+            continue
+
+        text = _checkpoint_message_text(content)
+        if role == "assistant":
+            text = THINK_RE.sub("", text)
+            if not text.strip() and tool_calls:
+                calls = []
+                for call in tool_calls:
+                    if isinstance(call, dict):
+                        call_name = call.get("name", "工具")
+                        arguments = call.get("args", {})
+                    else:
+                        call_name = getattr(call, "name", "工具")
+                        arguments = getattr(call, "args", {})
+                    calls.append(f"{call_name}({arguments})")
+                text = "调用工具：" + "、".join(calls)
+        if not text:
+            continue
+
+        item = {"role": role, "content": text}
+        if role == "tool" and name:
+            item["name"] = str(name)
+        messages.append(item)
+
+    limit = 500
+    return {
+        "thread_id": thread_id,
+        "messages": messages[-limit:],
+        "message_count": len(messages),
+        "truncated": len(messages) > limit,
+    }
+
+
+@app.get("/threads/messages")
+def get_thread_messages(
+    thread_id: str = Query(..., min_length=1, max_length=256),
+) -> dict:
+    """从 Checkpointer 读取会话对话；与运行历史列表分开返回。"""
+    return _serialize_checkpoint_messages(thread_id)
+
+
+@app.delete("/runs/{run_id}")
+def delete_agent_run(run_id: str) -> dict:
+    """删除单条运行记录，不删除其会话记忆。"""
+    store = app.state.runtime_store
+    if store.is_run_running(run_id):
+        raise HTTPException(status_code=409, detail="运行中的记录暂时不能删除")
+    deleted = store.delete_run(run_id)
+    return {"run_id": run_id, "deleted": deleted}
+
+
+@app.delete("/runs")
+def clear_agent_runs() -> dict:
+    """清空运行记录；会话 Checkpointer 与定时任务定义保留。"""
+    store = app.state.runtime_store
+    if store.has_running_runs():
+        raise HTTPException(status_code=409, detail="仍有任务运行，暂时不能清空运行记录")
+    deleted = store.clear_runs()
+    return {"deleted": deleted}
+
+
+@app.delete("/threads")
+def delete_thread(
+    thread_id: str = Query(..., min_length=1, max_length=256),
+) -> dict:
+    """删除会话检查点以及关联的全部运行记录。"""
+    manager: RunManager = app.state.run_manager
+    store = app.state.runtime_store
+    if (
+        any(run.thread_id == thread_id for run in manager.active())
+        or store.has_running_run_for_thread(thread_id)
+    ):
+        raise HTTPException(status_code=409, detail="会话仍有运行中的任务，暂时不能删除")
+
+    try:
+        agent = get_agent()
+    except Exception as exc:
+        logger.exception("初始化会话存储失败：%s", thread_id)
+        raise HTTPException(status_code=503, detail="暂时无法访问会话存储") from exc
+
+    checkpointer = getattr(agent, "checkpointer", None)
+    delete_checkpoint = getattr(checkpointer, "delete_thread", None)
+    if not callable(delete_checkpoint):
+        raise HTTPException(status_code=501, detail="当前 Checkpointer 不支持删除会话")
+    try:
+        delete_checkpoint(thread_id)
+    except Exception as exc:
+        logger.exception("删除会话检查点失败：%s", thread_id)
+        raise HTTPException(status_code=500, detail="删除会话检查点失败") from exc
+
+    deleted_runs = store.delete_runs_for_thread(thread_id)
+    return {"thread_id": thread_id, "deleted_runs": deleted_runs}
+
 
 # ============================================================
 # 4. 定时任务增删接口
@@ -313,7 +449,7 @@ async def websocket_events(websocket: WebSocket) -> None:
     {"type": "approval.respond", "run_id": "...", "call_id": "...", "approved": true}
     ```
 
-    浏览器工作台不传 `allow_write`，有副作用的工具会逐次请求批准。
+    桌面工作台不传 `allow_write`，有副作用的工具会逐次请求批准。
     为兼容旧客户端，显式传 `allow_write: true` 仍代表整轮授权。
 
     **服务端 → 客户端**：一条一个 JSON 事件。

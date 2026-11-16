@@ -60,21 +60,23 @@ python -m runtime --no-schedule  # 启动服务，但不启动定时任务
 python -m runtime --reload       # 开发模式热重载
 ```
 
-服务起在 `http://127.0.0.1:8000`。打开根地址即可与 Agent 连续聊天：后续消息自动沿用当前会话记忆，并可实时查看工具调用或取消运行。
+服务默认监听 `http://127.0.0.1:8000`，提供桌面工作台使用的 HTTP API 与 WebSocket。聊天界面随 Tauri 应用打包；`python -m runtime` 单独启动时不再提供浏览器工作台。
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
-| GET | `/` | 本地 Agent 调试工作台 |
 | GET | `/health` | 健康检查 |
 | GET | `/tasks` | 列出定时任务 |
 | POST | `/tasks` | 动态添加定时任务 |
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 已注册 job 与下次运行时间 |
 | GET | `/runs?limit=50&offset=0` | 分页查询最近执行记录及结果 |
+| GET | `/threads/messages?thread_id=...` | 查询会话检查点中的对话消息 |
+| DELETE | `/runs/{run_id}` / `/runs` | 删除单条或清空运行记录 |
+| DELETE | `/threads?thread_id=...` | 删除会话检查点及关联运行记录 |
 
-任务表在首次启动时从 `runtime/tasks.py` 的默认项初始化，之后的动态增删改会保存在运行时 SQLite 数据库，重启后继续生效。运行记录包含指令、最终输出或错误、触发来源、状态、耗时和会话 ID，默认保存在 `data/runtime.sqlite3`（桌面版位于应用支持目录；自定义 `SQLITE_PATH` 时使用同目录）。默认每页 50 条，最多 100 条。`/runs` 当前提供查询 API，工作台历史列表后续接入。
+任务表在首次启动时从 `runtime/tasks.py` 的默认项初始化，之后的动态增删改会保存在运行时 SQLite 数据库，重启后继续生效。运行记录包含指令、最终输出或错误、触发来源、状态、耗时和会话 ID，默认保存在 `data/runtime.sqlite3`（桌面版位于应用支持目录；自定义 `SQLITE_PATH` 时使用同目录）。默认每页 50 条，最多 100 条。工作台“运行历史”可按时间浏览状态、指令、结果和耗时；恢复会话会读取 Checkpointer 消息并沿用原 `thread_id`，不会自动重发任务。单条运行记录删除不会删除会话记忆；删除整个会话会一并删除该会话的所有运行记录与 Checkpointer 数据；清空运行记录会保留会话记忆。
 
-WebSocket `/ws` 是工作台使用的实时事件流接口。只读工具会直接运行；写文件或发送通知时，聊天窗口会显示工具用途和参数，并等待你选择“仅允许本次”或“拒绝本次”。每次批准只对当前工具调用生效，取消任务或关闭连接时，等待中的工具不会执行。
+WebSocket `/ws` 是桌面工作台使用的实时事件流接口。只读工具会直接运行；写文件或发送通知时，聊天窗口会显示工具用途和参数，并等待你选择“仅允许本次”或“拒绝本次”。每次批准只对当前工具调用生效，取消任务或关闭连接时，等待中的工具不会执行。
 
 授权协议的事件形状如下。客户端必须把请求中的 `run_id` 和 `call_id` 原样带回；服务端只接受发起该 run 的连接所作的应答。
 
@@ -83,9 +85,9 @@ WebSocket `/ws` 是工作台使用的实时事件流接口。只读工具会直�
 {"type":"approval.respond","run_id":"run-a1b2c3d4","call_id":"call-1","approved":true}
 ```
 
-浏览器工作台不会发送整轮 `allow_write`。旧 WebSocket 客户端仍可显式传 `allow_write: true`，但这会按旧规则一次性允许本轮写操作；Python API 和定时任务也继续支持原有设置。
+桌面工作台不会发送整轮 `allow_write`。旧 WebSocket 客户端仍可显式传 `allow_write: true`，但这会按旧规则一次性允许本轮写操作；Python API 和定时任务也继续支持原有设置。
 
-REST 接口只管理定时任务和查询状态；浏览器工作台通过 WebSocket `/ws` 触发交互式任务。也可以从 Python 直接调用：
+REST 接口管理定时任务、查询运行状态和历史；桌面工作台通过 WebSocket `/ws` 触发交互式任务。也可以从 Python 直接调用：
 
 ```bash
 # Python API（allow_write 默认 false，即只读，写工具会被闸门拦下）
@@ -123,14 +125,16 @@ agent/
 runtime/
   runner.py          同步 run_task() 入口；提供共享的 get_agent() 单例
   scheduler.py       APScheduler 封装（LangGraph 1.x 本地没有内置 cron）
-  server.py          FastAPI，定时任务接口、浏览器工作台、WebSocket 事件流
+  server.py          FastAPI，定时任务与运行历史 API、WebSocket 事件流
   storage.py         SQLite 持久化定时任务与运行记录
   events.py          事件模型与流归一化
   consumer.py        工作线程中的 agent.stream() 消费器与跨线程背压
   runs.py             WebSocket run 生命周期、取消和清理
   tasks.py           定时任务表，改这里就改 Agent 每天自动做什么
-frontend/
-  workbench.html     浏览器与桌面共用的连续对话工作台
+desktop/web/
+  index.html         Tauri 本机服务配置与生命周期连接页
+  workbench.html     随桌面应用打包的聊天与运行历史工作台
+  assets/            桌面品牌资源
 tests/               单元测试与集成测试（含假模型）
 ```
 

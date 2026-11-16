@@ -310,6 +310,36 @@
     .settings-option button:hover { border-color: #bccaf0; background: #f7f9ff; }
     .settings-panel-foot { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid #edf0f6; color: #939eb0; font-size: 9px; line-height: 1.6; }
 
+    .history-dialog { width: min(860px, calc(100vw - 28px)); max-height: min(88vh, 900px); border: 1px solid #e1e6f0; border-radius: 18px; padding: 0; color: #26334b; background: #f8faff; box-shadow: 0 24px 80px #1c2d4b30; }
+    .history-dialog::backdrop { background: #18243c66; backdrop-filter: blur(3px); }
+    .history-panel { display: flex; max-height: min(88vh, 900px); flex-direction: column; }
+    .history-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 21px 23px 16px; border-bottom: 1px solid #e8ecf4; background: #fff; }
+    .history-panel-head h2 { margin: 0; font-size: 19px; letter-spacing: -.03em; }
+    .history-panel-head p { margin: 5px 0 0; color: #8390a6; font-size: 11px; line-height: 1.6; }
+    .history-head-actions { display: flex; align-items: center; gap: 8px; }
+    .history-clear, .history-refresh, .history-close, .history-action { min-height: 32px; border: 1px solid #dce3f0; border-radius: 8px; padding: 0 10px; color: #52627e; background: #fff; font-size: 10px; font-weight: 650; white-space: nowrap; }
+    .history-clear { color: #a14b4b; border-color: #f0d9d9; }
+    .history-close { width: 32px; padding: 0; color: #77849b; background: #f4f6fa; font-size: 19px; }
+    .history-status { min-height: 37px; padding: 11px 23px 0; color: #8290a7; font-size: 10px; }
+    .history-list { display: grid; gap: 10px; overflow: auto; padding: 0 18px 18px; }
+    .history-item { min-width: 0; padding: 14px; border: 1px solid #e2e7f2; border-radius: 13px; background: #fff; box-shadow: 0 4px 13px #34487308; }
+    .history-item-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .history-item-title { min-width: 0; overflow: hidden; color: #34425c; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .history-item-meta { margin-top: 3px; color: #929db0; font-size: 9px; }
+    .history-status-badge { flex: 0 0 auto; border-radius: 20px; padding: 4px 8px; color: #596987; background: #eef1f6; font-size: 9px; font-weight: 650; }
+    .history-status-badge[data-state="succeeded"] { color: #258568; background: #e8f7ef; }
+    .history-status-badge[data-state="failed"], .history-status-badge[data-state="interrupted"] { color: #b14e45; background: #fff0ed; }
+    .history-status-badge[data-state="running"] { color: #365fd0; background: #e9efff; }
+    .history-instruction { margin: 11px 0 8px; color: #4d5d77; font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .history-output { margin-top: 7px; color: #63718a; font-size: 10px; }
+    .history-output summary { cursor: pointer; }
+    .history-output pre { max-height: 210px; overflow: auto; margin: 8px 0 0; padding: 10px; border: 1px solid #edf0f6; border-radius: 8px; color: #4d5d77; background: #f8faff; font: 10px/1.6 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .history-item-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+    .history-action:hover:not(:disabled), .history-clear:hover:not(:disabled) { background: #f4f6fb; }
+    .history-action.danger { color: #a14b4b; border-color: #f0d9d9; }
+    .history-load-more { min-height: 34px; margin: 0 18px 17px; border: 1px solid #dce3f0; border-radius: 8px; color: #52627e; background: #fff; font-size: 10px; font-weight: 650; }
+    .history-empty { padding: 30px 12px; color: #8995aa; text-align: center; font-size: 11px; }
+
     .conversation-column { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .side-nav .new-chat { min-height: 40px; justify-content: flex-start; padding: 0 10px; border: 1px solid #dce4f7; border-radius: 11px; background: #f1f4ff; color: #315fe8; font-weight: 650; }
     .side-nav .new-chat svg { width: 18px; height: 18px; }
@@ -458,7 +488,7 @@
   <script>if (window.parent !== window) document.documentElement.classList.add("embedded");</script>
   <header class="topbar">
     <div class="brand">
-      <img class="brand-logo" src="/assets/automation-agent-logo.png" alt="" aria-hidden="true">
+    <img class="brand-logo" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true">
       <div>Agent Workbench<small>LOCAL RUNTIME CONSOLE</small></div>
     </div>
     <div class="connection" id="connection" data-state="idle" role="status">
@@ -479,8 +509,8 @@
         <button class="nav-item active" type="button" data-nav-target="chat" aria-label="首页" title="首页" aria-current="page">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3.5 10 8.5-7 8.5 7v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1V10Z"/><path d="M9 20.5v-7h6v7"/></svg><span>首页</span>
         </button>
-        <button class="nav-item" type="button" data-nav-target="recentTasks" aria-label="最近任务" title="最近任务">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span>最近任务</span>
+        <button class="nav-item" type="button" data-nav-target="history" aria-label="运行历史" title="运行历史">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span>运行历史</span>
         </button>
         <button class="nav-item" type="button" id="sidebarSettingsButton" aria-label="设置" title="设置">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.1.9-1.2 2.1-1.4-.5a7.8 7.8 0 0 1-1.6.9l-.3 1.5h-2.4l-.3-1.5a7.8 7.8 0 0 1-1.6-.9l-1.4.5-1.2-2.1 1.1-.9a7 7 0 0 1 0-1.8l-1.1-.9 1.2-2.1 1.4.5a7.8 7.8 0 0 1 1.6-.9l.3-1.5h2.4l.3 1.5a7.8 7.8 0 0 1 1.6.9l1.4-.5 1.2 2.1-1.1.9a7 7 0 0 1 0 1.8Z" transform="translate(-1 -1)"/></svg><span>设置</span>
@@ -500,7 +530,7 @@
       <section class="panel chat-panel" aria-label="Agent 聊天">
         <div class="messages empty-state" id="messages" aria-live="polite" aria-relevant="additions text">
           <div class="welcome" id="welcome">
-            <img class="welcome-mark" src="/assets/automation-agent-logo.png" alt="" aria-hidden="true">
+            <img class="welcome-mark" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true">
             <div class="welcome-copy">
               <h2>你好，我是你的 AI 助手 <span aria-hidden="true">✦</span></h2>
               <p>有什么任务交给我？我可以帮你处理本地文件、整理数据和生成通知。</p>
@@ -591,6 +621,25 @@
     </section>
   </dialog>
 
+  <dialog class="history-dialog" id="historyDialog" aria-labelledby="historyTitle">
+    <section class="history-panel">
+      <header class="history-panel-head">
+        <div>
+          <h2 id="historyTitle">运行历史</h2>
+          <p>按时间查看任务状态与结果。恢复会话只加载已保存的对话，不会重新发送任务。</p>
+        </div>
+        <div class="history-head-actions">
+          <button class="history-refresh" id="refreshHistoryButton" type="button">刷新</button>
+          <button class="history-clear" id="clearHistoryButton" type="button">清空运行记录</button>
+          <button class="history-close" id="closeHistoryButton" type="button" aria-label="关闭运行历史">×</button>
+        </div>
+      </header>
+      <div class="history-status" id="historyStatus" role="status" aria-live="polite">正在加载运行记录…</div>
+      <div class="history-list" id="historyList"></div>
+      <button class="history-load-more" id="historyLoadMoreButton" type="button" hidden>加载更早记录</button>
+    </section>
+  </dialog>
+
   <script>
     const $ = (selector) => document.querySelector(selector);
     const form = $("#chatForm");
@@ -608,6 +657,13 @@
     const newChatButton = $("#newChatButton");
     const sidebarSettingsButton = $("#sidebarSettingsButton");
     const settingsDialog = $("#settingsDialog");
+    const historyDialog = $("#historyDialog");
+    const historyList = $("#historyList");
+    const historyStatus = $("#historyStatus");
+    const refreshHistoryButton = $("#refreshHistoryButton");
+    const clearHistoryButton = $("#clearHistoryButton");
+    const closeHistoryButton = $("#closeHistoryButton");
+    const historyLoadMoreButton = $("#historyLoadMoreButton");
     const closeSettingsDialogButton = $("#closeSettingsDialog");
     const openModelSettingsButton = $("#openModelSettingsButton");
     const openServiceSettingsButton = $("#openServiceSettingsButton");
@@ -627,6 +683,7 @@
     const recentTaskList = $("#recentTaskList");
     let socket = null;
     let connectPromise = null;
+    let serviceOrigin = window.location.origin;
     let activeRunId = null;
     let threadId = null;
     let currentAssistantBubble = null;
@@ -635,6 +692,26 @@
     const toolCards = new Map();
     const pendingApprovals = new Map();
     let currentWorkingDirectory = "";
+    let historyOffset = 0;
+    let historyHasMore = false;
+    let historyLoading = false;
+
+    function serviceUrl(path) {
+      return new URL(path, `${serviceOrigin}/`).toString();
+    }
+
+    function normalizeServiceOrigin(value) {
+      let url;
+      try { url = new URL(value); }
+      catch { throw new Error("服务地址无效。"); }
+      if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) {
+        throw new Error("服务地址必须指向本机 HTTP 服务。");
+      }
+      if (url.username || url.password || (url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) {
+        throw new Error("服务地址只能包含协议、主机和端口。");
+      }
+      return url.origin;
+    }
 
     function setWorkingDirectory(path) {
       currentWorkingDirectory = typeof path === "string" ? path : "";
@@ -672,9 +749,9 @@
       retryConnectionButton.textContent = state === "error" ? "重试连接" : "连接服务";
       sidebarConnection.dataset.state = state;
       sidebarConnectionText.textContent = label;
-      sidebarConnectionUrl.textContent = window.location.origin;
-      sidebarConnection.title = `${label} · ${window.location.origin}`;
-      sidebarConnection.setAttribute("aria-label", `${label}，${window.location.origin}`);
+      sidebarConnectionUrl.textContent = serviceOrigin;
+      sidebarConnection.title = `${label} · ${serviceOrigin}`;
+      sidebarConnection.setAttribute("aria-label", `${label}，${serviceOrigin}`);
       sidebarRetryButton.hidden = state === "connected" || state === "connecting";
       if (window.parent !== window) {
         window.parent.postMessage({ type: "automation-agent.workbench.connection", state, label }, "*");
@@ -736,6 +813,220 @@
         copy.append(content, status);
         item.append(mark, copy);
         executionTodoList.append(item);
+      }
+    }
+
+    const runStatusLabels = {
+      running: "执行中",
+      succeeded: "已完成",
+      failed: "失败",
+      cancelled: "已取消",
+      interrupted: "已中断",
+    };
+
+    function formatRunDate(value) {
+      if (!value) return "时间未知";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "时间未知";
+      return new Intl.DateTimeFormat("zh-CN", {
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit",
+      }).format(date);
+    }
+
+    function formatRunDuration(duration) {
+      if (!Number.isFinite(duration)) return "耗时未知";
+      return duration < 1000 ? `${duration} ms` : `${(duration / 1000).toFixed(1)} 秒`;
+    }
+
+    async function apiError(response, fallback) {
+      let body = {};
+      try { body = await response.json(); } catch {}
+      return new Error(body.detail || fallback);
+    }
+
+    function renderHistoryRun(run) {
+      const item = document.createElement("article");
+      item.className = "history-item";
+
+      const header = document.createElement("div");
+      header.className = "history-item-head";
+      const titleGroup = document.createElement("div");
+      titleGroup.style.minWidth = "0";
+      const title = document.createElement("div");
+      title.className = "history-item-title";
+      title.textContent = run.task_name || "未命名任务";
+      const meta = document.createElement("div");
+      meta.className = "history-item-meta";
+      meta.textContent = `${formatRunDate(run.started_at)} · ${formatRunDuration(run.duration_ms)} · ${run.trigger || "未知来源"}`;
+      titleGroup.append(title, meta);
+      const status = document.createElement("span");
+      status.className = "history-status-badge";
+      status.dataset.state = run.status || "";
+      status.textContent = runStatusLabels[run.status] || run.status || "状态未知";
+      header.append(titleGroup, status);
+
+      const instruction = document.createElement("div");
+      instruction.className = "history-instruction";
+      instruction.textContent = run.instruction || "（没有任务指令）";
+
+      item.append(header, instruction);
+      const recordedText = run.output || run.error;
+      if (recordedText) {
+        const output = document.createElement("details");
+        output.className = "history-output";
+        const summary = document.createElement("summary");
+        summary.textContent = run.error ? "查看错误信息" : "查看运行输出";
+        const content = document.createElement("pre");
+        content.textContent = recordedText;
+        output.append(summary, content);
+        item.append(output);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "history-item-actions";
+      const restore = document.createElement("button");
+      restore.type = "button";
+      restore.className = "history-action";
+      restore.textContent = "查看并恢复会话";
+      restore.disabled = Boolean(activeRunId) || run.status === "running";
+      if (run.status === "running") restore.title = "任务仍在运行；刷新历史状态后再恢复会话";
+      restore.addEventListener("click", () => recoverThread(run));
+
+      const deleteRun = document.createElement("button");
+      deleteRun.type = "button";
+      deleteRun.className = "history-action danger";
+      deleteRun.textContent = "删除此记录";
+      deleteRun.addEventListener("click", async () => {
+        if (!window.confirm("删除这条运行记录？会话记忆会保留。")) return;
+        try {
+          const response = await fetch(serviceUrl(`/runs/${encodeURIComponent(run.run_id)}`), { method: "DELETE" });
+          if (!response.ok) throw await apiError(response, "删除运行记录失败");
+          await loadRunHistory(true);
+        } catch (error) {
+          historyStatus.textContent = error.message;
+        }
+      });
+
+      const deleteThread = document.createElement("button");
+      deleteThread.type = "button";
+      deleteThread.className = "history-action danger";
+      deleteThread.textContent = "删除整个会话";
+      deleteThread.addEventListener("click", async () => {
+        if (!window.confirm("删除整个会话会清除该会话的 Checkpointer 记忆和所有关联运行记录，且无法恢复。继续吗？")) return;
+        try {
+          const response = await fetch(serviceUrl(`/threads?thread_id=${encodeURIComponent(run.thread_id)}`), { method: "DELETE" });
+          if (!response.ok) throw await apiError(response, "删除会话失败");
+          if (threadId === run.thread_id) newChatButton.click();
+          await loadRunHistory(true);
+        } catch (error) {
+          historyStatus.textContent = error.message;
+        }
+      });
+      actions.append(restore, deleteRun, deleteThread);
+      item.append(actions);
+      return item;
+    }
+
+    async function loadRunHistory(reset = false) {
+      if (historyLoading) return;
+      if (reset) {
+        historyOffset = 0;
+        historyHasMore = false;
+        historyList.replaceChildren();
+      }
+      historyLoading = true;
+      historyLoadMoreButton.disabled = true;
+      refreshHistoryButton.disabled = true;
+      clearHistoryButton.disabled = true;
+      historyStatus.textContent = historyOffset ? `已加载 ${historyOffset} 条记录，正在读取更多…` : "正在加载运行记录…";
+      try {
+        const response = await fetch(serviceUrl(`/runs?limit=50&offset=${historyOffset}`));
+        if (!response.ok) throw await apiError(response, "读取运行记录失败");
+        const runs = await response.json();
+        if (!Array.isArray(runs)) throw new Error("运行记录格式无效");
+        for (const run of runs) historyList.append(renderHistoryRun(run));
+        historyOffset += runs.length;
+        historyHasMore = runs.length === 50;
+        clearHistoryButton.disabled = historyOffset === 0;
+        historyLoadMoreButton.hidden = !historyHasMore;
+        if (historyOffset === 0) {
+          const empty = document.createElement("div");
+          empty.className = "history-empty";
+          empty.textContent = "还没有运行记录。提交任务后，历史会显示在这里。";
+          historyList.append(empty);
+          historyStatus.textContent = "暂无运行记录";
+        } else {
+          historyStatus.textContent = `已加载 ${historyOffset} 条记录${historyHasMore ? "，可继续向前翻阅" : ""}`;
+        }
+      } catch (error) {
+        historyStatus.textContent = error.message;
+      } finally {
+        historyLoading = false;
+        historyLoadMoreButton.disabled = false;
+        refreshHistoryButton.disabled = false;
+        clearHistoryButton.disabled = historyOffset === 0;
+      }
+    }
+
+    async function recoverThread(run) {
+      if (activeRunId) return;
+      try {
+        const response = await fetch(serviceUrl(`/threads/messages?thread_id=${encodeURIComponent(run.thread_id)}`));
+        if (!response.ok) throw await apiError(response, "读取会话内容失败");
+        const snapshot = await response.json();
+        threadId = snapshot.thread_id || run.thread_id;
+        activeRunId = null;
+        currentTask = null;
+        currentAssistantBubble = null;
+        toolCards.clear();
+        closePendingApprovals("expired", "历史会话已恢复；旧授权不能继续使用。");
+        renderExecutionTodos([]);
+        executionTodoSummary.textContent = "未创建";
+        executionTodoEmpty.textContent = "复杂任务拆解后，步骤会显示在这里。";
+        messages.replaceChildren();
+        messages.classList.remove("empty-state");
+
+        const historyMessages = Array.isArray(snapshot.messages) ? snapshot.messages : [];
+        for (const message of historyMessages) {
+          if (message.role === "user") addMessage("user", "你", message.content || "");
+          else addMessage("assistant", message.role === "tool" ? `工具 · ${message.name || "调用"}` : "Agent", message.content || "");
+        }
+        if (!historyMessages.length) {
+          addMessage("user", "你", run.instruction || "（没有任务指令）");
+          if (run.output) addMessage("assistant", "Agent", run.output);
+          else if (run.error) addNotice(`该次运行未完成：${run.error}`, true);
+          addNotice("没有找到保存的对话消息；显示的是运行记录快照。后续消息不会重发这次任务。");
+        }
+        if (snapshot.truncated) addNotice("会话较长，当前只显示最近 500 条消息；继续对话仍沿用完整会话记忆。");
+        if (run.status === "interrupted") addNotice("这次运行在服务重启时中断；当前展示的是已保存内容。", true);
+        if (run.status === "running") addNotice("历史记录仍标记为执行中；恢复会话不会重新启动任务。", true);
+
+        setBusy(false);
+        setTaskState("idle", "已恢复历史会话，可以继续发送消息。未自动重发任何任务。");
+        document.querySelectorAll(".nav-item").forEach((button) => {
+          const active = button.dataset.navTarget === "chat";
+          button.classList.toggle("active", active);
+          if (active) button.setAttribute("aria-current", "page");
+          else button.removeAttribute("aria-current");
+        });
+        historyDialog.close();
+        document.querySelector("main.chat-app").dataset.railOpen = "false";
+        input.focus();
+      } catch (error) {
+        historyStatus.textContent = error.message;
+      }
+    }
+
+    async function clearRunHistory() {
+      if (historyLoading) return;
+      if (!window.confirm("清空全部运行记录？保存的会话记忆会保留；如需删除会话记忆，请对相应会话使用“删除整个会话”。")) return;
+      try {
+        const response = await fetch(serviceUrl("/runs"), { method: "DELETE" });
+        if (!response.ok) throw await apiError(response, "清空运行记录失败");
+        await loadRunHistory(true);
+      } catch (error) {
+        historyStatus.textContent = error.message;
       }
     }
 
@@ -812,7 +1103,7 @@
         avatar.textContent = "你";
       } else {
         const logo = document.createElement("img");
-        logo.src = "/assets/automation-agent-logo.png";
+        logo.src = "./assets/automation-agent-logo.png";
         logo.alt = "";
         avatar.append(logo);
       }
@@ -1103,9 +1394,9 @@
       if (socket && socket.readyState === WebSocket.OPEN) return Promise.resolve(socket);
       if (connectPromise) return connectPromise;
       setConnection("connecting", "正在连接");
-      const url = new URL("/ws", window.location.href);
-      url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      connectionHost.textContent = window.location.host;
+      const url = new URL("/ws", `${serviceOrigin}/`);
+      url.protocol = new URL(serviceOrigin).protocol === "https:" ? "wss:" : "ws:";
+      connectionHost.textContent = new URL(serviceOrigin).host;
       const currentSocket = new WebSocket(url);
       socket = currentSocket;
       let failed = false;
@@ -1211,7 +1502,7 @@
       executionTodoSummary.textContent = "未创建";
       executionTodoEmpty.textContent = "复杂任务拆解后，步骤会显示在这里。";
       pendingApprovals.clear();
-      messages.innerHTML = `<div class="welcome" id="welcome"><img class="welcome-mark" src="/assets/automation-agent-logo.png" alt="" aria-hidden="true"><div class="welcome-copy"><h2>你好，我是你的 AI 助手 <span aria-hidden="true">✦</span></h2><p>有什么任务交给我？我可以帮你处理本地文件、整理数据和生成通知。</p><div class="suggestions"><button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。"><span aria-hidden="true">▤</span> 列出数据目录</button><button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。"><span aria-hidden="true">▧</span> 读取报告内容</button></div></div></div>`;
+      messages.innerHTML = `<div class="welcome" id="welcome"><img class="welcome-mark" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true"><div class="welcome-copy"><h2>你好，我是你的 AI 助手 <span aria-hidden="true">✦</span></h2><p>有什么任务交给我？我可以帮你处理本地文件、整理数据和生成通知。</p><div class="suggestions"><button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。"><span aria-hidden="true">▤</span> 列出数据目录</button><button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。"><span aria-hidden="true">▧</span> 读取报告内容</button></div></div></div>`;
       messages.classList.add("empty-state");
       setBusy(false);
       setTaskState("idle", "随时待命，开始你的任务吧。");
@@ -1240,9 +1531,32 @@
           input.focus();
           return;
         }
+        if (targetId === "history") {
+          historyDialog.showModal();
+          loadRunHistory(true);
+          return;
+        }
         const compactLayout = window.matchMedia("(max-width: 860px)").matches;
         if (compactLayout) document.querySelector("main.chat-app").dataset.railOpen = "true";
         document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    });
+
+    closeHistoryButton.addEventListener("click", () => historyDialog.close());
+    refreshHistoryButton.addEventListener("click", () => loadRunHistory(true));
+    historyLoadMoreButton.addEventListener("click", () => {
+      if (historyHasMore) loadRunHistory(false);
+    });
+    clearHistoryButton.addEventListener("click", clearRunHistory);
+    historyDialog.addEventListener("close", () => {
+      document.querySelectorAll(".nav-item").forEach((item) => {
+        if (item.dataset.navTarget === "history") {
+          item.classList.remove("active");
+          item.removeAttribute("aria-current");
+        } else if (item.dataset.navTarget === "chat") {
+          item.classList.add("active");
+          item.setAttribute("aria-current", "page");
+        }
       });
     });
 
@@ -1307,8 +1621,8 @@
       if (event.key === "Escape" && activeRunId) cancelButton.click();
     });
 
-    connectionHost.textContent = window.location.host;
-    sidebarConnectionUrl.textContent = window.location.origin;
+    connectionHost.textContent = new URL(serviceOrigin).host;
+    sidebarConnectionUrl.textContent = serviceOrigin;
 
     if (window.parent !== window) {
       window.addEventListener("message", (event) => {
@@ -1319,6 +1633,33 @@
         }
         if (event.data?.type !== "automation-agent.reconnect") return;
         const requestId = event.data.request_id;
+        let nextOrigin;
+        try {
+          nextOrigin = normalizeServiceOrigin(event.data.service_url || serviceOrigin);
+        } catch (error) {
+          window.parent.postMessage({ type: "automation-agent.connection", request_id: requestId, connected: false, error: error.message }, "*");
+          return;
+        }
+        if (nextOrigin !== serviceOrigin) {
+          const previousWasService = serviceOrigin && ["http:", "https:"].includes(new URL(serviceOrigin).protocol);
+          if (socket && socket.readyState < WebSocket.CLOSING) {
+            const previousSocket = socket;
+            socket = null;
+            connectPromise = null;
+            previousSocket.close();
+          }
+          if (previousWasService) {
+            if (activeRunId) {
+              closePendingApprovals("cancelled", "服务地址已切换；旧服务上的任务不会自动重发。");
+              activeRunId = null;
+              setBusy(false);
+            }
+            newChatButton.click();
+            addNotice("服务地址已切换；已开始一个新会话，不会重发旧任务。");
+          }
+          serviceOrigin = nextOrigin;
+          connectionHost.textContent = new URL(serviceOrigin).host;
+        }
         connect().then(() => {
           window.parent.postMessage({ type: "automation-agent.connection", request_id: requestId, connected: true }, "*");
         }).catch((error) => {
@@ -1326,6 +1667,8 @@
         });
       });
       window.parent.postMessage({ type: "automation-agent.workbench.ready" }, "*");
+    } else {
+      connectionHost.textContent = window.location.host;
     }
   </script>
 </body>

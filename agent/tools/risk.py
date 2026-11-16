@@ -76,7 +76,7 @@ def decide_tool_permission(
 
     `allow_write` 是旧入口使用的整轮授权开关。为了兼容 Python API、
     定时任务和旧版 WebSocket 客户端，显式设为 True 时仍放行工具；
-    当前浏览器工作台不发送这个开关，而是通过 `approval_handler` 对有副作用的
+    当前桌面工作台不发送这个开关，而是通过 `approval_handler` 对有副作用的
     工具逐次确认。未分类工具在没有整轮显式授权时始终拒绝。
     """
     # 旧入口显式授权整轮写操作时，保持原有行为。
