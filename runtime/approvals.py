@@ -139,7 +139,7 @@ class ApprovalBroker:
                 # 短间隔轮询取消标志，保证取消无需等满整个授权超时。
                 if pending.decided.wait(min(0.1, remaining)):
                     # 只有显式 True 才算批准；拒绝或未设置都不能放行工具。
-                    return pending.approved is True
+                    return pending.approved is True and not self.cancel_event.is_set()
             return False
         finally:
             # 所有完成路径都清理请求，未知或过期 call_id 后续无法再次应答。
@@ -151,6 +151,8 @@ class ApprovalBroker:
         if type(approved) is not bool:
             return False
         with self._lock:
+            if self.cancel_event.is_set():
+                return False
             # 只接受当前仍在等待的请求；过期、未知和重复应答都不改变状态。
             pending = self._pending.get(call_id)
             if pending is None or pending.decided.is_set():

@@ -34,15 +34,19 @@ import uuid
 # asynccontextmanager：把生成器包装成异步上下文管理器，
 # 用于定义 FastAPI 的 lifespan。
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from secrets import compare_digest
+from typing import Annotated, Literal
 
 # FastAPI：Web 框架。
 # WebSocket / WebSocketDisconnect：桌面版的事件流端点。
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
 # BaseModel / Field：Pydantic 模型与字段声明，
 # FastAPI 用它做请求体校验和 OpenAPI 文档。
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from apscheduler.triggers.cron import CronTrigger
 
 # RUNTIME：应用运行配置，这里取调度开关和通知渠道。
@@ -55,10 +59,11 @@ from agent.context import AgentContext
 from .runner import get_agent
 
 # BaseEvent / RunError / RunStart：事件模型。
-from .events import BaseEvent, RunError, RunStart, THINK_RE
+from .events import BaseEvent, RunError, RunStart, RunProgress, THINK_RE
 
 # RunBusyError / RunManager：run 的生命周期管理。
 from .runs import RunBusyError, RunManager
+from .concurrency import THREAD_RUNS
 
 # list_jobs / start_scheduler / stop_scheduler：调度器接口。
 from .scheduler import list_jobs, start_scheduler, stop_scheduler
@@ -68,6 +73,22 @@ from .storage import get_runtime_store
 from .tasks import ScheduledTask, add_task, all_tasks, configure_persistence, remove_task
 
 logger = logging.getLogger(__name__)
+
+# 仅托管 sidecar 使用这组 WebView 来源和版本协议。
+DESKTOP_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "https://tauri.localhost")
+DESKTOP_WS_PROTOCOL = "automation-agent.v1"
+
+
+@dataclass(frozen=True, repr=False)
+class DesktopAccess:
+    """保存单次 sidecar 启动的访问凭证和健康检查标记。"""
+
+    token: str
+    readiness: str
+
+    def accepts(self, candidate: str) -> bool:
+        """以恒定时间比较凭证，非 ASCII 输入直接拒绝。"""
+        return candidate.isascii() and compare_digest(candidate, self.token)
 
 
 # ============================================================
@@ -104,7 +125,7 @@ async def lifespan(app: FastAPI):
     configure_persistence(store)
     app.state.runtime_store = store
 
-    if RUNTIME.scheduler_enabled:
+    if RUNTIME.scheduler_enabled and app.state.desktop_access is None:
         start_scheduler()
         logger.info("定时任务已启动")
 
@@ -113,6 +134,8 @@ async def lifespan(app: FastAPI):
     app.state.run_manager = RunManager()
 
     yield
+    for handle in app.state.run_manager.active():
+        app.state.run_manager.cancel(handle.run_id, disconnect=True)
     stop_scheduler()
 
 
@@ -122,10 +145,34 @@ async def lifespan(app: FastAPI):
 # 这是 FastAPI 0.135+ 推荐的写法，
 # 不要再用 @app.on_event("startup") / @app.on_event("shutdown")。
 app = FastAPI(title="Automation Agent", version="0.1.0", lifespan=lifespan)
+app.state.desktop_access = None
+
+
+@app.middleware("http")
+async def authorize_desktop_http(request: Request, call_next):
+    """保护托管服务的 HTTP 接口，健康检查仅提供启动状态。"""
+    access = request.app.state.desktop_access
+    if access is None or (request.method == "GET" and request.url.path == "/health"):
+        return await call_next(request)
+
+    header = request.headers.get("authorization", "")
+    scheme, _, credential = header.partition(" ")
+    if scheme.lower() != "bearer" or not access.accepts(credential):
+        return JSONResponse(
+            {"detail": "需要桌面服务凭证"},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+        )
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+# CORS 放在凭证校验外层，使 WebView 的预检和 401 响应都能正常返回。
 app.add_middleware(
     CORSMiddleware,
     # Tauri 本地 WebView 用应用源直接访问 loopback HTTP API；普通浏览器工作台已迁入桌面包。
-    allow_origins=["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"],
+    allow_origins=DESKTOP_ORIGINS,
     allow_methods=["GET", "DELETE"],
     allow_headers=["*"],
 )
@@ -164,7 +211,7 @@ class ScheduledTaskRequest(BaseModel):
 # ============================================================
 
 @app.get("/health")
-def health() -> dict:
+def health(request: Request) -> dict:
     """
     健康检查。
 
@@ -177,6 +224,9 @@ def health() -> dict:
     不是「调度器此刻是否真的在跑」。
     两者在服务启动失败时可能不一致。
     """
+    access = request.app.state.desktop_access
+    if access is not None:
+        return {"status": "ok", "scheduler": False, "readiness": access.readiness}
     return {"status": "ok", "scheduler": RUNTIME.scheduler_enabled}
 
 
@@ -414,12 +464,18 @@ def delete_thread(
     thread_id: str = Query(..., min_length=1, max_length=256),
 ) -> dict:
     """删除会话检查点以及关联的全部运行记录。"""
-    manager: RunManager = app.state.run_manager
+    try:
+        lease = THREAD_RUNS.claim(thread_id)
+    except RunBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    with lease:
+        return _delete_thread_data(thread_id)
+
+
+def _delete_thread_data(thread_id: str) -> dict:
+    """持有会话占用后再检查并删除，避免检查通过后有新任务进入。"""
     store = app.state.runtime_store
-    if (
-        any(run.thread_id == thread_id for run in manager.active())
-        or store.has_running_run_for_thread(thread_id)
-    ):
+    if store.has_running_run_for_thread(thread_id):
         raise HTTPException(status_code=409, detail="会话仍有运行中的任务，暂时不能删除")
 
     try:
@@ -447,7 +503,7 @@ def delete_thread(
 # ============================================================
 
 @app.post("/tasks")
-def create_task(req: ScheduledTaskRequest) -> dict:
+def create_task(req: ScheduledTaskRequest, request: Request) -> dict:
     """
     动态添加一个定时任务。
 
@@ -460,6 +516,8 @@ def create_task(req: ScheduledTaskRequest) -> dict:
     所以这里直接调用是安全的。
 
     """
+    if request.app.state.desktop_access is not None:
+        raise HTTPException(status_code=403, detail="桌面托管服务未启用定时任务管理")
     try:
         CronTrigger.from_crontab(req.cron, timezone=RUNTIME.timezone)
     except (TypeError, ValueError) as exc:
@@ -479,7 +537,7 @@ def create_task(req: ScheduledTaskRequest) -> dict:
 
 
 @app.delete("/tasks/{name}")
-def delete_task(name: str) -> dict:
+def delete_task(name: str, request: Request) -> dict:
     """
     删除一个定时任务。
 
@@ -491,6 +549,8 @@ def delete_task(name: str) -> dict:
     同样需要重启调度器才生效，
     这里已经顺手调了 start_scheduler()。
     """
+    if request.app.state.desktop_access is not None:
+        raise HTTPException(status_code=403, detail="桌面托管服务未启用定时任务管理")
     removed = remove_task(name)
     start_scheduler()
     return {"removed": name, "ok": removed}
@@ -507,6 +567,38 @@ def delete_task(name: str) -> dict:
 WS_QUEUE_SIZE = 256
 
 
+class WSCommand(BaseModel):
+    """WebSocket 命令使用严格类型，拒绝未声明字段。"""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class StartCommand(WSCommand):
+    type: Literal["run.start"]
+    instruction: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50_000)]
+    task_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)] | None = None
+    thread_id: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
+    allow_write: bool = False
+
+
+class CancelCommand(WSCommand):
+    type: Literal["cancel"]
+
+
+class ApprovalCommand(WSCommand):
+    type: Literal["approval.respond"]
+    run_id: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    call_id: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    approved: bool
+
+
+WS_COMMAND_TYPES = {
+    "run.start": StartCommand,
+    "cancel": CancelCommand,
+    "approval.respond": ApprovalCommand,
+}
+
+
 @app.websocket("/ws")
 async def websocket_events(websocket: WebSocket) -> None:
     """桌面版的事件流端点。
@@ -520,8 +612,8 @@ async def websocket_events(websocket: WebSocket) -> None:
     {"type": "approval.respond", "run_id": "...", "call_id": "...", "approved": true}
     ```
 
-    桌面工作台不传 `allow_write`，有副作用的工具会逐次请求批准。
-    为兼容旧客户端，显式传 `allow_write: true` 仍代表整轮授权。
+    桌面托管模式验证握手凭证，并要求有副作用的工具逐次请求批准。
+    独立服务保留布尔值 `allow_write: true` 的旧客户端兼容。
 
     **服务端 → 客户端**：一条一个 JSON 事件。
     `run.start` / `model.text` / `tool.start` / `tool.end` / `tool.error` /
@@ -538,7 +630,23 @@ async def websocket_events(websocket: WebSocket) -> None:
     3. **连接断开要清理** —— 断开时取消这个连接上的所有 run，
        否则消费线程会一直跑下去。
     """
-    await websocket.accept()
+    access = websocket.app.state.desktop_access
+    if access is not None:
+        origin = websocket.headers.get("origin")
+        protocols = websocket.scope.get("subprotocols", [])
+        credential = next(
+            (protocol.removeprefix("bearer.") for protocol in protocols if protocol.startswith("bearer.")),
+            "",
+        )
+        if (
+            (origin is not None and origin not in DESKTOP_ORIGINS)
+            or DESKTOP_WS_PROTOCOL not in protocols
+            or not access.accepts(credential)
+        ):
+            await websocket.close(code=1008)
+            return
+    # 只回传业务协议名，避免把凭证写回响应头。
+    await websocket.accept(subprotocol=DESKTOP_WS_PROTOCOL if access is not None else None)
 
     manager: RunManager = websocket.app.state.run_manager
     conn_id = uuid.uuid4().hex[:8]
@@ -554,28 +662,34 @@ async def websocket_events(websocket: WebSocket) -> None:
 
     try:
         while True:
-            raw = await websocket.receive_text()
+            frame = await websocket.receive()
+            if frame["type"] == "websocket.disconnect":
+                raise WebSocketDisconnect(frame["code"])
+            raw = frame.get("text")
+            if raw is None or len(raw) > 262_144:
+                await queue.put(RunError(run_id="", message="命令必须是长度受限的 JSON 文本", recoverable=True))
+                continue
             try:
                 payload = json.loads(raw)
             except json.JSONDecodeError:
-                await queue.put(RunError(run_id="", message="消息不是合法 JSON"))
+                await queue.put(RunError(run_id="", message="消息不是合法 JSON", recoverable=True))
                 continue
             if not isinstance(payload, dict):
-                await queue.put(RunError(run_id="", message="消息必须是 JSON 对象"))
+                await queue.put(RunError(run_id="", message="消息必须是 JSON 对象", recoverable=True))
                 continue
             await _handle_ws_command(
                 manager=manager,
                 queue=queue,
                 conn_id=conn_id,
                 payload=payload,
+                managed=access is not None,
             )
     except WebSocketDisconnect:
         logger.info("WebSocket 断开：%s", conn_id)
     finally:
         # 断开：取消这个连接上的所有 run。
         # 不取消的话，消费线程会一直跑到 agent 结束。
-        for handle in manager.active_for(conn_id):
-            manager.cancel(handle.run_id)
+        manager.disconnect(conn_id)
         pump_task.cancel()
 
 
@@ -585,6 +699,7 @@ async def _handle_ws_command(
     queue: asyncio.Queue,
     conn_id: str,
     payload: dict,
+    managed: bool,
 ) -> None:
     """处理一条客户端命令。
 
@@ -592,29 +707,38 @@ async def _handle_ws_command(
     产生的消息都进 queue，由唯一的推送任务发出去 ——
     端点自己不直接 send。
     """
-    command = payload.get("type")
+    kind = payload.get("type")
+    # 同连接重复启动只拒绝新命令，不能让界面把仍运行中的旧任务当作失败。
+    if kind == "run.start" and manager.active_for(conn_id):
+        await queue.put(RunError(run_id="", message="上一轮还在运行", recoverable=True))
+        return
+    model = WS_COMMAND_TYPES.get(kind) if isinstance(kind, str) else None
+    if model is None:
+        await queue.put(RunError(run_id="", message="未知命令", recoverable=True))
+        return
+    try:
+        command = model.model_validate(payload)
+    except ValidationError as exc:
+        # 不回显客户端输入，错误中只列出已知字段名。
+        fields = sorted({
+            error["loc"][0] for error in exc.errors(include_input=False)
+            if error["loc"] and error["loc"][0] in model.model_fields
+        })
+        invalid = "、".join(fields) or "存在未知字段"
+        await queue.put(RunError(run_id="", message=f"{kind} 命令无效：{invalid}", recoverable=kind != "run.start"))
+        return
 
-    if command == "run.start":
-        await _handle_run_start(manager=manager, queue=queue, conn_id=conn_id, payload=payload)
-    elif command == "cancel":
+    if isinstance(command, StartCommand):
+        if managed and command.allow_write:
+            await queue.put(RunError(run_id="", message="桌面模式不支持整轮授权，请逐次审批"))
+            return
+        await _handle_run_start(manager=manager, queue=queue, conn_id=conn_id, command=command)
+    elif isinstance(command, CancelCommand):
         await _handle_ws_cancel(manager=manager, queue=queue, conn_id=conn_id)
-    elif command == "approval.respond":
-        await _handle_approval_respond(manager=manager, queue=queue, conn_id=conn_id, payload=payload)
-    else:
-        await queue.put(RunError(run_id="", message=f"未知命令：{command}"))
-
-
-async def _handle_approval_respond(*, manager: RunManager, queue: asyncio.Queue, conn_id: str, payload: dict) -> None:
-    """校验授权应答，并确保只有发起 run 的连接能完成对应请求。"""
-    run_id, call_id, approved = payload.get("run_id"), payload.get("call_id"), payload.get("approved")
-    valid_run_id = run_id if isinstance(run_id, str) else ""
-    if not isinstance(run_id, str) or not run_id or not isinstance(call_id, str) or not call_id or type(approved) is not bool:
-        await queue.put(RunError(run_id=valid_run_id, message="approval.respond 需要非空 run_id、非空 call_id 和布尔值 approved", recoverable=True))
-        return
-    if not manager.respond_approval(run_id, conn_id, call_id, approved):
-        await queue.put(RunError(run_id=run_id, message="授权请求不存在、已处理或不属于当前连接", recoverable=True))
-        return
-    # 应答确认属于协议控制消息，不另发事件；工具后续会产生 tool.start / tool.error。
+    elif isinstance(command, ApprovalCommand):
+        # 只有发起 run 的连接可以应答。成功通过后由工具事件报告执行结果。
+        if not manager.respond_approval(command.run_id, conn_id, command.call_id, command.approved):
+            await queue.put(RunError(run_id=command.run_id, message="授权请求不存在、已处理或不属于当前连接", recoverable=True))
 
 
 async def _handle_run_start(
@@ -622,23 +746,16 @@ async def _handle_run_start(
     manager: RunManager,
     queue: asyncio.Queue,
     conn_id: str,
-    payload: dict,
+    command: StartCommand,
 ) -> None:
     """启动一次执行。"""
-    instruction = str(payload.get("instruction", "")).strip()
-    if not instruction:
-        await queue.put(RunError(run_id="", message="缺少 instruction"))
-        return
-
-    task_name = str(payload.get("task_name") or instruction[:30])
-    thread_id = payload.get("thread_id") or None
-    # 写权限默认关闭 —— 只读是默认态，要写必须显式开。
-    allow_write = bool(payload.get("allow_write", False))
+    instruction = command.instruction
+    task_name = command.task_name or instruction[:30]
 
     # Agent 在首次调用时才惰性初始化。配置缺失（例如桌面版尚未填 API Key）
     # 必须转换成协议错误；否则异常会逃出 WebSocket handler，连接关闭后 UI 会一直显示运行中。
     try:
-        agent = get_agent()
+        agent = await asyncio.to_thread(get_agent)
     except Exception as exc:
         logger.error("Agent 初始化失败（%s）；请检查模型配置和 API Key。", type(exc).__name__)
         await queue.put(RunError(
@@ -651,7 +768,7 @@ async def _handle_run_start(
         task_name=task_name,
         # WebSocket 是 HTTP 层触发的，用 api。
         trigger="api",
-        allow_write=allow_write,
+        allow_write=command.allow_write,
         notify_channel=RUNTIME.notify_channel,
     )
 
@@ -660,7 +777,7 @@ async def _handle_run_start(
             owner=conn_id,
             instruction=instruction,
             task_name=task_name,
-            thread_id=thread_id,
+            thread_id=command.thread_id,
             agent=agent,
             queue=queue,
             loop=asyncio.get_running_loop(),
@@ -677,9 +794,9 @@ async def _handle_run_start(
                 app.state.runtime_store, event
             ),
         )
-    except RunBusyError:
+    except RunBusyError as exc:
         # 上一轮还在运行 —— 拒绝，不静默取消旧的。
-        await queue.put(RunError(run_id="", message="上一轮还在运行"))
+        await queue.put(RunError(run_id="", message=str(exc)))
         return
     except Exception:
         logger.exception("无法登记 Agent 运行记录")
@@ -738,4 +855,9 @@ async def _handle_ws_cancel(
     if not active:
         await queue.put(RunError(run_id="", message="没有正在运行的任务"))
         return
+    # 先确认取消请求，再置标志；消费者的终态不会排到确认消息前面。
+    await queue.put(RunProgress(
+        run_id=active[0].run_id,
+        note="已请求取消，正在等待当前调用退出；已完成的操作不会回滚。",
+    ))
     manager.cancel(active[0].run_id)

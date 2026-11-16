@@ -226,6 +226,8 @@
     modelToggle.hidden = true;
     settingsToggle.hidden = true;
     let currentOrigin = null;
+    // 托管凭证只在内存中保存，并且只交给对应地址的工作台。
+    let managedRuntime = null;
     let currentWorkingDirectory = "";
     let frameLoaded = false;
     let attemptId = 0;
@@ -305,6 +307,7 @@
         type: "automation-agent.reconnect",
         request_id: id,
         service_url: currentOrigin,
+        access_token: currentOrigin === managedRuntime?.origin ? managedRuntime.token : null,
       }, window.location.origin);
       frameTimer = setTimeout(() => {
         if (id === attemptId) {
@@ -316,7 +319,7 @@
       }, 8000);
     }
 
-    function connectToService(rawAddress) {
+    function connectToService(rawAddress, { managed = false } = {}) {
       const id = ++attemptId;
       let origin;
       try { origin = normalizeAddress(rawAddress); }
@@ -335,7 +338,7 @@
       if (frameLoaded && currentOrigin === origin) {
         requestWorkbenchReconnect(id);
       } else {
-        if (frameLoaded && currentOrigin !== origin) {
+        if (frameLoaded && currentOrigin !== origin && !managed) {
           const switchConfirmed = window.confirm("切换服务会断开当前工作台连接，可能取消正在执行的任务。是否继续？");
           if (!switchConfirmed || id !== attemptId) {
             connectButton.disabled = false;
@@ -347,8 +350,10 @@
         }
 
         currentOrigin = origin;
-        try { localStorage.setItem(STORAGE_KEY, origin); }
-        catch { /* 地址仍可在本次运行中使用；无法保存时下次启动恢复默认值。 */ }
+        if (!managed) {
+          try { localStorage.setItem(STORAGE_KEY, origin); }
+          catch { /* 地址仍可在本次运行中使用；无法保存时下次启动恢复默认值。 */ }
+        }
         setStatus("", "正在载入桌面内置工作台…");
         workspace.dataset.mode = "loading";
         frameLoaded = false;
@@ -472,6 +477,7 @@
     });
 
     async function waitForManagedRuntime() {
+      managedRuntime = null;
       const deadline = Date.now() + 95000;
       while (Date.now() < deadline) {
         const info = await nativeInvoke("runtime_info");
@@ -479,12 +485,13 @@
         runtimeDetails.textContent = `配置文件：${info.configPath}\n启动日志：${info.logPath}`;
         if (info.workingDirectory) setWorkingDirectory(info.workingDirectory);
         if (info.status === "ready") {
+          rememberManagedRuntime(info);
           restartRuntimeButton.hidden = true;
           runtimeActions.hidden = false;
           addressInput.value = info.serviceUrl;
           addressInput.disabled = false;
           connectButton.disabled = false;
-          connectToService(info.serviceUrl);
+          connectToService(info.serviceUrl, { managed: true });
           return;
         }
         if (info.status === "failed" || info.status === "stopped") {
@@ -510,6 +517,13 @@
       addressInput.disabled = false;
       connectButton.disabled = false;
       showSettings(true);
+    }
+
+    function rememberManagedRuntime(info) {
+      if (!/^[0-9a-f]{64}$/.test(info.accessToken || "")) {
+        throw new Error("本机服务未提供有效的启动凭证。");
+      }
+      managedRuntime = { origin: normalizeAddress(info.serviceUrl), token: info.accessToken };
     }
 
     async function chooseWorkingDirectory() {
@@ -561,7 +575,9 @@
             connectButton.disabled = false;
             showSettings(true);
           } else if (info.status === "ready" && previousOrigin) {
-            connectToService(previousOrigin);
+            rememberManagedRuntime(info);
+            const wasManaged = previousOrigin === managedRuntime.origin;
+            connectToService(previousOrigin, { managed: wasManaged });
           }
         } catch { /* 保留上方错误状态。 */ }
       }

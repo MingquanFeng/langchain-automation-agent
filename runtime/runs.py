@@ -15,13 +15,13 @@ Run Manager：run 的生命周期管理。
 一个会话（thread）里可以连续跑多个 run，每个 run 有独立的 run_id 和独立的取消标志，
 但共享同一份记忆。这正是桌面 Agent 的常态：用户在同一个对话里连问三件事。
 
-**并发限制：第一版单连接单任务。**
+**并发限制：单连接单任务，同一会话跨入口互斥。**
 每个连接（owner）同时只允许一个活跃 run。收到 run.start 时若已有活跃 run ——
 **拒绝并回一条 `run.error`**（说明「上一轮还在运行」），而不是静默取消旧的。
 理由：静默取消会让用户以为自己看到的是新一轮的结果。
 
-将来要做多任务并发，Run Manager 按 run_id 管理已经能承接，
-届时再去掉 owner 维度的限制、再加「事件按 run_id 路由」。
+同一 thread_id 由进程共享的 ThreadRegistry 保护，覆盖其他连接、同步任务和删除操作。
+取消后仍持有会话占用，直到同步工作线程真正退出；不同会话可并发执行。
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ import time
 
 # uuid：生成 run_id 与一次性 thread_id。
 import uuid
+import weakref
 
 # dataclass：RunHandle 的数据结构。
 from dataclasses import dataclass, field
@@ -51,23 +52,11 @@ from agent.context import AgentContext
 from runtime.consumer import StreamConsumer
 from runtime.approvals import ApprovalBroker
 from runtime.events import BaseEvent
+from runtime.concurrency import THREAD_RUNS, RunBusyError, ThreadLease
 
 
 # ============================================================
-# 1. 异常
-# ============================================================
-
-class RunBusyError(RuntimeError):
-    """同一个 owner 已经有活跃 run 了。
-
-    调用方（阶段 5 的 WebSocket 端点）应该捕获它，
-    然后给客户端回一条 `run.error` 说明「上一轮还在运行」，
-    而不是静默取消旧的 run。
-    """
-
-
-# ============================================================
-# 2. RunHandle
+# 1. RunHandle
 # ============================================================
 
 @dataclass
@@ -95,10 +84,14 @@ class RunHandle:
     started_at: float = 0.0
     task: asyncio.Task | None = None
     approval_broker: ApprovalBroker | None = None
+    consumer: StreamConsumer | None = None
+    lease: ThreadLease | None = None
+    # 只有真实工作线程退出后才允许注销；取消 asyncio 等待器不满足这个条件。
+    worker_finished: threading.Event = field(default_factory=threading.Event)
 
 
 # ============================================================
-# 3. Run Manager
+# 2. Run Manager
 # ============================================================
 
 class RunManager:
@@ -115,6 +108,9 @@ class RunManager:
 
         # 保护 _runs。
         self._lock = threading.Lock()
+        # 已结束的 run 也可能还有等待入队的事件。弱引用不延长消费者生命周期，
+        # 但连接断开时仍能关闭这些残留投递；仅靠 active() 会漏掉它们。
+        self._consumers: dict[str, weakref.WeakSet[StreamConsumer]] = {}
 
     # ---------- 启动 ----------
 
@@ -150,10 +146,10 @@ class RunManager:
             登记好的 RunHandle。
 
         抛出：
-            RunBusyError：同一 owner 已有活跃 run。
+            RunBusyError：同一 owner 或同一 thread_id 已有活跃 run。
 
         注意：
-            任务跑在**工作线程**里（`asyncio.to_thread`）——
+            任务跑在**工作线程**里（`run_in_executor`）——
             消费器是同步的，不能占住事件循环。
         """
         with self._lock:
@@ -164,6 +160,7 @@ class RunManager:
             run_id = f"run-{uuid.uuid4().hex[:8]}"
             # 不指定 thread_id 就用一次性的 —— 跟 runner.run_task() 的规则一致。
             resolved_thread_id = thread_id or f"task-{uuid.uuid4().hex[:8]}"
+            lease = THREAD_RUNS.claim(resolved_thread_id)
 
             handle = RunHandle(
                 run_id=run_id,
@@ -173,6 +170,7 @@ class RunManager:
                 task_name=task_name,
                 cancel_event=threading.Event(),
                 started_at=time.time(),
+                lease=lease,
             )
             self._runs[run_id] = handle
 
@@ -181,6 +179,7 @@ class RunManager:
                 on_started(handle)
             except Exception:
                 # 登记失败时不启动任务，也不能在活跃表中留下孤儿 run。
+                handle.worker_finished.set()
                 self.finish(run_id)
                 raise
 
@@ -198,18 +197,37 @@ class RunManager:
             cancel_event=handle.cancel_event,
         )
         handle.approval_broker = broker
+        handle.consumer = consumer
+        with self._lock:
+            self._consumers.setdefault(owner, weakref.WeakSet()).add(consumer)
         ctx.approval_handler = broker.request
+        ctx.cancel_event = handle.cancel_event
 
-        # to_thread 把同步的消费器放到工作线程里跑。
+        # executor 执行同步消费器；仅工作线程的 finally 能释放会话。
         # 消费器结束时自己会发结束事件（run.end / run.cancelled / run.error），
         # 这里的任务只是等它跑完。
-        task = loop.create_task(
-            asyncio.to_thread(consumer.run, instruction, ctx, resolved_thread_id)
-        )
-        handle.task = task
+        def work() -> None:
+            try:
+                consumer.run(instruction, ctx, resolved_thread_id)
+            finally:
+                handle.worker_finished.set()
+                self.finish(run_id)
 
-        # 跑完自动注销 —— 幂等，重复调用无害。
-        task.add_done_callback(lambda _: self.finish(run_id))
+        async def wait_for_worker(worker) -> None:
+            # 外层 task 的取消不能取消 executor future，更不能提前释放会话占用。
+            await asyncio.shield(worker)
+
+        try:
+            worker = loop.run_in_executor(None, work)
+        except Exception:
+            handle.worker_finished.set()
+            self.finish(run_id)
+            raise
+        task = loop.create_task(wait_for_worker(worker))
+        handle.task = task
+        task.add_done_callback(
+            lambda done: self.cancel(run_id, disconnect=True) if done.cancelled() else None
+        )
 
         return handle
 
@@ -232,21 +250,24 @@ class RunManager:
 
     # ---------- 取消与注销 ----------
 
-    def cancel(self, run_id: str) -> bool:
+    def cancel(self, run_id: str, *, disconnect: bool = False) -> bool:
         """请求取消一次执行。
 
         返回：
             True 表示命中了活跃的 run；False 表示没有这个 run 或它已经结束了。
 
         注意：
-            这是**协作式取消** —— 置位标志后，消费循环在**下一次迭代**时
-            检查到并 break。正在跑的那一步（模型调用或工具执行）**会做完**。
+            这是**协作式取消** —— 流循环和每次模型 / 工具尝试前后都会检查。
+            正在跑的同步调用等待返回或自身超时，已经发生的副作用不会回滚。
             取消信号最终体现为一条 `run.cancelled` 事件。
+            disconnect=True 表示客户端已断开，同时清理队列投递与背压等待。
         """
         handle = self.get(run_id)
         if handle is None:
             return False
         handle.cancel_event.set()
+        if disconnect and handle.consumer is not None:
+            handle.consumer.close()
         if handle.approval_broker is not None:
             handle.approval_broker.cancel_pending()
         return True
@@ -258,9 +279,24 @@ class RunManager:
             return False
         return handle.approval_broker.respond(call_id, approved)
 
-    def finish(self, run_id: str) -> None:
-        """注销一个 run。幂等 —— 重复调用无害。"""
+    def disconnect(self, owner: str) -> None:
+        """关闭连接的所有消费者，包括 run 已结束但事件尚未发完的情况。"""
+        for handle in self.active_for(owner):
+            self.cancel(handle.run_id, disconnect=True)
         with self._lock:
+            consumers = list(self._consumers.pop(owner, ()))
+        for consumer in consumers:
+            consumer.close()
+
+    def finish(self, run_id: str) -> None:
+        """注销已退出的 run；仍执行中的任务不会提前释放会话占用。"""
+        with self._lock:
+            handle = self._runs.get(run_id)
+            if handle is None or not handle.worker_finished.is_set():
+                return
             handle = self._runs.pop(run_id, None)
-        if handle is not None and handle.approval_broker is not None:
+            # 与移除活跃登记处于同一临界区，防止新任务见到半释放状态。
+            if handle.lease is not None:
+                handle.lease.release()
+        if handle.approval_broker is not None:
             handle.approval_broker.cancel_pending()

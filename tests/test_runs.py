@@ -18,7 +18,9 @@ from __future__ import annotations
 
 # 标准库：asyncio / sys / pathlib。
 import asyncio
+import threading
 import sys
+import pytest
 from pathlib import Path
 
 # 把项目根目录与 tests/ 插到 sys.path 最前面。
@@ -120,9 +122,11 @@ def test_two_runs_can_share_a_thread():
         mgr = RunManager()
         agent = _agent(AIMessage(content="一"), AIMessage(content="二"))
         h1, _, _ = await _start(mgr, thread_id="chat", agent=agent)
+        await h1.task
         h2, _, _ = await _start(mgr, owner="conn-2", thread_id="chat", agent=agent)
         assert h1.run_id != h2.run_id
         assert h1.thread_id == h2.thread_id == "chat"
+        await h2.task
 
     asyncio.run(scenario())
 
@@ -204,10 +208,96 @@ def test_finish_is_idempotent():
     async def scenario():
         mgr = RunManager()
         handle, _, _ = await _start(mgr)
+        await handle.task
         mgr.finish(handle.run_id)
         mgr.finish(handle.run_id)
         assert mgr.get(handle.run_id) is None
         assert mgr.active() == []
+
+    asyncio.run(scenario())
+
+
+# ---------- 跨入口会话互斥 ----------
+
+
+def test_same_thread_is_locked_until_actual_worker_exits(monkeypatch, tmp_path):
+    """取消等待器、连接断开都不能让另一个入口抢先写同一会话。"""
+    from runtime import runner
+    from runtime.storage import RuntimeStore
+
+    entered, release = threading.Event(), threading.Event()
+
+    class BlockingAgent:
+        def stream(self, *args, **kwargs):
+            entered.set()
+            assert release.wait(3)
+            yield "values", {"messages": []}
+
+    async def scenario():
+        manager = RunManager()
+        handle, _, _ = await _start(manager, agent=BlockingAgent(), thread_id="locked")
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            handle.task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await handle.task
+            manager.finish(handle.run_id)
+            assert manager.get(handle.run_id) is handle
+            with pytest.raises(RunBusyError):
+                await _start(RunManager(), owner="other", thread_id="locked")
+            store = RuntimeStore(tmp_path / "runtime.sqlite3")
+            monkeypatch.setattr(runner, "get_runtime_store", lambda: store)
+            with pytest.raises(RunBusyError):
+                runner.run_task("同步任务", thread_id="locked")
+            assert store.list_runs() == []
+        finally:
+            release.set()
+            assert await asyncio.to_thread(handle.worker_finished.wait, 2)
+        # 释放之后同一会话可正常复用。
+        next_handle, _, _ = await _start(manager, thread_id="locked")
+        await next_handle.task
+
+    asyncio.run(scenario())
+
+
+def test_start_record_failure_releases_thread():
+    """历史登记失败时没有启动 worker，必须立即归还会话占用。"""
+    async def scenario():
+        manager = RunManager()
+
+        def fail(_):
+            raise OSError("store unavailable")
+
+        with pytest.raises(OSError):
+            manager.start(
+                owner="a", instruction="测试", task_name="测试", thread_id="rollback",
+                agent=None, queue=asyncio.Queue(), loop=asyncio.get_running_loop(),
+                ctx=_ctx(), on_started=fail,
+            )
+        handle, _, _ = await _start(manager, thread_id="rollback")
+        await handle.task
+
+    asyncio.run(scenario())
+
+
+def test_disconnect_cleans_pending_events_after_worker_has_finished():
+    """worker 已结束、终态仍在等队列空位时，断线也必须清理残留投递。"""
+    async def scenario():
+        manager = RunManager()
+        queue = asyncio.Queue(maxsize=1)
+        handle = manager.start(
+            owner="finished-owner", instruction="测试", task_name="t", thread_id=None,
+            agent=_agent(AIMessage(content="消息 尚未 发完")), queue=queue,
+            loop=asyncio.get_running_loop(), ctx=_ctx(),
+        )
+        await handle.task
+        assert manager.get(handle.run_id) is None
+        assert handle.consumer._put_tasks
+        manager.disconnect("finished-owner")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert not handle.consumer._put_tasks
 
     asyncio.run(scenario())
 

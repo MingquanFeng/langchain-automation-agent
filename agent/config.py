@@ -11,6 +11,9 @@
 
 from __future__ import annotations
 
+# math：拒绝 NaN / infinity，避免超时配置失效。
+import math
+
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -189,6 +192,15 @@ class ModelConfig:
         )
     )
 
+    # 单次网络请求的超时秒数；SDK 内置重试关闭，由图的重试层统一控制。
+    request_timeout: float = field(
+        default_factory=lambda: float(_env("LLM_REQUEST_TIMEOUT", "60"))
+    )
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.request_timeout) or self.request_timeout <= 0:
+            raise ValueError("LLM_REQUEST_TIMEOUT 必须是大于 0 的有限秒数")
+
     def build(self):
         """
         根据当前配置创建 LangChain 聊天模型。
@@ -212,13 +224,22 @@ class ModelConfig:
             "temperature": self.temperature,
         }
 
+        # Ollama 通过 httpx 客户端参数配置超时；其余常用供应商使用 timeout。
+        if self.provider == "ollama":
+            kwargs["client_kwargs"] = {"timeout": self.request_timeout}
+        else:
+            kwargs["timeout"] = self.request_timeout
+            kwargs["max_retries"] = 0
+
         # 仅在配置了 API Key 时传入。
         if self.api_key:
             kwargs["api_key"] = self.api_key
 
         # 仅在配置了自定义地址时传入。
         if self.base_url:
-            kwargs["base_url"] = self.base_url
+            # 当前 langchain-deepseek 客户端实际读取 api_base；base_url 会被忽略。
+            address_key = "api_base" if self.provider == "deepseek" else "base_url"
+            kwargs[address_key] = self.base_url
 
         # **kwargs：将字典解包成关键字参数。
         #

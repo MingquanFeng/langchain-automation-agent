@@ -35,7 +35,7 @@ import uvicorn
 from agent.config import RUNTIME
 
 
-def main() -> None:
+def main(*, desktop_credentials: tuple[str, str] | None = None) -> None:
     """
     命令行入口。
 
@@ -44,6 +44,8 @@ def main() -> None:
     2. 配置日志。
     3. 让调度开关在服务模块被导入前生效。
     4. 启动 HTTP 服务。
+
+    desktop_credentials：桌面入口传入的单次启动凭证和健康检查标记。
 
     注意：
     这里的执行顺序有强依赖，不要随意调整。
@@ -66,6 +68,8 @@ def main() -> None:
     parser.add_argument("--no-schedule", action="store_true", help="不启动定时任务")
     parser.add_argument("--reload", action="store_true", help="代码热重载（开发用）")
     args = parser.parse_args()
+    if desktop_credentials is not None and (args.host != "127.0.0.1" or args.reload):
+        parser.error("桌面托管服务只允许监听 127.0.0.1，且不支持热重载")
 
     # --------------------------------------------------------
     # 1.2 配置日志
@@ -120,7 +124,7 @@ def main() -> None:
     # 模块还没导入就调不到。
     import agent.config
 
-    if args.no_schedule:
+    if args.no_schedule or desktop_credentials is not None:
         agent.config.set_cli_override("SCHEDULER_ENABLED", "0")
 
     # importlib：标准库模块，用来重新加载模块。
@@ -146,6 +150,8 @@ def main() -> None:
     from runtime import server
 
     importlib.reload(server)
+    if desktop_credentials is not None:
+        server.app.state.desktop_access = server.DesktopAccess(*desktop_credentials)
 
     # uvicorn.run() 直接接收 app 对象并阻塞运行，
     # 直到进程被 Ctrl-C 打断。

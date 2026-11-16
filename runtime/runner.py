@@ -10,8 +10,8 @@ Agent 调用封装。调度器和 Python 调用方都走这里，保证行为一
 3. 把执行结果整理成统一的字典返回。
 
 设计要点：
-只有这一个入口能调用 Agent。
-调度器和 Python 调用方都从这里走，
+调度器和 Python 调用方都从这个同步入口走，WebSocket 使用流消费器。
+两种执行方式共用会话占用表与取消中间件，
 这样触发出来的行为（上下文构造、thread_id 规则、
 写权限默认值）完全一致，不会出现「某个入口忘了传 context」的情况。
 """
@@ -22,6 +22,7 @@ from __future__ import annotations
 import uuid
 import logging
 import time
+import threading
 
 # Any：typing 里的任意类型标注。
 from typing import Any
@@ -34,11 +35,12 @@ from agent.config import RUNTIME
 
 # AgentContext：单次调用的运行时上下文结构。
 # Trigger：触发来源的字面量类型（schedule/api/cli/lab）。
-from agent.context import AgentContext, Trigger
+from agent.context import AgentContext, Trigger, TaskCancelledError, check_cancelled
 
 # build_agent：Agent 装配入口，见 agent/graph.py。
 from agent.graph import build_agent
 from runtime.storage import get_runtime_store
+from runtime.concurrency import THREAD_RUNS
 
 # 复用同一个 agent 实例，保留 checkpointer 里的记忆
 #
@@ -52,6 +54,7 @@ from runtime.storage import get_runtime_store
 # 所以这里用模块级变量做惰性单例：
 # 第一次调用 get_agent() 时才真正创建。
 _AGENT = None
+_AGENT_LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
 
 
@@ -71,14 +74,13 @@ def get_agent():
     避免仅仅 import runtime 就连上数据库、初始化模型客户端。
 
     线程安全：
-    这里没有加锁。
-    并发首次调用时理论上可能创建出两个实例，
-    但因为赋值是原子的，最终持有的仍是同一个对象，
-    丢掉的只是一个多余的实例，不影响正确性。
+    用锁串行化首次初始化，避免并发建立多套模型客户端和数据库连接。
     """
     global _AGENT
     if _AGENT is None:
-        _AGENT = build_agent()
+        with _AGENT_LOCK:
+            if _AGENT is None:
+                _AGENT = build_agent()
     return _AGENT
 
 
@@ -92,6 +94,8 @@ def run_task(
     trigger: Trigger = "cli",
     allow_write: bool = False,
     thread_id: str | None = None,
+    *,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """执行一次任务。
 
@@ -118,6 +122,12 @@ def run_task(
             不传时生成一个一次性的随机 ID。
             这只影响会话记忆的复用；每次执行仍会进入本地运行历史。
 
+        cancel_event：可选的协作式取消信号；取消后抛 TaskCancelledError。
+            已经开始的同步 I/O 等待自身返回，期间会话仍被占用。
+
+    抛出：
+        RunBusyError：同进程中其他入口正在使用该会话，本次不会登记运行记录。
+
     返回：
         包含 run_id、任务名、thread_id、最终输出、消息条数的字典。
 
@@ -137,6 +147,7 @@ def run_task(
         trigger=trigger,
         allow_write=allow_write,
         notify_channel=RUNTIME.notify_channel,
+        cancel_event=cancel_event,
     )
 
     # --------------------------------------------------------
@@ -151,6 +162,12 @@ def run_task(
     config = {"configurable": {"thread_id": thread_id or f"task-{uuid.uuid4().hex[:8]}"}}
     resolved_thread_id = config["configurable"]["thread_id"]
     run_id = f"run-{uuid.uuid4().hex}"
+    with THREAD_RUNS.claim(resolved_thread_id):
+        return _execute_task(instruction, ctx, config, run_id, resolved_thread_id)
+
+
+def _execute_task(instruction, ctx, config, run_id, resolved_thread_id) -> dict[str, Any]:
+    """在调用方持有会话占用期间登记、执行并保存终态。"""
     started_at = time.time()
     store = get_runtime_store()
     recorded = False
@@ -159,7 +176,7 @@ def run_task(
             run_id=run_id,
             thread_id=resolved_thread_id,
             task_name=ctx.task_name,
-            trigger=trigger,
+            trigger=ctx.trigger,
             instruction=instruction,
             started_at=started_at,
         )
@@ -184,24 +201,32 @@ def run_task(
     # 中间件里的 _ctx() 兜底会走到默认值，
     # 表现为「任务名和写权限都丢了」这种很难查的问题。
     try:
+        check_cancelled(ctx)
         agent = get_agent()
+        check_cancelled(ctx)
         result = agent.invoke(
             {"messages": [HumanMessage(content=instruction)]}, config, context=ctx
         )
+        check_cancelled(ctx)
         # Agent 跑完后最后一条是 AIMessage（最终回答）。
         output = result["messages"][-1].content
         message_count = len(result["messages"])
     except Exception as exc:
+        cancelled = isinstance(exc, TaskCancelledError) or (
+            ctx.cancel_event is not None and ctx.cancel_event.is_set()
+        )
         if recorded:
             try:
                 store.finish_run(
                     run_id,
-                    status="failed",
-                    error=f"{type(exc).__name__}: {exc}",
+                    status="cancelled" if cancelled else "failed",
+                    error="用户取消" if cancelled else f"{type(exc).__name__}: {exc}",
                     duration_ms=int((time.time() - started_at) * 1000),
                 )
             except Exception:
                 logger.exception("无法保存 Agent 运行错误：%s", run_id)
+        if cancelled and not isinstance(exc, TaskCancelledError):
+            raise TaskCancelledError("任务已请求取消") from exc
         raise
 
     # --------------------------------------------------------

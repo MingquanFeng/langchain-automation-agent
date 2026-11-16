@@ -125,6 +125,9 @@ from .context import AgentContext
 # 具体功能取决于 custom.py 的实现。
 from .middleware.custom import CUSTOM_MIDDLEWARE
 from .middleware.events import EventBridgeMiddleware
+from .middleware.cancellation import (
+    CancellationMiddleware, retry_unless_cancelled, tool_failure_message,
+)
 from .middleware.pii import build_pii_middleware
 
 # Agent 可以调用的工具集合。
@@ -199,6 +202,9 @@ RETRY = [
     ModelRetryMiddleware(
         # 模型调用失败时，最多重试 3 次。
         max_retries=3,
+        retry_on=retry_unless_cancelled,
+        # 耗尽重试必须成为失败状态，不能把错误说明当成成功回答保存。
+        on_failure="error",
 
         # 重试等待时间的退避系数。
         # 用于降低连续请求对服务端造成的压力。
@@ -212,13 +218,13 @@ RETRY = [
     ToolRetryMiddleware(
         # 工具执行失败时，最多重试 2 次。
         max_retries=2,
+        retry_on=retry_unless_cancelled,
 
-        # 如果重试后仍然失败，
-        # 将失败作为可继续处理的结果交给 Agent。
+        # 普通工具失败交给 Agent 处理；取消信号由回调直接抛出，不再继续。
         #
         # 这样模型有机会根据错误信息决定下一步。
         # 但不保证模型一定会向用户报告失败。
-        on_failure="continue",
+        on_failure=tool_failure_message,
     ),
 ]
 
@@ -491,6 +497,9 @@ def build_agent(
 
         # 加入模型和工具失败重试机制。
         *RETRY,
+
+        # 位于重试层内侧，确保每次重试前也检查取消。
+        CancellationMiddleware(),
 
         # 加入 TodoList 任务管理中间件。
         TODO,

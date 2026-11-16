@@ -55,6 +55,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
 
 from ..tools.risk import decide_tool_permission
+from ..context import check_cancelled
 
 
 # ============================================================
@@ -136,6 +137,7 @@ class EventBridgeMiddleware(AgentMiddleware):
         # 等待授权发生在工具开始事件之前，用户拒绝时工具 handler 完全不会执行。
         runtime = getattr(request, "runtime", None)
         ctx = getattr(runtime, "context", None)
+        check_cancelled(ctx)
         decision = decide_tool_permission(
             name,
             allow_write=bool(getattr(ctx, "allow_write", False)),
@@ -150,6 +152,8 @@ class EventBridgeMiddleware(AgentMiddleware):
                     # 授权通道出错时按拒绝处理，不能继续执行有副作用的工具。
                     approved = False
 
+            # 用户批准与取消可能同时到达；等待结束后必须再次检查。
+            check_cancelled(ctx)
             if not approved:
                 if decision == "deny":
                     message = f"工具 {name or '<未知>'} 没有风险登记，按默认拒绝策略未执行。"

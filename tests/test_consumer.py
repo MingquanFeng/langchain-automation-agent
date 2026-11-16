@@ -222,21 +222,8 @@ def test_cancel_midway_stops_the_run():
 # ---------- 异常 ----------
 
 
-def test_model_failure_is_wrapped_into_the_answer():
-    """模型调用失败不会逃出消费循环。
-
-    为什么：
-    `ModelRetryMiddleware` 的默认 `on_failure="continue"` 会把重试耗尽后的失败
-    包成一条 AIMessage 继续跑 —— 图本身是「成功」跑完的。
-    所以这里发的是 run.end，而错误信息出现在最终答案里。
-
-    这一点与改造计划里写的「模型调用失败 → 异常逃出消费循环 → run.error」不同，
-    是项目的 `on_failure="continue"` 造成的。要让模型失败触发 run.error，
-    得把 `agent/graph.py` 里 `ModelRetryMiddleware` 的 `on_failure` 改成 `"error"`。
-
-    另外一条路径仍会发 run.error —— 异常不被任何中间件兜住时
-    （见下面 test_unhandled_exception_emits_run_error）。
-    """
+def test_model_failure_emits_error_not_success():
+    """模型重试耗尽必须成为 run.error，不能把错误说明保存为成功回答。"""
 
     async def scenario():
         queue = asyncio.Queue(maxsize=64)
@@ -261,10 +248,9 @@ def test_model_failure_is_wrapped_into_the_answer():
 
     events = asyncio.run(scenario())
     types = [e.type for e in events]
-    assert types[-1] == "run.end"
-    assert isinstance(events[-1], RunEnd)
-    # 错误信息出现在最终答案里 —— 界面能看出来这次其实失败了。
-    assert "模型挂了" in events[-1].output
+    assert types[-1] == "run.error"
+    assert isinstance(events[-1], RunError)
+    assert "模型挂了" in events[-1].message
 
 
 def test_unhandled_exception_emits_run_error():
@@ -324,11 +310,25 @@ def test_pending_limit_blocks_the_producer():
     async def scenario():
         queue = asyncio.Queue(maxsize=1)
         agent = _make_agent(AIMessage(content="好了"))
-        thread = _run_consumer(agent, queue, asyncio.get_running_loop(), max_pending=1)
+        recorded = []
+        consumer = StreamConsumer(
+            agent, run_id="backpressure", queue=queue,
+            loop=asyncio.get_running_loop(), max_pending=1, on_terminal=recorded.append,
+        )
+        thread = threading.Thread(target=consumer.run, args=("测试", _ctx(), "backpressure"))
+        thread.start()
         # 给它一点时间去产出事件并卡住。
         await asyncio.sleep(1.0)
         alive = thread.is_alive()
         size = queue.qsize()
+        # 模拟连接断开：即使没人再消费满队列，也必须结束工作线程和 put 任务。
+        consumer.cancel_event.set()
+        consumer.close()
+        await asyncio.to_thread(thread.join, 2)
+        assert not thread.is_alive()
+        assert [event.type for event in recorded] == ["run.cancelled"]
+        await asyncio.sleep(0)
+        assert not consumer._put_tasks
         return alive, size
 
     alive, size = asyncio.run(scenario())

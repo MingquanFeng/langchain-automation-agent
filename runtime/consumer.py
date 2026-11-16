@@ -48,6 +48,7 @@ import threading
 
 # time：算耗时。
 import time
+from contextlib import closing
 
 # Any：typing 的任意类型标注。
 from typing import Any, Callable
@@ -66,7 +67,7 @@ from runtime.events import (
 )
 
 # AgentContext：运行时上下文。
-from agent.context import AgentContext
+from agent.context import AgentContext, TaskCancelledError, check_cancelled
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,9 @@ class StreamConsumer:
         self.max_pending = max_pending
         self._pending = 0
         self._slot_free = threading.Condition(threading.Lock())
+        # 连接关闭后停止投递并唤醒背压等待者；put 任务只在事件循环中操作。
+        self._closed = False
+        self._put_tasks: set[asyncio.Task] = set()
 
     # ---------- 主流程 ----------
 
@@ -172,7 +176,7 @@ class StreamConsumer:
         | 模型调用失败等异常 | `run.error` |
         """
         started = time.perf_counter()
-        cancelled = False
+        ctx.cancel_event = self.cancel_event
         # 每步的完整状态，留最后一份。
         final_state: dict = {}
         # 累积模型说出来的正文。
@@ -184,7 +188,8 @@ class StreamConsumer:
         text_parts: list[str] = []
 
         try:
-            for mode, payload in self.agent.stream(
+            check_cancelled(ctx)
+            stream = self.agent.stream(
                 {"messages": [HumanMessage(content=instruction)]},
                 {"configurable": {"thread_id": thread_id}},
                 context=ctx,
@@ -193,25 +198,26 @@ class StreamConsumer:
                 #   values   —— 每步的完整状态，用来在最后取最终答案
                 #   custom   —— 中间件发的工具事件（阶段 2 的 EventBridgeMiddleware）
                 stream_mode=["messages", "values", "custom"],
-            ):
-                # 取消检查。每轮一次 —— 协作式取消，
-                # 正在跑的那一步（模型调用或工具执行）会做完。
-                if self.cancel_event.is_set():
-                    cancelled = True
-                    break
+            )
+            # 显式关闭生成器，让图的工作线程和检查点写入完成后再发送终态。
+            with closing(stream):
+                for mode, payload in stream:
+                    check_cancelled(ctx)
+                    if mode == "values":
+                        final_state = payload
+                        continue
 
-                # values 模式归一化层不处理。
-                # 每步推全量状态 —— 留最后一份，正文为空时要拿它兜底。
-                if mode == "values":
-                    final_state = payload
-                    continue
-
-                for event in self.normalizer.normalize(mode, payload):
-                    if isinstance(event, ModelText):
-                        text_parts.append(event.text)
-                    self._emit(event)
+                    for event in self.normalizer.normalize(mode, payload):
+                        if isinstance(event, ModelText):
+                            text_parts.append(event.text)
+                        self._emit(event)
+            # 无增量输出或正常返回恰逢取消时，也不能误报成功。
+            check_cancelled(ctx)
 
         except Exception as exc:
+            if isinstance(exc, TaskCancelledError) or self.cancel_event.is_set():
+                self._emit_terminal(RunCancelled(run_id=self.run_id, reason="用户取消"))
+                return
             # 模型调用失败（API 401、重试耗尽）等异常逃出消费循环。
             # 异常路径必须发出一条结束事件。
             self._emit_terminal(RunError(
@@ -223,26 +229,15 @@ class StreamConsumer:
 
         duration_ms = int((time.perf_counter() - started) * 1000)
 
-        if cancelled:
-            # 取消发的是 run.cancelled 而不是 run.end ——
-            # 客户端据此把界面从「运行中」改到「已取消」。
-            self._emit_terminal(RunCancelled(run_id=self.run_id, reason="用户取消"))
-            return
-
         output = "".join(text_parts)
         if not output:
-            # 没有正文 —— 多数是**模型调用失败**。
-            # 重试中间件的 `on_failure="continue"` 会把失败包成一条 AIMessage
-            # 写进 state，但那条消息不经过模型节点，
-            # **`messages` 模式看不到它** —— 所以既没有 model.text，累积的正文也是空的。
-            # 回退到 state 的最后一条消息，让用户看到「模型调用失败了」，
-            # 而不是一片空白。
+            # 无流式正文时使用最终状态中的文本；模型异常已经走 run.error。
             output = _last_message_text(final_state.get("messages", []))
 
         self._emit_terminal(RunEnd(
             run_id=self.run_id,
             output=output,
-            messages=len(text_parts),
+            messages=len(final_state.get("messages", [])),
             duration_ms=duration_ms,
         ))
 
@@ -284,7 +279,11 @@ class StreamConsumer:
         # 背压：在途事件太多就先停下，等事件循环消化。
         with self._slot_free:
             while self._pending >= self.max_pending:
+                if self._closed or self.loop.is_closed():
+                    return
                 self._slot_free.wait(timeout=0.1)
+            if self._closed or self.loop.is_closed():
+                return
             self._pending += 1
 
         try:
@@ -299,13 +298,22 @@ class StreamConsumer:
         队列满时这个协程会 await 等待 —— 那才是真正的背压：
         事件循环停在 put 上，生产者的计数降不下来，于是也停下来。
         """
+        if self._closed:
+            self._release()
+            return
         try:
             task = asyncio.ensure_future(self.queue.put(event))
         except RuntimeError:
             self._release()
             return
         # 无论成功、失败还是被取消，都要释放计数。
-        task.add_done_callback(lambda _: self._release())
+        self._put_tasks.add(task)
+        task.add_done_callback(self._put_done)
+
+    def _put_done(self, task: asyncio.Task) -> None:
+        """在事件循环中回收已投递或被取消的 put。"""
+        self._put_tasks.discard(task)
+        self._release()
 
     def _release(self) -> None:
         """释放一个在途名额，并唤醒等待的生产者。"""
@@ -320,8 +328,17 @@ class StreamConsumer:
         （进程退出或连接关闭时调用。）
         """
         with self._slot_free:
-            self._pending = 0
+            self._closed = True
             self._slot_free.notify_all()
+        try:
+            self.loop.call_soon_threadsafe(self._cancel_puts)
+        except RuntimeError:
+            pass
+
+    def _cancel_puts(self) -> None:
+        """连接已不存在，取消仍在等队列空位的投递，不影响终态持久化。"""
+        for task in tuple(self._put_tasks):
+            task.cancel()
 
 
 def _last_message_text(messages: list) -> str:

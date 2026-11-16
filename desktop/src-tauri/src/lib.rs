@@ -28,6 +28,9 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(90);
 #[serde(rename_all = "camelCase")]
 struct RuntimeInfo {
     service_url: String,
+    access_token: String,
+    #[serde(skip)]
+    readiness: String,
     config_path: String,
     log_path: String,
     working_directory: String,
@@ -83,9 +86,11 @@ fn runtime_info(state: State<'_, Arc<RuntimeState>>) -> RuntimeInfo {
         return current;
     }
 
-    if !state.exited.load(Ordering::Acquire) && health_check(&current.service_url) {
+    if !state.exited.load(Ordering::Acquire)
+        && health_check(&current.service_url, &current.readiness)
+    {
         let mut info = state.info.lock().expect("runtime info mutex poisoned");
-        if info.status == "starting" {
+        if info.status == "starting" && info.readiness == current.readiness {
             info.status = "ready".into();
             info.error = None;
             state.log(&format!("Agent 服务已就绪：{}", info.service_url));
@@ -325,6 +330,8 @@ fn create_runtime_state(app: &tauri::AppHandle) -> Result<Arc<RuntimeState>, Str
     Ok(Arc::new(RuntimeState {
         info: Mutex::new(RuntimeInfo {
             service_url: String::new(),
+            access_token: String::new(),
+            readiness: String::new(),
             config_path: config_path.to_string_lossy().into_owned(),
             log_path: log_path.to_string_lossy().into_owned(),
             working_directory: working_directory.to_string_lossy().into_owned(),
@@ -342,6 +349,16 @@ fn create_runtime_state(app: &tauri::AppHandle) -> Result<Arc<RuntimeState>, Str
 }
 
 fn start_runtime(app: &tauri::AppHandle, state: &Arc<RuntimeState>) -> Result<(), String> {
+    // 每次启动轮换凭证。健康检查验证独立标记，不向探测端口发送访问凭证。
+    let mut startup_random = [0_u8; 64];
+    getrandom::fill(&mut startup_random)
+        .map_err(|error| format!("无法生成桌面服务凭证：{error}"))?;
+    let encode = |bytes: &[u8]| -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    };
+    let access_token = encode(&startup_random[..32]);
+    let readiness = encode(&startup_random[32..]);
+
     let port = TcpListener::bind(("127.0.0.1", 0))
         .and_then(|listener| listener.local_addr())
         .map_err(|error| format!("无法分配本机服务端口：{error}"))?
@@ -361,6 +378,8 @@ fn start_runtime(app: &tauri::AppHandle, state: &Arc<RuntimeState>) -> Result<()
         .args(["--host", "127.0.0.1", "--port", &port_arg, "--no-schedule"])
         .env("AUTOMATION_AGENT_HOME", &state.app_home)
         .env("__CLI_DATA_DIR__", &working_directory)
+        .env("AUTOMATION_AGENT_SIDECAR_TOKEN", &access_token)
+        .env("AUTOMATION_AGENT_SIDECAR_READINESS", &readiness)
         .set_process_group(true)
         .kill_on_drop(true);
     let (mut receiver, child) = command
@@ -370,6 +389,8 @@ fn start_runtime(app: &tauri::AppHandle, state: &Arc<RuntimeState>) -> Result<()
     {
         let mut info = state.info.lock().expect("runtime info mutex poisoned");
         info.service_url = service_url.clone();
+        info.access_token = access_token;
+        info.readiness = readiness;
         info.status = "starting".into();
         info.error = None;
     }
@@ -418,7 +439,7 @@ fn start_runtime(app: &tauri::AppHandle, state: &Arc<RuntimeState>) -> Result<()
     Ok(())
 }
 
-fn health_check(service_url: &str) -> bool {
+fn health_check(service_url: &str, readiness: &str) -> bool {
     let Some(port) = service_url
         .strip_prefix("http://127.0.0.1:")
         .and_then(|value| value.parse::<u16>().ok())
@@ -462,8 +483,12 @@ fn health_check(service_url: &str) -> bool {
         return false;
     };
     let mut body = vec![0; content_length];
-    response.read_exact(&mut body).is_ok()
-        && String::from_utf8_lossy(&body).contains("\"status\":\"ok\"")
+    if response.read_exact(&mut body).is_err() {
+        return false;
+    }
+    let body = String::from_utf8_lossy(&body);
+    body.contains("\"status\":\"ok\"")
+        && body.contains(&format!("\"readiness\":\"{readiness}\""))
 }
 
 fn stop_runtime(state: &RuntimeState) {
@@ -472,8 +497,8 @@ fn stop_runtime(state: &RuntimeState) {
         return;
     };
 
-    let service_url = state.info().service_url;
-    let service_running = health_check(&service_url);
+    let runtime = state.info();
+    let service_running = health_check(&runtime.service_url, &runtime.readiness);
     if state.exited.load(Ordering::Acquire) && !service_running {
         return;
     }
@@ -493,12 +518,15 @@ fn stop_runtime(state: &RuntimeState) {
         libc::kill(-pid, libc::SIGTERM);
     }
     let deadline = Instant::now() + Duration::from_secs(3);
-    while (!state.exited.load(Ordering::Acquire) || health_check(&service_url))
+    while (!state.exited.load(Ordering::Acquire)
+        || health_check(&runtime.service_url, &runtime.readiness))
         && Instant::now() < deadline
     {
         thread::sleep(Duration::from_millis(50));
     }
-    if !state.exited.load(Ordering::Acquire) || health_check(&service_url) {
+    if !state.exited.load(Ordering::Acquire)
+        || health_check(&runtime.service_url, &runtime.readiness)
+    {
         state.log("Agent 服务未在 3 秒内退出，正在终止 sidecar 进程组。");
         let _ = child.kill();
     }

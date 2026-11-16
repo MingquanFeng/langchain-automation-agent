@@ -401,13 +401,16 @@
     .task-card { min-height: 153px; background: linear-gradient(150deg, #fff, #f4f7ff); }
     .task-state-dot { width: 7px; height: 7px; border-radius: 50%; background: #37b77c; box-shadow: 0 0 0 3px #37b77c16; }
     .task-card[data-state="running"] .task-state-dot { background: #416ef0; box-shadow: 0 0 0 3px #416ef01a; animation: pulse 1.2s infinite; }
+    .task-card[data-state="cancelling"] .task-state-dot { background: #b28437; box-shadow: 0 0 0 3px #b284371a; animation: pulse 1.2s infinite; }
     .task-card[data-state="error"] .task-state-dot { background: #d16a57; box-shadow: 0 0 0 3px #d16a5718; }
     .task-state-badge { border-radius: 20px; padding: 5px 9px; color: #279363; background: #e4f7ed; font-size: 10px; font-weight: 650; }
     .task-card[data-state="running"] .task-state-badge { color: #365fd0; background: #e9efff; }
+    .task-card[data-state="cancelling"] .task-state-badge { color: #926b28; background: #faf1df; }
     .task-card[data-state="error"] .task-state-badge { color: #a85043; background: #fff0ec; }
     .task-state-copy { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
     .task-state-icon { width: 31px; height: 31px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; color: #36ab74; background: #eaf8f0; font-size: 17px; }
     .task-card[data-state="running"] .task-state-icon { color: #456fea; background: #eaf0ff; }
+    .task-card[data-state="cancelling"] .task-state-icon { color: #926b28; background: #faf1df; }
     .task-card[data-state="error"] .task-state-icon { color: #bf6352; background: #fff0ed; }
     .task-state-copy p { margin: 0; color: #5d6b83; font-size: 11px; line-height: 1.6; }
     .task-progress-track { height: 3px; overflow: hidden; margin-top: 15px; border-radius: 9px; background: #e8edfa; }
@@ -710,6 +713,7 @@
     let socket = null;
     let connectPromise = null;
     let serviceOrigin = window.location.origin;
+    let serviceAccessToken = null;
     let activeRunId = null;
     let threadId = null;
     let currentAssistantBubble = null;
@@ -725,8 +729,11 @@
     let historyHasMore = false;
     let historyLoading = false;
 
-    function serviceUrl(path) {
-      return new URL(path, `${serviceOrigin}/`).toString();
+    function serviceFetch(path, { method = "GET" } = {}) {
+      const headers = serviceAccessToken ? { Authorization: `Bearer ${serviceAccessToken}` } : {};
+      return fetch(new URL(path, `${serviceOrigin}/`), {
+        method, headers, cache: "no-store", redirect: "error",
+      });
     }
 
     function normalizeServiceOrigin(value) {
@@ -785,7 +792,7 @@
       if (window.parent !== window) {
         window.parent.postMessage({ type: "automation-agent.workbench.connection", state, label }, "*");
       }
-      if (!currentTask || currentTask.state !== "running") {
+      if (!currentTask || !["running", "cancelling"].includes(currentTask.state)) {
         if (state === "connected") setTaskState("idle", "随时待命，开始你的任务吧。");
         else if (state === "connecting") setTaskState("connecting", "正在连接本机 Agent…");
         else if (state === "error" || state === "idle") setTaskState("error", "Agent 暂时未连接，请检查服务后重试。");
@@ -793,8 +800,8 @@
     }
 
     function setTaskState(state, description) {
-      const stateLabels = { idle: "空闲中", connecting: "连接中", running: "执行中", done: "已完成", cancelled: "已取消", error: "需检查" };
-      const stateIcons = { idle: "✦", connecting: "◌", running: "↗", done: "✓", cancelled: "Ⅱ", error: "!" };
+      const stateLabels = { idle: "空闲中", connecting: "连接中", running: "执行中", cancelling: "正在取消", done: "已完成", cancelled: "已取消", error: "需检查" };
+      const stateIcons = { idle: "✦", connecting: "◌", running: "↗", cancelling: "◌", done: "✓", cancelled: "Ⅱ", error: "!" };
       taskStatusCard.dataset.state = state;
       taskStateBadge.textContent = stateLabels[state] || "空闲中";
       taskStateIcon.textContent = stateIcons[state] || "✦";
@@ -916,7 +923,7 @@
       remove.addEventListener("click", async () => {
         if (!window.confirm("删除整个会话会清除 Checkpointer 记忆和关联运行记录，且无法恢复。继续吗？")) return;
         try {
-          const response = await fetch(serviceUrl(`/threads?thread_id=${encodeURIComponent(session.thread_id)}`), { method: "DELETE" });
+          const response = await serviceFetch(`/threads?thread_id=${encodeURIComponent(session.thread_id)}`, { method: "DELETE" });
           if (!response.ok) throw await apiError(response, "删除会话失败");
           if (threadId === session.thread_id) newChatButton.click();
           await Promise.all([loadThreadHistory(true), loadRunHistory(true)]);
@@ -941,7 +948,7 @@
       updateHistoryControls();
       sessionHistoryStatus.textContent = sessionHistoryOffset ? `已加载 ${sessionHistoryOffset} 个会话，正在读取更多…` : "正在加载会话…";
       try {
-        const response = await fetch(serviceUrl(`/threads?limit=50&offset=${sessionHistoryOffset}`));
+        const response = await serviceFetch(`/threads?limit=50&offset=${sessionHistoryOffset}`);
         if (!response.ok) throw await apiError(response, "读取会话列表失败");
         const payload = await response.json();
         if (!Array.isArray(payload.threads)) throw new Error("会话列表格式无效");
@@ -1021,7 +1028,7 @@
       deleteRun.addEventListener("click", async () => {
         if (!window.confirm("删除这条运行记录？会话记忆会保留。")) return;
         try {
-          const response = await fetch(serviceUrl(`/runs/${encodeURIComponent(run.run_id)}`), { method: "DELETE" });
+          const response = await serviceFetch(`/runs/${encodeURIComponent(run.run_id)}`, { method: "DELETE" });
           if (!response.ok) throw await apiError(response, "删除运行记录失败");
           await loadRunHistory(true);
         } catch (error) {
@@ -1036,7 +1043,7 @@
       deleteThread.addEventListener("click", async () => {
         if (!window.confirm("删除整个会话会清除该会话的 Checkpointer 记忆和所有关联运行记录，且无法恢复。继续吗？")) return;
         try {
-          const response = await fetch(serviceUrl(`/threads?thread_id=${encodeURIComponent(run.thread_id)}`), { method: "DELETE" });
+          const response = await serviceFetch(`/threads?thread_id=${encodeURIComponent(run.thread_id)}`, { method: "DELETE" });
           if (!response.ok) throw await apiError(response, "删除会话失败");
           if (threadId === run.thread_id) newChatButton.click();
           await Promise.all([loadThreadHistory(true), loadRunHistory(true)]);
@@ -1060,7 +1067,7 @@
       updateHistoryControls();
       historyStatus.textContent = historyOffset ? `已加载 ${historyOffset} 条记录，正在读取更多…` : "正在加载运行记录…";
       try {
-        const response = await fetch(serviceUrl(`/runs?limit=50&offset=${historyOffset}`));
+        const response = await serviceFetch(`/runs?limit=50&offset=${historyOffset}`);
         if (!response.ok) throw await apiError(response, "读取运行记录失败");
         const runs = await response.json();
         if (!Array.isArray(runs)) throw new Error("运行记录格式无效");
@@ -1089,7 +1096,7 @@
     async function recoverThread(run) {
       if (activeRunId) return;
       try {
-        const response = await fetch(serviceUrl(`/threads/messages?thread_id=${encodeURIComponent(run.thread_id)}`));
+        const response = await serviceFetch(`/threads/messages?thread_id=${encodeURIComponent(run.thread_id)}`);
         if (!response.ok) throw await apiError(response, "读取会话内容失败");
         const snapshot = await response.json();
         threadId = snapshot.thread_id || run.thread_id;
@@ -1139,7 +1146,7 @@
       if (historyLoading) return;
       if (!window.confirm("清空全部运行记录？保存的会话记忆会保留；如需删除会话记忆，请对相应会话使用“删除整个会话”。")) return;
       try {
-        const response = await fetch(serviceUrl("/runs"), { method: "DELETE" });
+        const response = await serviceFetch("/runs", { method: "DELETE" });
         if (!response.ok) throw await apiError(response, "清空运行记录失败");
         await loadRunHistory(true);
       } catch (error) {
@@ -1162,13 +1169,13 @@
         item.dataset.state = task.state;
         const mark = document.createElement("span");
         mark.className = "recent-task-mark";
-        mark.textContent = task.state === "done" ? "✓" : task.state === "running" ? "◌" : task.state === "error" ? "!" : "Ⅱ";
+        mark.textContent = task.state === "done" ? "✓" : ["running", "cancelling"].includes(task.state) ? "◌" : task.state === "error" ? "!" : "Ⅱ";
         const copy = document.createElement("span");
         copy.className = "recent-task-copy";
         const title = document.createElement("strong");
         title.textContent = task.instruction;
         const meta = document.createElement("small");
-        const labels = { connecting: "正在连接", running: "执行中", done: "已完成", cancelled: "已取消", error: "未完成" };
+        const labels = { connecting: "正在连接", running: "执行中", cancelling: "正在取消", done: "已完成", cancelled: "已取消", error: "未完成" };
         meta.textContent = `${labels[task.state] || "任务"} · ${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(task.createdAt)}`;
         copy.append(title, meta);
         item.append(mark, copy);
@@ -1514,7 +1521,9 @@
       const url = new URL("/ws", `${serviceOrigin}/`);
       url.protocol = new URL(serviceOrigin).protocol === "https:" ? "wss:" : "ws:";
       connectionHost.textContent = new URL(serviceOrigin).host;
-      const currentSocket = new WebSocket(url);
+      // WebView 的 WebSocket API 无法设置 Authorization，改用握手子协议传入凭证。
+      const protocols = serviceAccessToken ? ["automation-agent.v1", `bearer.${serviceAccessToken}`] : [];
+      const currentSocket = new WebSocket(url, protocols);
       socket = currentSocket;
       let failed = false;
       connectPromise = new Promise((resolve, reject) => {
@@ -1544,7 +1553,10 @@
           catch { addNotice("服务返回了无法解析的事件。", true); }
         });
         currentSocket.addEventListener("close", () => {
-          if (socket !== currentSocket) return;
+          if (socket !== currentSocket) {
+            settleFailure("Agent 服务连接已切换。");
+            return;
+          }
           connectPromise = null;
           setConnection(failed ? "error" : "idle", failed ? "连接失败" : "连接已关闭");
           if (!settled) settleFailure("Agent 服务连接已关闭。请检查服务状态后重试。");
@@ -1605,6 +1617,8 @@
         socket.send(JSON.stringify({ type: "cancel" }));
         cancelButton.disabled = true;
         cancelButton.textContent = "正在取消…";
+        closePendingApprovals("cancelled", "已请求取消，等待任务退出。");
+        finishCurrentTask("cancelling", "已请求取消，正在等待当前调用退出；已完成的操作不会回滚。");
       }
     });
 
@@ -1750,7 +1764,7 @@
 
     if (window.parent !== window) {
       window.addEventListener("message", (event) => {
-        if (event.source !== window.parent) return;
+        if (event.source !== window.parent || event.origin !== window.location.origin) return;
         if (event.data?.type === "automation-agent.working-directory") {
           setWorkingDirectory(event.data.path);
           return;
@@ -1764,7 +1778,12 @@
           window.parent.postMessage({ type: "automation-agent.connection", request_id: requestId, connected: false, error: error.message }, "*");
           return;
         }
-        if (nextOrigin !== serviceOrigin) {
+        const nextToken = event.data.access_token || null;
+        if (nextToken !== null && (typeof nextToken !== "string" || !/^[0-9a-f]{64}$/.test(nextToken))) {
+          window.parent.postMessage({ type: "automation-agent.connection", request_id: requestId, connected: false, error: "本机服务凭证无效。" }, window.location.origin);
+          return;
+        }
+        if (nextOrigin !== serviceOrigin || nextToken !== serviceAccessToken) {
           const previousWasService = serviceOrigin && ["http:", "https:"].includes(new URL(serviceOrigin).protocol);
           if (socket && socket.readyState < WebSocket.CLOSING) {
             const previousSocket = socket;
@@ -1782,6 +1801,7 @@
             addNotice("服务地址已切换；已开始一个新会话，不会重发旧任务。");
           }
           serviceOrigin = nextOrigin;
+          serviceAccessToken = nextToken;
           connectionHost.textContent = new URL(serviceOrigin).host;
         }
         connect().then(() => {

@@ -119,7 +119,8 @@ def test_tool_error_is_emitted_once():
         content="",
         tool_calls=[{"name": "boom", "args": {"x": "1"}, "id": "c9", "type": "tool_call"}],
     )
-    model = FakeModel(messages=iter([tool_call]))
+    # 工具错误交给模型解释；必须提供后续回答，避免以模型耗尽响应冒充正常结束。
+    model = FakeModel(messages=iter([tool_call, AIMessage(content="工具失败，未完成操作")]))
 
     from langgraph.checkpoint.memory import InMemorySaver
 

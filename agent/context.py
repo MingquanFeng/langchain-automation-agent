@@ -19,6 +19,7 @@ from __future__ import annotations
 # dataclass：标准库的数据类装饰器。
 # 自动生成 __init__、__repr__、__eq__ 等方法。
 from dataclasses import dataclass, field
+import threading
 
 # Literal：类型字面量。
 # 用来把某个字段的取值限制在固定的几个字符串里。
@@ -41,6 +42,17 @@ from typing import Any, Callable, Literal
 #
 # 新增触发方式时，要同步改这里。
 Trigger = Literal["schedule", "api", "cli", "lab"]
+
+
+class TaskCancelledError(RuntimeError):
+    """协作式取消信号；不得作为普通模型或工具失败重试。"""
+
+
+def check_cancelled(ctx) -> None:
+    """在模型和工具的调用边界检查取消；无上下文的旧调用保持兼容。"""
+    event = getattr(ctx, "cancel_event", None)
+    if event is not None and event.is_set():
+        raise TaskCancelledError("任务已请求取消")
 
 # 各取值的含义：
 #
@@ -162,3 +174,6 @@ class AgentContext:
     #
     # 当前代码没有自动继承 RUNTIME 的值。
     notify_channel: str = "terminal"
+
+    # 由执行入口注入，与审批等待、流消费器共用；不写入会话检查点。
+    cancel_event: threading.Event | None = field(default=None, repr=False, compare=False)

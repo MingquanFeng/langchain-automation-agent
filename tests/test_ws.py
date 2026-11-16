@@ -30,6 +30,7 @@ import pytest
 
 # fastapi.testclient：跑真实的 WebSocket 握手。
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 # 项目内部。
 import runtime.server as server_mod
@@ -341,6 +342,7 @@ def test_cancel_during_approval_prevents_write(client, monkeypatch):
             events = _drain_until(ws, {"run.cancelled", "run.end", "run.error"})
 
         assert events[-1]["type"] == "run.cancelled"
+        assert any(event["type"] == "run.progress" for event in events)
         assert not target.exists()
         assert not any(event["type"] == "tool.start" for event in events)
     finally:
@@ -381,7 +383,110 @@ def test_malformed_approval_response_is_recoverable(client):
     assert event["recoverable"] is True
 
 
+# ---------- 桌面托管连接与逐次审批 ----------
+
+
+@pytest.fixture
+def desktop_access(monkeypatch):
+    """为当前测试启用桌面托管模式，使用可控的测试凭证。"""
+    access = server_mod.DesktopAccess("a" * 64, "b" * 64)
+    monkeypatch.setattr(app.state, "desktop_access", access)
+    return access
+
+
+def test_desktop_http_requires_token_but_allows_health_and_preflight(client, desktop_access):
+    """HTTP 越权请求在路由执行之前被拒绝，WebView 预检可以通过。"""
+    origin = "tauri://localhost"
+    assert client.get("/health").json() == {
+        "status": "ok", "scheduler": False, "readiness": desktop_access.readiness,
+    }
+    for method, path in (("GET", "/runs"), ("GET", "/threads"), ("DELETE", "/runs"), ("DELETE", "/threads")):
+        response = client.request(method, path, headers={"Origin": origin})
+        assert response.status_code == 401
+        assert response.headers["access-control-allow-origin"] == origin
+    assert client.get("/runs", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    preflight = client.options("/runs", headers={
+        "Origin": origin,
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization",
+    })
+    assert preflight.status_code == 200
+
+    headers = {"Authorization": f"Bearer {desktop_access.token}"}
+    response = client.get("/runs", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert client.delete("/tasks/example", headers=headers).status_code == 403
+
+
+def test_desktop_websocket_requires_token_and_checks_origin(client, desktop_access):
+    """握手缺凭证、凭证错误或网页来源不符时，均在接收命令前拒绝。"""
+    protocol = server_mod.DESKTOP_WS_PROTOCOL
+    credentials = f"bearer.{desktop_access.token}"
+    for protocols, origin in (
+        ([protocol], "tauri://localhost"),
+        ([protocol, "bearer.wrong"], "tauri://localhost"),
+        ([protocol, credentials], "https://example.test"),
+    ):
+        with pytest.raises(WebSocketDisconnect) as error:
+            with client.websocket_connect("/ws", subprotocols=protocols, headers={"Origin": origin}):
+                pytest.fail("拒绝的握手不应进入 WebSocket 会话")
+        assert error.value.code == 1008
+
+
+def test_desktop_websocket_validates_commands_and_requires_approval(client, desktop_access, monkeypatch):
+    """托管连接认证成功后，客户端仍无法授予整轮写权限。"""
+    target = _install_write_agent(monkeypatch)
+    protocol = server_mod.DESKTOP_WS_PROTOCOL
+    try:
+        with client.websocket_connect("/ws", subprotocols=[protocol, f"bearer.{desktop_access.token}"]) as ws:
+            assert ws.accepted_subprotocol == protocol
+            for invalid_field in ({"instruction": 12}, {"thread_id": 123}, {"allow_write": "false"}, {"allow_write": True}):
+                ws.send_json({"type": "run.start", "instruction": "写入文件", **invalid_field})
+                assert ws.receive_json()["type"] == "run.error"
+                assert not target.exists()
+
+            ws.send_json({"type": "run.start", "instruction": "写入文件"})
+            events = _drain_until(ws, {"approval.request", "run.error"})
+            approval = events[-1]
+            assert approval["type"] == "approval.request"
+            assert not target.exists()
+            ws.send_json({"type": "approval.respond", "run_id": approval["run_id"], "call_id": approval["call_id"], "approved": False})
+            assert _drain_until(ws, {"run.end", "run.error"})[-1]["type"] == "run.end"
+            assert not target.exists()
+    finally:
+        target.unlink(missing_ok=True)
+
+
 # ---------- 连接生命周期 ----------
+
+
+def test_two_connections_cannot_run_or_delete_same_thread(client, monkeypatch):
+    """真实 WebSocket 连接共享互斥，重复命令不改变旧任务的状态。"""
+    target = _install_write_agent(monkeypatch)
+    thread_id = f"shared-{uuid.uuid4().hex}"
+    try:
+        with client.websocket_connect("/ws") as owner, client.websocket_connect("/ws") as other:
+            owner.send_json({"type": "run.start", "instruction": "写文件", "thread_id": thread_id})
+            approval = _drain_until(owner, {"approval.request"})[-1]
+            other.send_json({"type": "run.start", "instruction": "重复", "thread_id": thread_id})
+            error = other.receive_json()
+            assert error["type"] == "run.error"
+            assert "该会话" in error["message"]
+            assert client.delete("/threads", params={"thread_id": thread_id}).status_code == 409
+            owner.send_json({"type": "run.start", "instruction": "重复"})
+            assert owner.receive_json()["recoverable"] is True
+            owner.send_text("invalid json")
+            assert owner.receive_json()["recoverable"] is True
+            owner.send_json({"type": "cancel"})
+            events = _drain_until(owner, {"run.cancelled", "run.error", "run.end"})
+            assert events[-1]["type"] == "run.cancelled"
+            records = client.get("/runs").json()
+            record = next(r for r in records if r["run_id"] == approval["run_id"])
+            assert record["status"] == "cancelled"
+            assert not target.exists()
+    finally:
+        target.unlink(missing_ok=True)
 
 
 def test_disconnect_cancels_the_run(client):
