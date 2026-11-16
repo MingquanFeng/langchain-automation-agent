@@ -20,6 +20,8 @@ from __future__ import annotations
 
 # uuid：标准库，用来生成随机的会话 ID。
 import uuid
+import logging
+import time
 
 # Any：typing 里的任意类型标注。
 from typing import Any
@@ -36,6 +38,7 @@ from agent.context import AgentContext, Trigger
 
 # build_agent：Agent 装配入口，见 agent/graph.py。
 from agent.graph import build_agent
+from runtime.storage import get_runtime_store
 
 # 复用同一个 agent 实例，保留 checkpointer 里的记忆
 #
@@ -49,6 +52,7 @@ from agent.graph import build_agent
 # 所以这里用模块级变量做惰性单例：
 # 第一次调用 get_agent() 时才真正创建。
 _AGENT = None
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -112,17 +116,16 @@ def run_task(
             会话 ID。
             相同则共享记忆（对应课件 09 章短期记忆，见 courseware/langChain/尚硅谷-09-上下文与记忆.pdf）。
             不传时生成一个一次性的随机 ID。
+            这只影响会话记忆的复用；每次执行仍会进入本地运行历史。
 
     返回：
-        包含任务名、thread_id、最终输出、消息条数的字典。
+        包含 run_id、任务名、thread_id、最终输出、消息条数的字典。
 
     注意：
     thread_id 的命名规则决定了记忆的隔离边界：
         cron-{任务名}：定时任务跨天保留记忆。
-        task-{随机}：一次性任务，不留痕。
+        task-{随机}：一次性任务，不复用会话记忆；运行记录仍会持久化。
     """
-    agent = get_agent()
-
     # --------------------------------------------------------
     # 2.1 构造运行时上下文
     # --------------------------------------------------------
@@ -146,6 +149,24 @@ def run_task(
     # 不传时用 task-{8位随机} 生成一次性的会话 ID，
     # 保证不同任务之间不会串记忆。
     config = {"configurable": {"thread_id": thread_id or f"task-{uuid.uuid4().hex[:8]}"}}
+    resolved_thread_id = config["configurable"]["thread_id"]
+    run_id = f"run-{uuid.uuid4().hex}"
+    started_at = time.time()
+    store = get_runtime_store()
+    recorded = False
+    try:
+        store.start_run(
+            run_id=run_id,
+            thread_id=resolved_thread_id,
+            task_name=ctx.task_name,
+            trigger=trigger,
+            instruction=instruction,
+            started_at=started_at,
+        )
+        recorded = True
+    except Exception:
+        # 本地历史库异常不应阻止 Agent 正常执行；服务端会记录诊断日志。
+        logger.exception("无法登记 Agent 运行记录：%s", run_id)
 
     # --------------------------------------------------------
     # 2.3 调用 Agent
@@ -162,21 +183,49 @@ def run_task(
     # 但 runtime.context 会是 None，
     # 中间件里的 _ctx() 兜底会走到默认值，
     # 表现为「任务名和写权限都丢了」这种很难查的问题。
-    result = agent.invoke(
-        {"messages": [HumanMessage(content=instruction)]}, config, context=ctx
-    )
+    try:
+        agent = get_agent()
+        result = agent.invoke(
+            {"messages": [HumanMessage(content=instruction)]}, config, context=ctx
+        )
+        # Agent 跑完后最后一条是 AIMessage（最终回答）。
+        output = result["messages"][-1].content
+        message_count = len(result["messages"])
+    except Exception as exc:
+        if recorded:
+            try:
+                store.finish_run(
+                    run_id,
+                    status="failed",
+                    error=f"{type(exc).__name__}: {exc}",
+                    duration_ms=int((time.time() - started_at) * 1000),
+                )
+            except Exception:
+                logger.exception("无法保存 Agent 运行错误：%s", run_id)
+        raise
 
     # --------------------------------------------------------
     # 2.4 整理返回值
     # --------------------------------------------------------
 
-    # output 取最后一条消息的 content。
-    # Agent 跑完后最后一条一定是 AIMessage（模型的最终回答）。
+    if recorded:
+        try:
+            store.finish_run(
+                run_id,
+                status="succeeded",
+                output=output if isinstance(output, str) else str(output),
+                duration_ms=int((time.time() - started_at) * 1000),
+                message_count=message_count,
+            )
+        except Exception:
+            logger.exception("无法保存 Agent 运行结果：%s", run_id)
+
     return {
         "task_name": ctx.task_name,
-        "thread_id": config["configurable"]["thread_id"],
-        "output": result["messages"][-1].content,
+        "run_id": run_id,
+        "thread_id": resolved_thread_id,
+        "output": output,
         # 消息条数：一条用户消息 + 每轮的工具消息 + 最终回答。
         # 可以用来粗略判断这次任务来回了多少轮。
-        "messages": len(result["messages"]),
+        "messages": message_count,
     }

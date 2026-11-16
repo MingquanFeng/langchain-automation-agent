@@ -28,7 +28,7 @@ AUTOMATION_AGENT_PYTHON=/opt/miniconda3/envs/langchain1.2/bin/python npm run bui
 
 桌面应用启动时会选择一个空闲端口，只绑定 `127.0.0.1`，并在服务通过 `/health` 检查后载入工作台。端口由操作系统动态分配，因此不会占用浏览器版默认的 8000 端口。应用关闭窗口或退出时会向服务发送 `SIGTERM`，超时后再回收整个 sidecar 进程组。
 
-API Key 和模型配置保存在 macOS 应用支持目录的 `.env`；会话记忆数据库保存在同目录的 `data/`，启动日志在 `logs/runtime.log`。文件工具默认使用这个 `data/` 目录，也可点击工作台输入框左侧的文件夹按钮选择其他工作目录。更换目录会保存到应用支持目录并重启 Agent 服务，文件工具仍受目录沙箱限制；会话记忆不会移入所选目录。首次启动默认使用 MiniMax-M3（`LLM_PROVIDER`、`LLM_MODEL`、`LLM_BASE_URL`），模型设置只录入 `LLM_API_KEY`。
+API Key 和模型配置保存在 macOS 应用支持目录的 `.env`；会话记忆数据库保存在同目录的 `data/memory.sqlite`，定时任务配置与 Agent 运行记录保存在 `data/runtime.sqlite3`，启动日志在 `logs/runtime.log`。运行记录包含任务指令、最终结果或错误信息，时间按 UTC 保存。文件工具默认使用这个 `data/` 目录，也可点击工作台输入框左侧的文件夹按钮选择其他工作目录。更换目录会保存到应用支持目录并重启 Agent 服务，文件工具仍受目录沙箱限制；会话记忆和运行数据不会移入所选目录。首次启动默认使用 MiniMax-M3（`LLM_PROVIDER`、`LLM_MODEL`、`LLM_BASE_URL`），模型设置只录入 `LLM_API_KEY`。
 
 窗口载入工作台后，聊天页顶部也提供“连接服务 / 重试连接”按钮。它只重新打开 WebSocket，不会自动重发之前的任务；连接中断时任务最终状态可能未确认，需先查看服务端或日志再决定是否手动重发。
 

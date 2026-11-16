@@ -38,12 +38,13 @@ from contextlib import asynccontextmanager
 
 # FastAPI：Web 框架。
 # WebSocket / WebSocketDisconnect：桌面版的事件流端点。
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
 # BaseModel / Field：Pydantic 模型与字段声明，
 # FastAPI 用它做请求体校验和 OpenAPI 文档。
 from pydantic import BaseModel, Field
+from apscheduler.triggers.cron import CronTrigger
 
 # RUNTIME：应用运行配置，这里取调度开关和通知渠道。
 from agent.config import RUNTIME
@@ -62,9 +63,10 @@ from .runs import RunBusyError, RunManager
 
 # list_jobs / start_scheduler / stop_scheduler：调度器接口。
 from .scheduler import list_jobs, start_scheduler, stop_scheduler
+from .storage import get_runtime_store
 
 # ScheduledTask / add_task / all_tasks / remove_task：任务表接口。
-from .tasks import ScheduledTask, add_task, all_tasks, remove_task
+from .tasks import ScheduledTask, add_task, all_tasks, configure_persistence, remove_task
 
 logger = logging.getLogger(__name__)
 WORKBENCH_HTML = Path(__file__).resolve().parent.parent / "frontend" / "workbench.html"
@@ -99,6 +101,12 @@ async def lifespan(app: FastAPI):
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    store = get_runtime_store()
+    store.initialize()
+    store.mark_interrupted_runs()
+    configure_persistence(store)
+    app.state.runtime_store = store
+
     if RUNTIME.scheduler_enabled:
         start_scheduler()
         logger.info("定时任务已启动")
@@ -188,10 +196,7 @@ def list_scheduled_tasks() -> list[dict]:
     返回：
         每个元素含 name、cron、instruction、allow_write。
 
-    注意：
-    查的是 tasks.py 里的内存字典，
-    里面包含 POST /tasks 动态加的任务（进程重启后就没了）。
-    想看调度器实际注册了什么，用 /jobs。
+    查询持久化任务注册表。想看调度器实际注册了什么，用 /jobs。
     """
     return [
         {
@@ -199,6 +204,7 @@ def list_scheduled_tasks() -> list[dict]:
             "cron": t.cron,
             "instruction": t.instruction,
             "allow_write": t.allow_write,
+            "enabled": t.enabled,
         }
         for t in all_tasks()
     ]
@@ -219,6 +225,16 @@ def jobs() -> list[dict]:
     return list_jobs()
 
 
+@app.get("/runs")
+def list_agent_runs(
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    """分页查询最近的 Agent 执行记录，包括结果、错误和状态。"""
+    return app.state.runtime_store.list_runs(limit=limit, offset=offset)
+
+
+
 # ============================================================
 # 4. 定时任务增删接口
 # ============================================================
@@ -232,16 +248,16 @@ def create_task(req: ScheduledTaskRequest) -> dict:
         created：任务名。
         cron：注册进去的 cron 表达式。
 
-    注意：
-    add_task() 只改内存字典，
-    必须再调一次 start_scheduler() 才能让调度器真正认识它。
+    任务会先持久化，再重建调度器使其立即生效。
     start_scheduler() 内部会先停掉旧调度器再重建，
     所以这里直接调用是安全的。
 
-    注意：
-    任务只存在内存里，
-    进程重启就没了。要持久化得改 tasks.py 的 TASKS 列表。
     """
+    try:
+        CronTrigger.from_crontab(req.cron, timezone=RUNTIME.timezone)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"无效的 cron 表达式：{exc}") from exc
+
     task = ScheduledTask(
         name=req.name,
         cron=req.cron,
@@ -442,10 +458,25 @@ async def _handle_run_start(
             queue=queue,
             loop=asyncio.get_running_loop(),
             ctx=ctx,
+            on_started=lambda run: app.state.runtime_store.start_run(
+                run_id=run.run_id,
+                thread_id=run.thread_id,
+                task_name=run.task_name,
+                trigger=ctx.trigger,
+                instruction=run.instruction,
+                started_at=run.started_at,
+            ),
+            on_terminal=lambda event: _record_terminal_event(
+                app.state.runtime_store, event
+            ),
         )
     except RunBusyError:
         # 上一轮还在运行 —— 拒绝，不静默取消旧的。
         await queue.put(RunError(run_id="", message="上一轮还在运行"))
+        return
+    except Exception:
+        logger.exception("无法登记 Agent 运行记录")
+        await queue.put(RunError(run_id="", message="无法保存运行记录；本次任务未启动。"))
         return
 
     await queue.put(RunStart(
@@ -454,6 +485,34 @@ async def _handle_run_start(
         thread_id=handle.thread_id,
         instruction=instruction,
     ))
+
+
+def _record_terminal_event(store, event: BaseEvent) -> None:
+    """把 WebSocket run 的最终事件同步到本地运行记录。"""
+    if event.type == "run.end":
+        status = "succeeded"
+        output = getattr(event, "output", "")
+        error = None
+    elif event.type == "run.cancelled":
+        status = "cancelled"
+        output = ""
+        error = getattr(event, "reason", "") or None
+    else:
+        status = "failed"
+        output = ""
+        error = getattr(event, "message", "运行失败")
+    try:
+        store.finish_run(
+            event.run_id,
+            status=status,
+            output=output,
+            error=error,
+            duration_ms=getattr(event, "duration_ms", None),
+            message_count=getattr(event, "messages", None),
+        )
+    except Exception:
+        # 运行记录写入失败不能中断事件推送或改变 Agent 的实际结果。
+        logger.exception("无法保存 Agent 运行结果：%s", event.run_id)
 
 
 async def _handle_ws_cancel(

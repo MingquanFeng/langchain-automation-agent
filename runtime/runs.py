@@ -42,7 +42,7 @@ import uuid
 from dataclasses import dataclass, field
 
 # Any：typing 的任意类型标注。
-from typing import Any
+from typing import Any, Callable
 
 # AgentContext：运行时上下文。
 from agent.context import AgentContext
@@ -50,6 +50,7 @@ from agent.context import AgentContext
 # StreamConsumer：真正地执行体（阶段 3）。
 from runtime.consumer import StreamConsumer
 from runtime.approvals import ApprovalBroker
+from runtime.events import BaseEvent
 
 
 # ============================================================
@@ -128,6 +129,8 @@ class RunManager:
         queue: "asyncio.Queue",
         loop: asyncio.AbstractEventLoop,
         ctx: AgentContext,
+        on_started: Callable[[RunHandle], None] | None = None,
+        on_terminal: Callable[[BaseEvent], None] | None = None,
     ) -> RunHandle:
         """登记并启动一次执行。
 
@@ -140,6 +143,8 @@ class RunManager:
             queue：事件队列。
             loop：事件循环。
             ctx：运行时上下文。
+            on_started：可选的运行登记回调，在消费线程启动前调用。
+            on_terminal：可选的结束事件回调，用于保存执行结果。
 
         返回：
             登记好的 RunHandle。
@@ -171,12 +176,21 @@ class RunManager:
             )
             self._runs[run_id] = handle
 
+        if on_started is not None:
+            try:
+                on_started(handle)
+            except Exception:
+                # 登记失败时不启动任务，也不能在活跃表中留下孤儿 run。
+                self.finish(run_id)
+                raise
+
         consumer = StreamConsumer(
             agent=agent,
             run_id=run_id,
             queue=queue,
             loop=loop,
             cancel_event=handle.cancel_event,
+            on_terminal=on_terminal,
         )
         broker = ApprovalBroker(
             run_id=run_id,

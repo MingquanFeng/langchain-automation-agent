@@ -39,7 +39,7 @@ PY=/opt/miniconda3/envs/langchain1.2/bin/python
 所有命令都在本目录（`automation_agent/`）下执行。
 
 ```bash
-# 跑完整测试套件（当前记录为 101 项，全部用假模型，不调真实模型 API）
+# 跑完整测试套件（当前记录为 144 项，全部用假模型，不调真实模型 API）
 $PY -m pytest tests/ -q
 
 # 跑单个测试
@@ -71,6 +71,7 @@ $PY -m runtime --host 0.0.0.0 --port 8080
 | POST | `/tasks` | 动态添加定时任务（cron + 指令） |
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 列出调度器已注册的 job 与下次运行时间 |
+| GET | `/runs` | 分页查询 Agent 历史运行记录 |
 | GET | `/` | 连续对话调试工作台 |
 | WS | `/ws` | 桌面版事件流。收 `run.start` / `cancel`，推结构化事件 |
 

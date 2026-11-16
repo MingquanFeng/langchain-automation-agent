@@ -13,16 +13,15 @@
 2. 保存默认任务表 TASKS。
 3. 提供运行时增删查接口。
 
-注意：
-TASKS 是模块级内存字典，不落盘。
-进程重启后通过 POST /tasks 动态加的任务全部消失，
-只有改代码里的 TASKS 列表才是持久定义。
+默认任务由 TASKS 提供；服务首次启动时写入运行时数据库。之后动态增删改会持久化，
+数据库中的任务注册表在后续启动时作为实际配置来源。
 """
 
 from __future__ import annotations
 
 # dataclass：标准库的数据类装饰器。
 from dataclasses import dataclass
+from typing import Any
 
 
 # ============================================================
@@ -101,11 +100,8 @@ class ScheduledTask:
     enabled: bool = True
 
 
-# 默认任务表。cron 表达式按 agent/config.py 的 SCHEDULER_TIMEZONE 解释。
-#
-# 注意：
-# 这份列表是「持久定义」的唯一来源，
-# 改这里 = 改 Agent 每天自动做什么。
+# 默认任务表。首次创建运行时数据库时会将这些默认项写入数据库。
+# cron 表达式按 agent/config.py 的 SCHEDULER_TIMEZONE 解释。
 TASKS: list[ScheduledTask] = [
     ScheduledTask(
         name="每日待办汇总",
@@ -135,16 +131,36 @@ TASKS: list[ScheduledTask] = [
     ),
 ]
 
-# 运行时可动态添加
-#
-# 这是一个普通的模块级内存字典，
-# 键是任务名，值是任务对象。
-#
-# 注意：
-# 不落盘。进程重启后这里的动态任务就没了，
-# 剩下的只有上面 TASKS 列表里的内容
-# （下面这行初始化会把 TASKS 灌进 _registry）。
+# 热路径使用内存注册表；服务启动时从 SQLite 恢复，增删改时同步持久化。
 _registry: dict[str, ScheduledTask] = {t.name: t for t in TASKS}
+_store: Any | None = None
+
+
+def configure_persistence(store: Any) -> None:
+    """从运行时数据库恢复任务；数据库首次创建时种入代码默认值。"""
+    global _registry, _store
+    defaults = [
+        {
+            "name": task.name,
+            "cron": task.cron,
+            "instruction": task.instruction,
+            "allow_write": task.allow_write,
+            "enabled": task.enabled,
+        }
+        for task in TASKS
+    ]
+    rows = store.load_or_seed_tasks(defaults)
+    _registry = {
+        row["name"]: ScheduledTask(
+            name=row["name"],
+            cron=row["cron"],
+            instruction=row["instruction"],
+            allow_write=row["allow_write"],
+            enabled=row["enabled"],
+        )
+        for row in rows
+    }
+    _store = store
 
 
 # ============================================================
@@ -178,10 +194,16 @@ def add_task(task: ScheduledTask) -> None:
     覆盖后需要重新 start_scheduler() 才会真正生效
     （POST /tasks 接口已经帮你做了这一步）。
 
-    注意：
-    加进内存字典不等于注册进调度器。
-    只调 add_task() 的话，调度器里并没有这个 job。
+    持久化完成后更新内存注册表；HTTP 接口会重建调度器使任务立即生效。
     """
+    if _store is not None:
+        _store.save_task({
+            "name": task.name,
+            "cron": task.cron,
+            "instruction": task.instruction,
+            "allow_write": task.allow_write,
+            "enabled": task.enabled,
+        })
     _registry[task.name] = task
 
 
@@ -196,11 +218,13 @@ def remove_task(name: str) -> bool:
         True 表示确实删掉了；
         False 表示表里本来就没这个名字。
 
-    注意：
-    同样只改内存字典，
-    需要重新 start_scheduler() 才会在调度器里消失。
+    数据库和内存注册表都会删除该任务；HTTP 接口会重建调度器。
     """
     # pop 的第二个参数是默认值。
     # 任务不存在时返回 None，
     # 因此 `is not None` 正好等价于「删成功了」。
-    return _registry.pop(name, None) is not None
+    existed = name in _registry
+    if _store is not None:
+        _store.delete_task(name)
+    _registry.pop(name, None)
+    return existed

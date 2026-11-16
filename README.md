@@ -70,6 +70,9 @@ python -m runtime --reload       # 开发模式热重载
 | POST | `/tasks` | 动态添加定时任务 |
 | DELETE | `/tasks/{name}` | 删除定时任务 |
 | GET | `/jobs` | 已注册 job 与下次运行时间 |
+| GET | `/runs?limit=50&offset=0` | 分页查询最近执行记录及结果 |
+
+任务表在首次启动时从 `runtime/tasks.py` 的默认项初始化，之后的动态增删改会保存在运行时 SQLite 数据库，重启后继续生效。运行记录包含指令、最终输出或错误、触发来源、状态、耗时和会话 ID，默认保存在 `data/runtime.sqlite3`（桌面版位于应用支持目录；自定义 `SQLITE_PATH` 时使用同目录）。默认每页 50 条，最多 100 条。`/runs` 当前提供查询 API，工作台历史列表后续接入。
 
 WebSocket `/ws` 是工作台使用的实时事件流接口。只读工具会直接运行；写文件或发送通知时，聊天窗口会显示工具用途和参数，并等待你选择“仅允许本次”或“拒绝本次”。每次批准只对当前工具调用生效，取消任务或关闭连接时，等待中的工具不会执行。
 
@@ -121,6 +124,7 @@ runtime/
   runner.py          同步 run_task() 入口；提供共享的 get_agent() 单例
   scheduler.py       APScheduler 封装（LangGraph 1.x 本地没有内置 cron）
   server.py          FastAPI，定时任务接口、浏览器工作台、WebSocket 事件流
+  storage.py         SQLite 持久化定时任务与运行记录
   events.py          事件模型与流归一化
   consumer.py        工作线程中的 agent.stream() 消费器与跨线程背压
   runs.py             WebSocket run 生命周期、取消和清理

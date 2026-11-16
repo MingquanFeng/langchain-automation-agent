@@ -40,6 +40,9 @@ from __future__ import annotations
 # asyncio：跨线程投递事件用。
 import asyncio
 
+# logging：记录运行历史的回调失败不能影响事件流。
+import logging
+
 # threading：取消标志用（跨线程安全）。
 import threading
 
@@ -47,7 +50,7 @@ import threading
 import time
 
 # Any：typing 的任意类型标注。
-from typing import Any
+from typing import Any, Callable
 
 # AIMessage / HumanMessage：agent 循环的消息类型。
 from langchain_core.messages import AIMessage, HumanMessage
@@ -64,6 +67,8 @@ from runtime.events import (
 
 # AgentContext：运行时上下文。
 from agent.context import AgentContext
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -118,6 +123,7 @@ class StreamConsumer:
         loop: asyncio.AbstractEventLoop,
         cancel_event: threading.Event | None = None,
         max_pending: int = DEFAULT_MAX_PENDING,
+        on_terminal: Callable[[BaseEvent], None] | None = None,
     ) -> None:
         # agent：编译好的 CompiledStateGraph。
         self.agent = agent
@@ -131,6 +137,7 @@ class StreamConsumer:
 
         # 取消标志。跨线程置位，消费循环每轮检查。
         self.cancel_event = cancel_event if cancel_event is not None else threading.Event()
+        self.on_terminal = on_terminal
 
         # 归一化层：把 (模式名, 载荷) 变成事件。
         self.normalizer = StreamNormalizer(run_id)
@@ -207,7 +214,7 @@ class StreamConsumer:
         except Exception as exc:
             # 模型调用失败（API 401、重试耗尽）等异常逃出消费循环。
             # 异常路径必须发出一条结束事件。
-            self._emit(RunError(
+            self._emit_terminal(RunError(
                 run_id=self.run_id,
                 message=f"{type(exc).__name__}: {exc}",
                 recoverable=False,
@@ -219,7 +226,7 @@ class StreamConsumer:
         if cancelled:
             # 取消发的是 run.cancelled 而不是 run.end ——
             # 客户端据此把界面从「运行中」改到「已取消」。
-            self._emit(RunCancelled(run_id=self.run_id, reason="用户取消"))
+            self._emit_terminal(RunCancelled(run_id=self.run_id, reason="用户取消"))
             return
 
         output = "".join(text_parts)
@@ -232,12 +239,21 @@ class StreamConsumer:
             # 而不是一片空白。
             output = _last_message_text(final_state.get("messages", []))
 
-        self._emit(RunEnd(
+        self._emit_terminal(RunEnd(
             run_id=self.run_id,
             output=output,
             messages=len(text_parts),
             duration_ms=duration_ms,
         ))
+
+    def _emit_terminal(self, event: BaseEvent) -> None:
+        """先保存最终状态，再向连接发送对应结束事件。"""
+        if self.on_terminal is not None:
+            try:
+                self.on_terminal(event)
+            except Exception:
+                logger.exception("运行结果持久化回调失败：%s", self.run_id)
+        self._emit(event)
 
     # ---------- 跨线程投递 ----------
 
