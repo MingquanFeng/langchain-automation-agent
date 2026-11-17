@@ -322,6 +322,16 @@ def _serialize_checkpoint_message_list(raw_messages: list) -> list[dict]:
             continue
 
         text = _checkpoint_message_text(content)
+        # ContextInjectionMiddleware 的权限提示用于下一次模型调用，不是 Agent
+        # 对用户的回答。新检查点使用 name 标记；两个固定文本用于兼容已保存的旧数据。
+        if role == "assistant" and (
+            name == "context_hint"
+            or text in {
+                "（提示：写入或外部操作需要对具体工具调用单独授权；未授权的操作不会执行。）",
+                "（提示：本轮为只读模式，任何写操作都会被拒绝。）",
+            }
+        ):
+            continue
         if role == "assistant":
             text = THINK_RE.sub("", text)
             if not text.strip() and tool_calls:

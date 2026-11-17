@@ -178,7 +178,10 @@ class ContextInjectionMiddleware(AgentMiddleware):
             )
             return {
                 "messages": [
-                    AIMessage(content=notice)
+                    # name 让持久化会话恢复层能识别内部提示，避免把它当成
+                    # Agent 对用户的正式回答重新显示。历史旧数据还会由服务端
+                    # 按固定文本兼容过滤。
+                    AIMessage(content=notice, name="context_hint")
                 ]
             }
         return None

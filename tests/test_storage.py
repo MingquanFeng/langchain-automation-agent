@@ -4,6 +4,7 @@
 1. 默认任务只在新数据库中种入一次，动态改动跨 RuntimeStore 实例保留。
 2. Agent run 的成功、失败、取消和进程中断状态能正确写入并分页读取。
 3. 同步 runner 与 WebSocket 服务都使用运行时存储记录实际执行结果。
+4. 工作台历史分页、消息恢复和运行记录/会话删除语义保持一致。
 
 所有数据库写入都使用 pytest 临时目录；WebSocket 集成测试使用假模型，不调用真实模型 API。
 """
@@ -433,4 +434,207 @@ def test_checkpoint_thread_history_lists_sessions_without_run_rows(
         "第二段回答",
     }
     assert isolated_server_store.list_runs() == []
+
+
+def _seed_finished_run(
+    store: RuntimeStore,
+    run_id: str,
+    thread_id: str,
+    *,
+    started_at: float,
+) -> None:
+    """为历史删除语义测试创建一条已完成运行记录。"""
+    store.start_run(
+        run_id=run_id,
+        thread_id=thread_id,
+        task_name=f"任务-{run_id}",
+        trigger="api",
+        instruction=f"处理 {run_id}",
+        started_at=started_at,
+    )
+    store.finish_run(
+        run_id,
+        status="succeeded",
+        output=f"完成 {run_id}",
+        finished_at=started_at + 1,
+    )
+
+
+def test_thread_messages_restore_and_continue_the_same_thread(
+    isolated_server_store, monkeypatch
+):
+    """消息接口过滤内部提示，恢复后的下一轮沿用原 thread_id 和完整记忆。"""
+    import runtime.server as server_mod
+
+    from agent.graph import build_agent
+
+    thread_id = "thread-history-resume"
+    test_agent = build_agent(
+        model=FakeModel(messages=iter([
+            AIMessage(content="第一轮回答"),
+            AIMessage(content="第二轮回答"),
+        ])),
+        checkpointer=InMemorySaver(),
+    )
+    monkeypatch.setattr(server_mod, "get_agent", lambda: test_agent)
+
+    with TestClient(server_mod.app) as client:
+        for instruction, expected_output in (
+            ("第一轮问题", "第一轮回答"),
+            ("继续这个会话", "第二轮回答"),
+        ):
+            with client.websocket_connect("/ws") as websocket:
+                websocket.send_json({
+                    "type": "run.start",
+                    "instruction": instruction,
+                    "thread_id": thread_id,
+                })
+                events = _receive_until_terminal(websocket, {"run.end", "run.error"})
+            assert events[-1]["type"] == "run.end"
+            assert events[-1]["output"] == expected_output
+
+        response = client.get("/threads/messages", params={"thread_id": thread_id})
+        session = client.get("/threads?limit=10&offset=0").json()["threads"][0]
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["thread_id"] == thread_id
+    assert payload["truncated"] is False
+    assert [(item["role"], item["content"]) for item in payload["messages"]] == [
+        ("user", "第一轮问题"),
+        ("assistant", "第一轮回答"),
+        ("user", "继续这个会话"),
+        ("assistant", "第二轮回答"),
+    ]
+    assert session["thread_id"] == thread_id
+    assert session["title"] == "第一轮问题"
+    assert session["preview"] == "第二轮回答"
+    assert session["message_count"] == 4
+
+
+def test_deleting_runs_and_clearing_history_preserve_checkpoint(
+    isolated_server_store, monkeypatch
+):
+    """删除单条或清空运行记录都不能删除对应的会话记忆。"""
+    import runtime.server as server_mod
+
+    from agent.context import AgentContext
+    from agent.graph import build_agent
+
+    thread_id = "thread-history-keep"
+    test_agent = build_agent(
+        model=FakeModel(messages=iter([AIMessage(content="会话记忆仍在")])),
+        checkpointer=InMemorySaver(),
+    )
+    test_agent.invoke(
+        {"messages": [HumanMessage(content="需要保留的提问")]},
+        {"configurable": {"thread_id": thread_id}},
+        context=AgentContext(allow_write=True),
+    )
+    monkeypatch.setattr(server_mod, "get_agent", lambda: test_agent)
+    _seed_finished_run(isolated_server_store, "run-delete-one", thread_id, started_at=10)
+    _seed_finished_run(isolated_server_store, "run-clear-rest", thread_id, started_at=20)
+
+    with TestClient(server_mod.app) as client:
+        deleted = client.delete("/runs/run-delete-one")
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+        assert [row["run_id"] for row in client.get("/runs").json()] == ["run-clear-rest"]
+        assert client.get("/threads/messages", params={"thread_id": thread_id}).json()[
+            "message_count"
+        ] == 2
+
+        cleared = client.delete("/runs")
+        assert cleared.status_code == 200
+        assert cleared.json()["deleted"] == 1
+        assert client.get("/runs").json() == []
+        messages = client.get("/threads/messages", params={"thread_id": thread_id}).json()
+        threads = client.get("/threads").json()["threads"]
+
+    assert messages["message_count"] == 2
+    assert any(item["thread_id"] == thread_id for item in threads)
+
+
+def test_running_history_cannot_be_deleted_or_cleared(
+    isolated_server_store, monkeypatch
+):
+    """仍在运行的记录不能单独删除，也不能通过清空历史绕过保护。"""
+    import runtime.server as server_mod
+
+    from agent.graph import build_agent
+
+    test_agent = build_agent(
+        model=FakeModel(messages=iter([AIMessage(content="不会实际调用")])),
+        checkpointer=InMemorySaver(),
+    )
+    monkeypatch.setattr(server_mod, "get_agent", lambda: test_agent)
+
+    with TestClient(server_mod.app) as client:
+        # lifespan 会把启动前遗留的 running 标记为 interrupted，所以必须在服务
+        # 启动后创建当前进程内的运行记录，才能验证在线保护语义。
+        isolated_server_store.start_run(
+            run_id="run-live",
+            thread_id="thread-live",
+            task_name="当前运行任务",
+            trigger="api",
+            instruction="不能删除",
+            started_at=20,
+        )
+        assert client.delete("/runs/run-live").status_code == 409
+        assert client.delete("/runs").status_code == 409
+
+        isolated_server_store.finish_run("run-live", status="cancelled")
+        assert client.delete("/runs/run-live").status_code == 200
+
+
+def test_deleting_thread_removes_checkpoint_and_only_its_runs(
+    isolated_server_store, monkeypatch
+):
+    """删除整个会话清理其 Checkpointer 和关联记录，但不影响其他会话。"""
+    import runtime.server as server_mod
+
+    from agent.context import AgentContext
+    from agent.graph import build_agent
+
+    target_thread = "thread-history-delete"
+    other_thread = "thread-history-other"
+    test_agent = build_agent(
+        model=FakeModel(messages=iter([
+            AIMessage(content="待删除回答"),
+            AIMessage(content="保留回答"),
+        ])),
+        checkpointer=InMemorySaver(),
+    )
+    for thread_id, question in (
+        (target_thread, "待删除问题"),
+        (other_thread, "保留问题"),
+    ):
+        test_agent.invoke(
+            {"messages": [HumanMessage(content=question)]},
+            {"configurable": {"thread_id": thread_id}},
+            context=AgentContext(allow_write=True),
+        )
+    monkeypatch.setattr(server_mod, "get_agent", lambda: test_agent)
+    _seed_finished_run(isolated_server_store, "run-target-1", target_thread, started_at=10)
+    _seed_finished_run(isolated_server_store, "run-target-2", target_thread, started_at=20)
+    _seed_finished_run(isolated_server_store, "run-other", other_thread, started_at=30)
+
+    with TestClient(server_mod.app) as client:
+        deleted = client.delete("/threads", params={"thread_id": target_thread})
+        assert deleted.status_code == 200
+        assert deleted.json() == {"thread_id": target_thread, "deleted_runs": 2}
+
+        target_messages = client.get(
+            "/threads/messages", params={"thread_id": target_thread}
+        ).json()
+        other_messages = client.get(
+            "/threads/messages", params={"thread_id": other_thread}
+        ).json()
+        threads = client.get("/threads").json()["threads"]
+        runs = client.get("/runs").json()
+
+    assert target_messages["message_count"] == 0
+    assert other_messages["message_count"] == 2
+    assert {item["thread_id"] for item in threads} == {other_thread}
+    assert [row["run_id"] for row in runs] == ["run-other"]
 
