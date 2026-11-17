@@ -32,9 +32,16 @@ from langgraph.store.sqlite import SqliteStore
 # 导入模块对象是为了替换 graph.py 中运行时读取的 RUNTIME、
 # _build_store 和 create_agent，而不是只替换本测试文件里的名字。
 import agent.graph as graph_module
+import agent.memory as memory_module
 
-# 命名空间构建函数是本组隔离测试的直接被测对象。
-from agent.memory import build_memory_namespaces
+# 命名空间与记录服务是本组隔离测试的直接被测对象。
+from agent.memory import (
+    MemoryValidationError,
+    build_memory_namespaces,
+    delete_memory_record,
+    list_memory_records,
+    save_memory_record,
+)
 
 
 # ============================================================
@@ -206,8 +213,11 @@ def test_namespaces_do_not_expose_local_identity_or_absolute_path(tmp_path):
     assert "alice@example.com" not in serialized
     assert str(project.resolve()) not in serialized
 
-    # 项目作用域必须嵌套在用户作用域下，这是跨用户隔离的结构保证。
-    assert namespaces.project[: len(namespaces.user)] == namespaces.user
+    # profile 与 projects 是同一用户根节点下的两个并列分支，
+    # 查询用户级记忆时不会因前缀匹配混入项目级数据。
+    assert namespaces.user[-1] == "profile"
+    assert namespaces.project[-2] == "projects"
+    assert namespaces.user[:-1] == namespaces.project[:-2]
 
 
 def test_same_key_is_isolated_between_projects(monkeypatch, tmp_path):
@@ -244,3 +254,98 @@ def test_empty_memory_user_id_is_rejected(tmp_path):
     # ^...$ 要求完整错误信息匹配，防止以后把空身份静默改成默认公共桶。
     with pytest.raises(ValueError, match="^memory user id 不能为空$"):
         build_memory_namespaces(user_id="  ", project_dir=tmp_path)
+
+
+# ============================================================
+# 5. 记录 CRUD 与显式保存边界
+# ============================================================
+
+def _use_memory_context(monkeypatch, project_dir: Path) -> None:
+    """让记录服务在测试项目和本地测试用户的命名空间中运行。"""
+    monkeypatch.setattr(
+        memory_module.config,
+        "RUNTIME",
+        SimpleNamespace(memory_user_id="test-user"),
+    )
+    monkeypatch.setattr(memory_module.config, "DATA_DIR", project_dir)
+
+
+def test_memory_records_can_be_created_updated_listed_and_deleted(monkeypatch, tmp_path):
+    """显式记忆入口完整支持查看、新建、修改和删除。"""
+    _use_memory_context(monkeypatch, tmp_path / "project")
+    store = InMemoryStore()
+
+    created = save_memory_record(
+        store,
+        scope="project",
+        memory_kind="preference",
+        content="  默认使用简体中文  ",
+    )
+    assert created["id"].startswith("mem_")
+    assert created["content"] == "默认使用简体中文"
+
+    updated = save_memory_record(
+        store,
+        scope="project",
+        memory_kind="fact",
+        content="项目使用 Python 3.13",
+        memory_id=created["id"],
+    )
+    assert updated["id"] == created["id"]
+    assert updated["memory_type"] == "fact"
+
+    listed = list_memory_records(store, scope="project")
+    assert listed["items"] == [updated]
+    assert listed["has_more"] is False
+
+    assert delete_memory_record(
+        store,
+        scope="project",
+        memory_id=created["id"],
+    ) is True
+    assert delete_memory_record(
+        store,
+        scope="project",
+        memory_id=created["id"],
+    ) is False
+
+
+def test_user_and_project_record_lists_do_not_mix(monkeypatch, tmp_path):
+    """用户级查询与项目级查询只返回各自精确命名空间的数据。"""
+    _use_memory_context(monkeypatch, tmp_path / "project")
+    store = InMemoryStore()
+    user_record = save_memory_record(
+        store,
+        scope="user",
+        memory_kind="preference",
+        content="所有项目默认用中文",
+    )
+    project_record = save_memory_record(
+        store,
+        scope="project",
+        memory_kind="fact",
+        content="当前项目使用 SQLite",
+    )
+
+    assert list_memory_records(store, scope="user")["items"] == [user_record]
+    assert list_memory_records(store, scope="project")["items"] == [project_record]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"scope": "all", "memory_kind": "fact", "content": "x"}, "作用域"),
+        ({"scope": "user", "memory_kind": "conversation", "content": "x"}, "类型"),
+        ({"scope": "user", "memory_kind": "fact", "content": "   "}, "不能为空"),
+    ],
+)
+def test_memory_record_validation_rejects_unsafe_shapes(
+    monkeypatch,
+    tmp_path,
+    kwargs,
+    message,
+):
+    """不允许公共作用域、整段对话类别或空内容进入 Store。"""
+    _use_memory_context(monkeypatch, tmp_path / "project")
+    with pytest.raises(MemoryValidationError, match=message):
+        save_memory_record(InMemoryStore(), **kwargs)

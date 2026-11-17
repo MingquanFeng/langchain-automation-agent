@@ -4,7 +4,7 @@ Agent 工具集合的统一导出入口。
 对应课件 05 章（courseware/langChain/尚硅谷-05-Tools.pdf）：@tool 定义工具，docstring 就是给模型看的说明。
 
 主要职责：
-1. 汇总文件、结构化编辑和通知工具。
+1. 汇总文件、结构化编辑、长期记忆和通知工具。
 2. 提供 ALL_TOOLS 列表，供 graph.py 注入 create_agent。
 3. 作为「Agent 能调用哪些工具」的唯一白名单。
 
@@ -28,6 +28,9 @@ from .edits import EDIT_TOOLS
 # NOTIFY_TOOLS：通知出口工具。
 # 来自 notify.py，webhook 未配置时降级为终端输出。
 from .notify import NOTIFY_TOOLS
+
+# MEMORY_TOOLS：显式查看、保存、修改和删除长期记忆。
+from .memories import MEMORY_TOOLS
 from .risk import (
     PermissionDecision,
     TOOL_RISK_LEVELS,
@@ -49,7 +52,7 @@ from .risk import (
 #
 # 用 *FILE_TOOLS, *NOTIFY_TOOLS 而不是直接拼接 +，
 # 是因为 + 只能连接两个列表，解包的方式可以继续加第三组。
-ALL_TOOLS = [*FILE_TOOLS, *EDIT_TOOLS, *NOTIFY_TOOLS]
+ALL_TOOLS = [*FILE_TOOLS, *EDIT_TOOLS, *MEMORY_TOOLS, *NOTIFY_TOOLS]
 
 # 启动时校验工具清单和风险登记表完全一致。
 # 新增、移除或重命名工具却未同步风险表时，尽早失败，避免权限策略漏项。
@@ -75,6 +78,7 @@ __all__ = [
     "ALL_TOOLS",
     "FILE_TOOLS",
     "EDIT_TOOLS",
+    "MEMORY_TOOLS",
     "NOTIFY_TOOLS",
     "TOOL_RISK_LEVELS",
     "ToolRiskLevel",

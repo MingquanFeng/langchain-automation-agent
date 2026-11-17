@@ -23,6 +23,7 @@
     }
 
     * { box-sizing: border-box; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; margin: -1px; padding: 0; border: 0; clip: rect(0 0 0 0); white-space: nowrap; }
     body {
       margin: 0;
       min-width: 320px;
@@ -310,6 +311,36 @@
     .settings-option button { min-height: 32px; border: 1px solid #dce3f0; border-radius: 8px; padding: 0 10px; color: #49618d; background: #fff; font-size: 10px; font-weight: 650; white-space: nowrap; }
     .settings-option button:hover { border-color: #bccaf0; background: #f7f9ff; }
     .settings-panel-foot { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid #edf0f6; color: #939eb0; font-size: 9px; line-height: 1.6; }
+
+    .memory-dialog { width: min(700px, calc(100vw - 28px)); max-height: min(86vh, 820px); border: 1px solid #e1e6f0; border-radius: 18px; padding: 0; color: #26334b; background: #f8faff; box-shadow: 0 24px 80px #1c2d4b30; }
+    .memory-dialog::backdrop { background: #18243c66; backdrop-filter: blur(3px); }
+    .memory-panel { display: flex; max-height: min(86vh, 820px); flex-direction: column; }
+    .memory-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 21px 23px 16px; border-bottom: 1px solid #e8ecf4; background: #fff; }
+    .memory-head h2 { margin: 0; font-size: 19px; letter-spacing: -.03em; }
+    .memory-head p { margin: 5px 0 0; color: #8390a6; font-size: 11px; line-height: 1.6; }
+    .memory-close { width: 32px; height: 32px; border: 0; border-radius: 8px; color: #77849b; background: #f4f6fa; cursor: pointer; font-size: 19px; }
+    .memory-toolbar { display: flex; align-items: center; gap: 9px; padding: 13px 18px; border-bottom: 1px solid #e8ecf4; background: #fff; }
+    .memory-toolbar select, .memory-form select { min-height: 34px; border: 1px solid #dce3f0; border-radius: 8px; padding: 0 9px; color: #465571; background: #fff; font-size: 10px; }
+    .memory-toolbar button, .memory-form button, .memory-action { min-height: 34px; border: 1px solid #dce3f0; border-radius: 8px; padding: 0 11px; color: #49618d; background: #fff; font-size: 10px; font-weight: 650; cursor: pointer; }
+    .memory-toolbar button { margin-left: auto; color: #fff; border-color: #416ce7; background: #416ce7; }
+    .memory-status { margin-right: auto; color: #8290a7; font-size: 10px; }
+    .memory-content { min-height: 0; overflow: auto; padding: 14px 18px 18px; }
+    .memory-form { display: grid; gap: 10px; margin-bottom: 13px; padding: 13px; border: 1px solid #dfe5f1; border-radius: 12px; background: #fff; }
+    .memory-form[hidden] { display: none; }
+    .memory-form label { display: grid; gap: 5px; color: #53617a; font-size: 10px; font-weight: 650; }
+    .memory-form textarea { min-height: 86px; resize: vertical; border: 1px solid #dce3f0; border-radius: 9px; padding: 9px 10px; color: #35435c; background: #fbfcff; font: 11px/1.6 var(--sans); }
+    .memory-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .memory-form .memory-save { color: #fff; border-color: #416ce7; background: #416ce7; }
+    .memory-list { display: grid; gap: 9px; }
+    .memory-item { padding: 13px 14px; border: 1px solid #e2e7f2; border-radius: 12px; background: #fff; box-shadow: 0 4px 13px #34487308; }
+    .memory-item-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .memory-badge { border-radius: 20px; padding: 4px 8px; color: #365fd0; background: #e9efff; font-size: 9px; font-weight: 650; }
+    .memory-item-time { color: #98a2b4; font-size: 9px; }
+    .memory-item-content { margin: 9px 0 0; color: #4d5d77; font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .memory-item-actions { display: flex; gap: 7px; margin-top: 10px; }
+    .memory-action { min-height: 30px; }
+    .memory-action.danger { color: #a14b4b; border-color: #f0d9d9; }
+    .memory-empty { padding: 34px 12px; color: #8995aa; text-align: center; font-size: 11px; }
 
     .history-dialog { width: min(860px, calc(100vw - 28px)); max-height: min(88vh, 900px); border: 1px solid #e1e6f0; border-radius: 18px; padding: 0; color: #26334b; background: #f8faff; box-shadow: 0 24px 80px #1c2d4b30; }
     .history-dialog::backdrop { background: #18243c66; backdrop-filter: blur(3px); }
@@ -629,7 +660,59 @@
         </div>
         <button id="openServiceSettingsButton" type="button">管理服务</button>
       </div>
+      <div class="settings-option">
+        <span class="settings-option-icon" aria-hidden="true">◇</span>
+        <div class="settings-option-copy">
+          <strong>长期记忆</strong>
+          <span>查看、修改或删除你明确要求跨会话保存的偏好和事实。</span>
+        </div>
+        <button id="openMemorySettingsButton" type="button">管理记忆</button>
+      </div>
       <p class="settings-panel-foot">当前连接地址显示在左侧栏底部。API Key 保存在本机配置文件中。</p>
+    </section>
+  </dialog>
+
+  <dialog class="memory-dialog" id="memoryDialog" aria-labelledby="memoryTitle">
+    <section class="memory-panel">
+      <header class="memory-head">
+        <div>
+          <h2 id="memoryTitle">长期记忆</h2>
+          <p>这里只显示明确保存的偏好和事实。项目记忆不会在其他工作目录中出现。</p>
+        </div>
+        <button class="memory-close" id="closeMemoryDialog" type="button" aria-label="关闭长期记忆">×</button>
+      </header>
+      <div class="memory-toolbar">
+        <label>
+          <span class="sr-only">记忆作用域</span>
+          <select id="memoryScope">
+            <option value="project">当前项目</option>
+            <option value="user">所有项目</option>
+          </select>
+        </label>
+        <span class="memory-status" id="memoryStatus" role="status" aria-live="polite"></span>
+        <button id="newMemoryButton" type="button">新增记忆</button>
+      </div>
+      <div class="memory-content">
+        <form class="memory-form" id="memoryForm" hidden>
+          <input id="memoryId" type="hidden">
+          <label>
+            类型
+            <select id="memoryType">
+              <option value="preference">偏好</option>
+              <option value="fact">事实</option>
+            </select>
+          </label>
+          <label>
+            内容
+            <textarea id="memoryContent" maxlength="4000" required placeholder="一条简短、独立的偏好或事实"></textarea>
+          </label>
+          <div class="memory-form-actions">
+            <button id="cancelMemoryEditButton" type="button">取消</button>
+            <button class="memory-save" type="submit">保存</button>
+          </div>
+        </form>
+        <div class="memory-list" id="memoryList"></div>
+      </div>
     </section>
   </dialog>
 
@@ -684,6 +767,18 @@
     const newChatButton = $("#newChatButton");
     const sidebarSettingsButton = $("#sidebarSettingsButton");
     const settingsDialog = $("#settingsDialog");
+    const memoryDialog = $("#memoryDialog");
+    const memoryScope = $("#memoryScope");
+    const memoryStatus = $("#memoryStatus");
+    const memoryList = $("#memoryList");
+    const memoryForm = $("#memoryForm");
+    const memoryId = $("#memoryId");
+    const memoryType = $("#memoryType");
+    const memoryContent = $("#memoryContent");
+    const openMemorySettingsButton = $("#openMemorySettingsButton");
+    const closeMemoryDialogButton = $("#closeMemoryDialog");
+    const newMemoryButton = $("#newMemoryButton");
+    const cancelMemoryEditButton = $("#cancelMemoryEditButton");
     const historyDialog = $("#historyDialog");
     const sessionHistoryList = $("#sessionHistoryList");
     const sessionHistoryStatus = $("#sessionHistoryStatus");
@@ -729,11 +824,17 @@
     let historyOffset = 0;
     let historyHasMore = false;
     let historyLoading = false;
+    let memoryRecords = [];
 
-    function serviceFetch(path, { method = "GET" } = {}) {
+    function serviceFetch(path, { method = "GET", body } = {}) {
       const headers = serviceAccessToken ? { Authorization: `Bearer ${serviceAccessToken}` } : {};
+      if (body !== undefined) headers["Content-Type"] = "application/json";
       return fetch(new URL(path, `${serviceOrigin}/`), {
-        method, headers, cache: "no-store", redirect: "error",
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        cache: "no-store",
+        redirect: "error",
       });
     }
 
@@ -882,6 +983,150 @@
       let body = {};
       try { body = await response.json(); } catch {}
       return new Error(body.detail || fallback);
+    }
+
+    function resetMemoryForm() {
+      memoryId.value = "";
+      memoryType.value = "preference";
+      memoryContent.value = "";
+      memoryForm.hidden = true;
+    }
+
+    function editMemory(record) {
+      memoryId.value = record.id;
+      memoryType.value = record.memory_type;
+      memoryContent.value = record.content;
+      memoryForm.hidden = false;
+      memoryContent.focus();
+    }
+
+    function renderMemories() {
+      memoryList.replaceChildren();
+      if (!memoryRecords.length) {
+        const empty = document.createElement("div");
+        empty.className = "memory-empty";
+        empty.textContent = memoryScope.value === "project"
+          ? "当前项目还没有长期记忆。"
+          : "还没有跨项目共享的用户记忆。";
+        memoryList.append(empty);
+        return;
+      }
+
+      for (const record of memoryRecords) {
+        const item = document.createElement("article");
+        item.className = "memory-item";
+
+        const head = document.createElement("div");
+        head.className = "memory-item-head";
+        const badge = document.createElement("span");
+        badge.className = "memory-badge";
+        badge.textContent = record.memory_type === "preference" ? "偏好" : "事实";
+        const time = document.createElement("span");
+        time.className = "memory-item-time";
+        time.textContent = `更新于 ${formatRunDate(record.updated_at)}`;
+        head.append(badge, time);
+
+        const content = document.createElement("p");
+        content.className = "memory-item-content";
+        content.textContent = record.content;
+
+        const actions = document.createElement("div");
+        actions.className = "memory-item-actions";
+        const edit = document.createElement("button");
+        edit.className = "memory-action";
+        edit.type = "button";
+        edit.textContent = "编辑";
+        edit.addEventListener("click", () => editMemory(record));
+        const remove = document.createElement("button");
+        remove.className = "memory-action danger";
+        remove.type = "button";
+        remove.textContent = "删除";
+        remove.addEventListener("click", () => void removeMemory(record, remove));
+        actions.append(edit, remove);
+
+        item.append(head, content, actions);
+        memoryList.append(item);
+      }
+    }
+
+    async function loadMemories() {
+      memoryStatus.textContent = "正在加载…";
+      memoryList.setAttribute("aria-busy", "true");
+      try {
+        const response = await serviceFetch(
+          `/memories?scope=${encodeURIComponent(memoryScope.value)}&limit=100&offset=0`,
+        );
+        if (!response.ok) throw await apiError(response, "读取长期记忆失败");
+        const result = await response.json();
+        memoryRecords = Array.isArray(result.items) ? result.items : [];
+        renderMemories();
+        memoryStatus.textContent = `${memoryRecords.length} 条`;
+      } catch (error) {
+        memoryRecords = [];
+        renderMemories();
+        memoryStatus.textContent = error.message;
+      } finally {
+        memoryList.removeAttribute("aria-busy");
+      }
+    }
+
+    async function saveMemoryFromForm(event) {
+      event.preventDefault();
+      const content = memoryContent.value.trim();
+      if (!content) {
+        memoryStatus.textContent = "记忆内容不能为空";
+        memoryContent.focus();
+        return;
+      }
+
+      const id = memoryId.value;
+      const method = id ? "PUT" : "POST";
+      const path = id ? `/memories/${encodeURIComponent(id)}` : "/memories";
+      memoryStatus.textContent = id ? "正在保存修改…" : "正在保存…";
+      try {
+        const response = await serviceFetch(path, {
+          method,
+          body: {
+            scope: memoryScope.value,
+            memory_type: memoryType.value,
+            content,
+          },
+        });
+        if (!response.ok) throw await apiError(response, "保存长期记忆失败");
+        resetMemoryForm();
+        await loadMemories();
+      } catch (error) {
+        memoryStatus.textContent = error.message;
+      }
+    }
+
+    async function removeMemory(record, button) {
+      // 第一次点击只把按钮切成确认态，第二次点击才真正请求删除。
+      // 不使用原生 confirm，避免阻塞 WebView 事件循环，也让确认目标始终可见。
+      if (button.dataset.confirming !== "true") {
+        button.dataset.confirming = "true";
+        button.textContent = "确认删除";
+        window.setTimeout(() => {
+          if (button.isConnected) {
+            button.dataset.confirming = "false";
+            button.textContent = "删除";
+          }
+        }, 4000);
+        return;
+      }
+      button.disabled = true;
+      memoryStatus.textContent = "正在删除…";
+      try {
+        const response = await serviceFetch(
+          `/memories/${encodeURIComponent(record.id)}?scope=${encodeURIComponent(memoryScope.value)}`,
+          { method: "DELETE" },
+        );
+        if (!response.ok) throw await apiError(response, "删除长期记忆失败");
+        resetMemoryForm();
+        await loadMemories();
+      } catch (error) {
+        memoryStatus.textContent = error.message;
+      }
     }
 
     function updateHistoryControls() {
@@ -1726,6 +1971,26 @@
       homeButton.setAttribute("aria-current", "page");
     });
     closeSettingsDialogButton.addEventListener("click", () => settingsDialog.close());
+
+    openMemorySettingsButton.addEventListener("click", () => {
+      settingsDialog.close();
+      resetMemoryForm();
+      memoryDialog.showModal();
+      void loadMemories();
+    });
+    closeMemoryDialogButton.addEventListener("click", () => memoryDialog.close());
+    memoryDialog.addEventListener("close", resetMemoryForm);
+    memoryScope.addEventListener("change", () => {
+      resetMemoryForm();
+      void loadMemories();
+    });
+    newMemoryButton.addEventListener("click", () => {
+      resetMemoryForm();
+      memoryForm.hidden = false;
+      memoryContent.focus();
+    });
+    cancelMemoryEditButton.addEventListener("click", resetMemoryForm);
+    memoryForm.addEventListener("submit", saveMemoryFromForm);
 
     function openShellSettings(type, standaloneMessage) {
       settingsDialog.close();

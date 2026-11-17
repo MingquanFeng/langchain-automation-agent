@@ -16,6 +16,7 @@ from typing import Iterable, Literal
 ToolRiskLevel = Literal[
     "read_only",
     "internal_state",
+    "persistent_state_write",
     "workspace_write",
     "external_effect",
 ]
@@ -26,6 +27,7 @@ PermissionDecision = Literal["allow", "require_approval", "deny"]
 RISK_LEVELS: frozenset[str] = frozenset({
     "read_only",
     "internal_state",
+    "persistent_state_write",
     "workspace_write",
     "external_effect",
 })
@@ -34,6 +36,7 @@ RISK_LEVELS: frozenset[str] = frozenset({
 #
 # read_only：只读取工作区数据，不修改文件，也不向外部发送信息。
 # internal_state：只更新当前 Agent 运行中的内部任务状态。
+# persistent_state_write：修改应用自己的持久数据，例如长期记忆。
 # workspace_write：会在 Agent 工作目录内创建或修改文件。
 # external_effect：会向项目外部发送通知等信息，产生外部副作用。
 #
@@ -48,6 +51,11 @@ TOOL_RISK_LEVELS: dict[str, ToolRiskLevel] = {
     "read_file": "read_only",
     "read_json": "read_only",
     "list_file_backups": "read_only",
+    "list_memories": "read_only",
+
+    # 长期记忆写入：不修改项目文件，但会改变跨会话持久状态。
+    "save_memory": "persistent_state_write",
+    "delete_memory": "persistent_state_write",
 
     # 文件写入工具：会修改 data/ 沙箱内的项目数据。
     "write_file": "workspace_write",

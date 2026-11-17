@@ -212,6 +212,69 @@ def test_run_start_echoes_the_run_metadata(client):
     assert start["instruction"] == "列出数据目录下的文件"
 
 
+# ---------- 长期记忆管理 API ----------
+
+def test_memory_api_supports_explicit_crud(client):
+    """管理入口可以查看、新建、修改和删除一条明确的长期记忆。"""
+    created_response = client.post("/memories", json={
+        "scope": "project",
+        "memory_type": "preference",
+        "content": "默认使用简体中文",
+    })
+    assert created_response.status_code == 201
+    created = created_response.json()
+    assert created["id"].startswith("mem_")
+    assert created["content"] == "默认使用简体中文"
+
+    listed = client.get("/memories?scope=project").json()
+    assert listed["items"] == [created]
+
+    updated_response = client.put(f"/memories/{created['id']}", json={
+        "scope": "project",
+        "memory_type": "fact",
+        "content": "当前项目使用 SQLite",
+    })
+    assert updated_response.status_code == 200
+    updated = updated_response.json()
+    assert updated["memory_type"] == "fact"
+    assert updated["content"] == "当前项目使用 SQLite"
+
+    deleted = client.delete(
+        f"/memories/{created['id']}?scope=project"
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+    assert client.get("/memories?scope=project").json()["items"] == []
+
+
+def test_memory_api_rejects_invalid_or_missing_records(client):
+    """非法类别、空内容、错误 ID 和不存在的更新都有明确状态码。"""
+    invalid_kind = client.post("/memories", json={
+        "scope": "project",
+        "memory_type": "conversation",
+        "content": "不要保存整段对话",
+    })
+    assert invalid_kind.status_code == 422
+
+    empty_content = client.post("/memories", json={
+        "scope": "project",
+        "memory_type": "fact",
+        "content": "   ",
+    })
+    assert empty_content.status_code == 422
+
+    invalid_id = client.delete("/memories/not-a-memory?scope=project")
+    assert invalid_id.status_code == 422
+
+    missing_id = "mem_00000000000000000000000000000000"
+    missing = client.put(f"/memories/{missing_id}", json={
+        "scope": "project",
+        "memory_type": "fact",
+        "content": "不存在",
+    })
+    assert missing.status_code == 404
+
+
 # ---------- 取消 ----------
 
 
@@ -466,7 +529,14 @@ def test_desktop_http_requires_token_but_allows_health_and_preflight(client, des
     assert client.get("/health").json() == {
         "status": "ok", "scheduler": False, "readiness": desktop_access.readiness,
     }
-    for method, path in (("GET", "/runs"), ("GET", "/threads"), ("DELETE", "/runs"), ("DELETE", "/threads")):
+    for method, path in (
+        ("GET", "/runs"),
+        ("GET", "/threads"),
+        ("GET", "/memories"),
+        ("POST", "/memories"),
+        ("DELETE", "/runs"),
+        ("DELETE", "/threads"),
+    ):
         response = client.request(method, path, headers={"Origin": origin})
         assert response.status_code == 401
         assert response.headers["access-control-allow-origin"] == origin

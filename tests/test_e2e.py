@@ -22,6 +22,7 @@ from __future__ import annotations
 # 标准库：sys / pathlib 处理导入路径。
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 # pytest：测试框架，本文件用它做参数化（parametrize）。
 import pytest
@@ -39,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.store.memory import InMemoryStore
 
 # 项目内部：
 # AgentContext：单次调用的运行时上下文，写权限 allow_write 在里面。
@@ -115,8 +117,29 @@ def test_tool_is_callable(tool, tmp_path, monkeypatch):
         "text": "t",
         "title": "x",
         "items": "y",
+        "scope": "project",
+        "memory_type": "preference",
+        "memory_id": "mem_00000000000000000000000000000000",
     }
-    if tool.name in {"edit_file", "restore_file_backup"}:
+    if tool.name in {"list_memories", "save_memory", "delete_memory"}:
+        # ToolRuntime 只会在真实 ToolNode 中自动注入；直接调用工具函数时
+        # 使用临时 InMemoryStore 构造最小替身，避免测试写入真实长期记忆。
+        memory_args = {"runtime": SimpleNamespace(store=InMemoryStore())}
+        if tool.name == "list_memories":
+            memory_args["scope"] = "project"
+        elif tool.name == "save_memory":
+            memory_args.update({
+                "content": "测试偏好",
+                "scope": "project",
+                "memory_type": "preference",
+            })
+        else:
+            memory_args.update({
+                "memory_id": "mem_00000000000000000000000000000000",
+                "scope": "project",
+            })
+        result = tool.func(**memory_args)
+    elif tool.name in {"edit_file", "restore_file_backup"}:
         result = tool.invoke({
             "name": tool.name,
             "args": args,
@@ -332,6 +355,60 @@ def test_same_thread_shares_history():
     r1 = agent.invoke({"messages": [HumanMessage(content="我叫张三")]}, cfg, context=ctx)
     r2 = agent.invoke({"messages": [HumanMessage(content="我叫什么")]}, cfg, context=ctx)
     assert len(r2["messages"]) > len(r1["messages"])
+
+
+def test_explicit_memory_tool_uses_injected_store():
+    """明确授权后，save_memory 通过 ToolRuntime 写入 Agent 装配的 Store。"""
+    store = InMemoryStore()
+    agent = build_agent(
+        model=make_model(
+            tool_call("save_memory", {
+                "content": "默认使用简体中文",
+                "scope": "project",
+                "memory_type": "preference",
+            }),
+            AIMessage(content="已经记住"),
+        ),
+        checkpointer=InMemorySaver(),
+        store=store,
+    )
+    agent.invoke(
+        {"messages": [HumanMessage(content="请记住默认使用简体中文")]},
+        {"configurable": {"thread_id": "memory-save"}},
+        context=AgentContext(task_name="保存记忆", allow_write=True),
+    )
+
+    from agent.memory import list_memory_records
+
+    records = list_memory_records(store, scope="project")["items"]
+    assert len(records) == 1
+    assert records[0]["content"] == "默认使用简体中文"
+
+
+def test_memory_tool_without_approval_does_not_persist():
+    """非交互只读入口没有授权回调时，长期记忆写入必须被闸门拒绝。"""
+    store = InMemoryStore()
+    agent = build_agent(
+        model=make_model(
+            tool_call("save_memory", {
+                "content": "不应保存",
+                "scope": "project",
+                "memory_type": "fact",
+            }),
+            AIMessage(content="未保存"),
+        ),
+        checkpointer=InMemorySaver(),
+        store=store,
+    )
+    agent.invoke(
+        {"messages": [HumanMessage(content="记住这件事")]},
+        {"configurable": {"thread_id": "memory-denied"}},
+        context=AgentContext(task_name="拒绝记忆", allow_write=False),
+    )
+
+    from agent.memory import list_memory_records
+
+    assert list_memory_records(store, scope="project")["items"] == []
 
 
 # ---------- 7. 中间件不因缺省 context 而崩溃 ----------

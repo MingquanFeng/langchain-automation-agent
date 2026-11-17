@@ -55,6 +55,15 @@ from agent.config import RUNTIME
 # AgentContext：单次调用的运行时上下文。
 from agent.context import AgentContext
 
+# 长期记忆服务：HTTP 管理入口与 Agent 工具共用同一套校验和 CRUD。
+from agent.memory import (
+    MAX_MEMORY_CONTENT_CHARS,
+    MemoryValidationError,
+    delete_memory_record,
+    list_memory_records,
+    save_memory_record,
+)
+
 # get_agent：进程内唯一的 Agent 单例（见 runner.py）。
 from .runner import get_agent
 
@@ -173,7 +182,7 @@ app.add_middleware(
     CORSMiddleware,
     # Tauri 本地 WebView 用应用源直接访问 loopback HTTP API；普通浏览器工作台已迁入桌面包。
     allow_origins=DESKTOP_ORIGINS,
-    allow_methods=["GET", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -204,6 +213,22 @@ class ScheduledTaskRequest(BaseModel):
 
     # 是否允许写操作。
     allow_write: bool = False
+
+
+class MemoryWriteRequest(BaseModel):
+    """POST /memories 与 PUT /memories/{id} 的显式记忆请求。"""
+
+    # 拒绝未声明字段，避免客户端拼错字段后服务端静默忽略。
+    model_config = ConfigDict(extra="forbid")
+
+    # user 跨项目共享；project 只属于当前工作目录。
+    scope: Literal["user", "project"] = "project"
+
+    # 只允许偏好和事实，不接受完整对话等泛化类别。
+    memory_type: Literal["preference", "fact"] = "preference"
+
+    # Pydantic 先做基础长度校验，agent.memory 仍会 strip 后再次校验。
+    content: str = Field(min_length=1, max_length=MAX_MEMORY_CONTENT_CHARS)
 
 
 # ============================================================
@@ -274,6 +299,109 @@ def list_agent_runs(
 ) -> list[dict]:
     """分页查询最近的 Agent 执行记录，包括结果、错误和状态。"""
     return app.state.runtime_store.list_runs(limit=limit, offset=offset)
+
+
+# ============================================================
+# 4. 长期记忆管理接口
+# ============================================================
+
+def _agent_memory_store():
+    """取得与 Agent 工具共用的 Store，避免 HTTP 与聊天入口数据分叉。"""
+    try:
+        store = getattr(get_agent(), "store", None)
+    except Exception as exc:
+        logger.exception("初始化长期记忆 Store 失败")
+        raise HTTPException(status_code=503, detail="暂时无法访问长期记忆") from exc
+    if store is None:
+        raise HTTPException(status_code=503, detail="当前 Agent 未配置长期记忆 Store")
+    return store
+
+
+@app.get("/memories")
+def list_memories_api(
+    scope: Literal["user", "project"] = Query(default="project"),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    """分页查看用户明确保存的当前用户级或项目级长期记忆。"""
+    try:
+        return list_memory_records(
+            _agent_memory_store(),
+            scope=scope,
+            limit=limit,
+            offset=offset,
+        )
+    except MemoryValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("读取长期记忆失败：scope=%s", scope)
+        raise HTTPException(status_code=503, detail="暂时无法读取长期记忆") from exc
+
+
+@app.post("/memories", status_code=201)
+def create_memory_api(req: MemoryWriteRequest) -> dict:
+    """由用户在管理界面明确提交一条新的长期记忆。"""
+    try:
+        return save_memory_record(
+            _agent_memory_store(),
+            scope=req.scope,
+            memory_kind=req.memory_type,
+            content=req.content,
+        )
+    except MemoryValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("创建长期记忆失败：scope=%s", req.scope)
+        raise HTTPException(status_code=500, detail="创建长期记忆失败") from exc
+
+
+@app.put("/memories/{memory_id}")
+def update_memory_api(memory_id: str, req: MemoryWriteRequest) -> dict:
+    """由用户明确修改当前作用域中一条已存在的长期记忆。"""
+    try:
+        return save_memory_record(
+            _agent_memory_store(),
+            scope=req.scope,
+            memory_kind=req.memory_type,
+            content=req.content,
+            memory_id=memory_id,
+        )
+    except MemoryValidationError as exc:
+        status = 404 if str(exc) == "要修改的长期记忆不存在" else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("修改长期记忆失败：%s", memory_id)
+        raise HTTPException(status_code=500, detail="修改长期记忆失败") from exc
+
+
+@app.delete("/memories/{memory_id}")
+def delete_memory_api(
+    memory_id: str,
+    scope: Literal["user", "project"] = Query(default="project"),
+) -> dict:
+    """由用户明确删除当前作用域中的一条长期记忆。"""
+    try:
+        deleted = delete_memory_record(
+            _agent_memory_store(),
+            scope=scope,
+            memory_id=memory_id,
+        )
+    except MemoryValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("删除长期记忆失败：%s", memory_id)
+        raise HTTPException(status_code=500, detail="删除长期记忆失败") from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="长期记忆不存在")
+    return {"id": memory_id, "scope": scope, "deleted": True}
 
 
 def _checkpoint_message_text(content: object) -> str:
@@ -509,7 +637,7 @@ def _delete_thread_data(thread_id: str) -> dict:
 
 
 # ============================================================
-# 4. 定时任务增删接口
+# 5. 定时任务增删接口
 # ============================================================
 
 @app.post("/tasks")

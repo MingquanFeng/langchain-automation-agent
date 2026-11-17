@@ -21,7 +21,7 @@
 | `tool.end` | 调用成功返回后 | `name` / `call_id` / `ok` / `duration_ms` / `result_preview` |
 | `tool.error` | 调用抛异常时 | `name` / `call_id` / `message` |
 
-**14 个工具函数一行都不用改** —— 事件全部从中间件这一层发出去。
+**17 个工具函数一行都不用改** —— 事件全部从中间件这一层发出去。
 
 注意：
 1. `get_stream_writer()` 只能在图的执行上下文里调用，

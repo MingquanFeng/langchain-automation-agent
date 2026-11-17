@@ -60,8 +60,8 @@
 由框架代为执行，再把返回值包成 `ToolMessage` 回灌进对话 —— 这个来回就是 agent 循环。
 
 **两条工具设计规范**：
-- 工具数量 **2-5 个最佳**（**07 章** P21：「只给 Agent 需要的工具，工具太多会混淆。一般 2-5 个工具最佳」）—— 本项目有 14 个（9 个基础文件 + 3 个结构化编辑 + 2 个通知），已经偏多，模型选错工具的概率会上升。
-- docstring 要写 **Google 风格**（参数逐个说明，**05 章** 3.1）—— 项目现在 14 个工具全部开了 `parse_docstring=True` 且写成 Google 风格，参数说明会进 schema 的 `properties.<arg>.description`，模型不用靠参数名猜。
+- 工具数量 **2-5 个最佳**（**07 章** P21：「只给 Agent 需要的工具，工具太多会混淆。一般 2-5 个工具最佳」）—— 本项目有 17 个（9 个基础文件 + 3 个结构化编辑 + 3 个长期记忆 + 2 个通知），已经偏多，模型选错工具的概率会上升。
+- docstring 要写 **Google 风格**（参数逐个说明，**05 章** 3.1）—— 项目现在 17 个工具全部开了 `parse_docstring=True` 且写成 Google 风格，参数说明会进 schema 的 `properties.<arg>.description`，模型不用靠参数名猜。
 
 ---
 
@@ -117,7 +117,7 @@
 | 层次 | 是什么 | 本项目的载体 |
 |---|---|---|
 | 动态运行时上下文 | state，随对话变化 | `AgentState`（messages / jump_to） |
-| 动态跨会话上下文 | store，跨 thread 共享 | `SqliteStore`（默认持久化；当前只完成容器与命名空间） |
+| 动态跨会话上下文 | store，跨 thread 共享 | `SqliteStore`（默认持久化；只接受用户明确保存的偏好和事实） |
 | **静态运行时上下文** | context，每次调用传入、不持久 | `AgentContext` |
 
 **课件 09 章 4.1 讲了三种在钩子里读 context 的方式**，项目实现了两种：
@@ -201,7 +201,7 @@ __start__ → model → tools → model → … → __end__
 |---|---|---|
 | 06 结构化输出 | 只有手写的 `save_json` | 用 `model.with_structured_output(PydanticModel)` 让模型直接返回结构化对象，比让模型「输出 JSON 字符串再解析」可靠得多。四种模式见课件 06 章 2.1-2.4（Pydantic / TypedDict / JSON Schema / dataclass） |
 | 07 章 7.3 `ToolStrategy` | 没用 `response_format` | 让 Agent 直接返回结构化对象。注意 1.x **必须显式** `ToolStrategy(Schema)`，直接传 `Schema` 会报错 |
-| 09 章 3 长期记忆 | 已接入持久化 `SqliteStore` 和用户/项目命名空间，尚无面向用户的记忆写入与管理入口 | 用显式工具实现 `put/get/search/delete`，只保存用户要求跨会话复用的偏好和事实 |
+| 09 章 3 长期记忆 | 已接入持久化 `SqliteStore`、用户/项目命名空间、显式记忆工具与桌面管理界面 | 下一步补齐写入来源、过期策略和冲突处理，不自动复制整段对话 |
 | 10 RAG | requirements 里被注释掉了 | 需要向量库 + 切分，最后再碰 |
 
 LangGraph 专项课件（`courseware/langGraph/`）里还没接入的：
