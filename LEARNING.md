@@ -201,7 +201,7 @@ __start__ → model → tools → model → … → __end__
 |---|---|---|
 | 06 结构化输出 | 只有手写的 `save_json` | 用 `model.with_structured_output(PydanticModel)` 让模型直接返回结构化对象，比让模型「输出 JSON 字符串再解析」可靠得多。四种模式见课件 06 章 2.1-2.4（Pydantic / TypedDict / JSON Schema / dataclass） |
 | 07 章 7.3 `ToolStrategy` | 没用 `response_format` | 让 Agent 直接返回结构化对象。注意 1.x **必须显式** `ToolStrategy(Schema)`，直接传 `Schema` 会报错 |
-| 09 章 3 长期记忆 | 已接入持久化 `SqliteStore`、用户/项目命名空间、显式记忆工具与桌面管理界面 | 下一步补齐写入来源、过期策略和冲突处理，不自动复制整段对话 |
+| 09 章 3 长期记忆 | 已接入持久化 `SqliteStore`、用户/项目命名空间、显式记忆工具与桌面管理界面；记录来源、过期策略和修订号冲突控制已落地 | 只接受用户明确要求保存的偏好或事实，不自动复制整段对话；过期记录由查询惰性清理 |
 | 10 RAG | requirements 里被注释掉了 | 需要向量库 + 切分，最后再碰 |
 
 LangGraph 专项课件（`courseware/langGraph/`）里还没接入的：

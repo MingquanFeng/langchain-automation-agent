@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f3f5f8">
-  <title>Agent Workbench</title>
+  <title>阿序 · Axu</title>
   <style>
     :root {
       color-scheme: light;
@@ -262,7 +262,7 @@
       *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
     }
 
-    /* Automation Agent dashboard */
+    /* 阿序 · Axu dashboard */
     body { background: radial-gradient(ellipse at 34% 0%, #e8edff 0, transparent 44%), #f4f6fb; }
     main.chat-app {
       width: min(1580px, calc(100% - 28px)); height: calc(100vh - 92px); min-height: 520px;
@@ -337,6 +337,7 @@
     .memory-badge { border-radius: 20px; padding: 4px 8px; color: #365fd0; background: #e9efff; font-size: 9px; font-weight: 650; }
     .memory-item-time { color: #98a2b4; font-size: 9px; }
     .memory-item-content { margin: 9px 0 0; color: #4d5d77; font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .memory-item-meta { margin-top: 7px; color: #8995a9; font-size: 9px; line-height: 1.5; }
     .memory-item-actions { display: flex; gap: 7px; margin-top: 10px; }
     .memory-action { min-height: 30px; }
     .memory-action.danger { color: #a14b4b; border-color: #f0d9d9; }
@@ -532,7 +533,7 @@
   <header class="topbar">
     <div class="brand">
     <img class="brand-logo" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true">
-      <div>Agent Workbench<small>LOCAL RUNTIME CONSOLE</small></div>
+      <div>阿序 · Axu<small>你的个人桌面 AI Agent</small></div>
     </div>
     <div class="connection" id="connection" data-state="idle" role="status">
       <span class="signal" aria-hidden="true"></span>
@@ -575,8 +576,8 @@
           <div class="welcome" id="welcome">
             <img class="welcome-mark" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true">
             <div class="welcome-copy">
-              <h2>你好，我是你的 AI 助手 <span aria-hidden="true">✦</span></h2>
-              <p>有什么任务交给我？我可以帮你处理本地文件、整理数据和生成通知。</p>
+              <h2>你好，我是阿序 <span aria-hidden="true">✦</span></h2>
+              <p>你的个人桌面 AI Agent，可以帮你处理本地文件、整理数据和生成通知。</p>
               <div class="suggestions">
                 <button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。"><span aria-hidden="true">▤</span> 列出数据目录</button>
                 <button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。"><span aria-hidden="true">▧</span> 读取报告内容</button>
@@ -695,11 +696,21 @@
       <div class="memory-content">
         <form class="memory-form" id="memoryForm" hidden>
           <input id="memoryId" type="hidden">
+          <input id="memoryRevision" type="hidden">
           <label>
             类型
             <select id="memoryType">
               <option value="preference">偏好</option>
               <option value="fact">事实</option>
+            </select>
+          </label>
+          <label>
+            过期策略
+            <select id="memoryExpirationPolicy">
+              <option value="never">永不过期</option>
+              <option value="30_days">30 天后过期</option>
+              <option value="90_days">90 天后过期</option>
+              <option value="365_days">365 天后过期</option>
             </select>
           </label>
           <label>
@@ -773,7 +784,9 @@
     const memoryList = $("#memoryList");
     const memoryForm = $("#memoryForm");
     const memoryId = $("#memoryId");
+    const memoryRevision = $("#memoryRevision");
     const memoryType = $("#memoryType");
+    const memoryExpirationPolicy = $("#memoryExpirationPolicy");
     const memoryContent = $("#memoryContent");
     const openMemorySettingsButton = $("#openMemorySettingsButton");
     const closeMemoryDialogButton = $("#closeMemoryDialog");
@@ -871,6 +884,7 @@
     const riskLabels = {
       workspace_write: "修改数据文件",
       external_effect: "发送到外部",
+      persistent_state_write: "修改长期记忆",
     };
     const toolDescriptions = {
       write_file: "将创建或覆盖数据目录中的文件。",
@@ -878,6 +892,8 @@
       save_json: "将创建或覆盖数据目录中的 JSON 文件。",
       edit_file: "将按差异预览修改现有文本；批准后会先保存可恢复备份。",
       restore_file_backup: "将按反向差异恢复文件；恢复前的当前状态也会保存为备份。",
+      save_memory: "将新建或修改一条跨会话长期记忆。",
+      delete_memory: "将永久删除一条指定的长期记忆。",
       notify: "将消息发送到已配置的通知渠道。",
       notify_summary: "将摘要发送到已配置的通知渠道。",
     };
@@ -987,14 +1003,18 @@
 
     function resetMemoryForm() {
       memoryId.value = "";
+      memoryRevision.value = "";
       memoryType.value = "preference";
+      memoryExpirationPolicy.value = "never";
       memoryContent.value = "";
       memoryForm.hidden = true;
     }
 
     function editMemory(record) {
       memoryId.value = record.id;
+      memoryRevision.value = String(record.revision);
       memoryType.value = record.memory_type;
+      memoryExpirationPolicy.value = record.expiration_policy || "never";
       memoryContent.value = record.content;
       memoryForm.hidden = false;
       memoryContent.focus();
@@ -1030,6 +1050,23 @@
         content.className = "memory-item-content";
         content.textContent = record.content;
 
+        // 来源由后端根据可信入口写入，界面只展示，不能由表单伪造。
+        const sourceLabels = { agent: "Agent 工具", settings: "设置页", legacy: "旧版本" };
+        const expirationLabels = {
+          never: "永不过期",
+          "30_days": "30 天有效",
+          "90_days": "90 天有效",
+          "365_days": "365 天有效",
+        };
+        const meta = document.createElement("div");
+        meta.className = "memory-item-meta";
+        const createdBy = sourceLabels[record.created_source] || "未知入口";
+        const updatedBy = sourceLabels[record.updated_source] || "未知入口";
+        const expiration = record.expires_at
+          ? `到期于 ${formatRunDate(record.expires_at)}`
+          : (expirationLabels[record.expiration_policy] || "永不过期");
+        meta.textContent = `由${createdBy}创建 · 最近由${updatedBy}修改 · ${expiration} · 修订 ${record.revision}`;
+
         const actions = document.createElement("div");
         actions.className = "memory-item-actions";
         const edit = document.createElement("button");
@@ -1044,7 +1081,7 @@
         remove.addEventListener("click", () => void removeMemory(record, remove));
         actions.append(edit, remove);
 
-        item.append(head, content, actions);
+        item.append(head, content, meta, actions);
         memoryList.append(item);
       }
     }
@@ -1090,9 +1127,20 @@
             scope: memoryScope.value,
             memory_type: memoryType.value,
             content,
+            expiration_policy: memoryExpirationPolicy.value,
+            ...(id ? { expected_revision: Number(memoryRevision.value) } : {}),
           },
         });
-        if (!response.ok) throw await apiError(response, "保存长期记忆失败");
+        if (!response.ok) {
+          const error = await apiError(response, "保存长期记忆失败");
+          // 409 表示编辑期间记录已被其他入口改动。立即刷新可以把最新
+          // 内容和修订号展示给用户，避免在旧表单上继续覆盖。
+          if (response.status === 409) {
+            resetMemoryForm();
+            await loadMemories();
+          }
+          throw error;
+        }
         resetMemoryForm();
         await loadMemories();
       } catch (error) {
@@ -1118,10 +1166,14 @@
       memoryStatus.textContent = "正在删除…";
       try {
         const response = await serviceFetch(
-          `/memories/${encodeURIComponent(record.id)}?scope=${encodeURIComponent(memoryScope.value)}`,
+          `/memories/${encodeURIComponent(record.id)}?scope=${encodeURIComponent(memoryScope.value)}&expected_revision=${encodeURIComponent(record.revision)}`,
           { method: "DELETE" },
         );
-        if (!response.ok) throw await apiError(response, "删除长期记忆失败");
+        if (!response.ok) {
+          const error = await apiError(response, "删除长期记忆失败");
+          if (response.status === 409) await loadMemories();
+          throw error;
+        }
         resetMemoryForm();
         await loadMemories();
       } catch (error) {
@@ -1887,7 +1939,7 @@
       executionTodoSummary.textContent = "未创建";
       executionTodoEmpty.textContent = "复杂任务拆解后，步骤会显示在这里。";
       pendingApprovals.clear();
-      messages.innerHTML = `<div class="welcome" id="welcome"><img class="welcome-mark" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true"><div class="welcome-copy"><h2>你好，我是你的 AI 助手 <span aria-hidden="true">✦</span></h2><p>有什么任务交给我？我可以帮你处理本地文件、整理数据和生成通知。</p><div class="suggestions"><button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。"><span aria-hidden="true">▤</span> 列出数据目录</button><button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。"><span aria-hidden="true">▧</span> 读取报告内容</button></div></div></div>`;
+      messages.innerHTML = `<div class="welcome" id="welcome"><img class="welcome-mark" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true"><div class="welcome-copy"><h2>你好，我是阿序 <span aria-hidden="true">✦</span></h2><p>你的个人桌面 AI Agent，可以帮你处理本地文件、整理数据和生成通知。</p><div class="suggestions"><button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。"><span aria-hidden="true">▤</span> 列出数据目录</button><button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。"><span aria-hidden="true">▧</span> 读取报告内容</button></div></div></div>`;
       messages.classList.add("empty-state");
       setBusy(false);
       setTaskState("idle", "随时待命，开始你的任务吧。");

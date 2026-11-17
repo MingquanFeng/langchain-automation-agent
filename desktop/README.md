@@ -1,4 +1,4 @@
-# Automation Agent 桌面壳
+# 阿序 · Axu 桌面应用
 
 这是独立的 Tauri 桌面项目。桌面入口会启动随应用打包的 Python sidecar，并加载应用包内的工作台页面；聊天界面随桌面应用分发，Agent 执行、事件归一化和授权仍由 Python 服务负责。
 
@@ -24,7 +24,7 @@ AUTOMATION_AGENT_PYTHON=/opt/miniconda3/envs/langchain1.2/bin/python npm run dev
 AUTOMATION_AGENT_PYTHON=/opt/miniconda3/envs/langchain1.2/bin/python npm run build
 ```
 
-`npm run dev` 和 `npm run build` 会先调用 `scripts/build_runtime.py`，生成当前 macOS 架构的 PyInstaller sidecar，再启动 Tauri。`npm run build` 成功后会自动把最新的 `Automation Agent.app` 移到桌面，并替换桌面上的旧版本。首次需要联网安装构建依赖。sidecar 会从当前 Python 环境收集运行时依赖；桌面应用使用时不要求用户安装 Python。当前只配置 Apple Silicon 与 Intel Mac 的构建目标，签名和公证尚未配置。
+`npm run dev` 和 `npm run build` 会先调用 `scripts/build_runtime.py`，生成当前 macOS 架构的 PyInstaller sidecar，再启动 Tauri。`npm run build` 成功后会自动把最新的 `阿序 · Axu.app` 移到桌面，并替换桌面上的旧版本。首次需要联网安装构建依赖。sidecar 会从当前 Python 环境收集运行时依赖；桌面应用使用时不要求用户安装 Python。当前只配置 Apple Silicon 与 Intel Mac 的构建目标，签名和公证尚未配置。
 
 桌面应用启动时会选择一个空闲端口，只绑定 `127.0.0.1`。宿主通过 `/health` 核对本次启动标记，再把连接地址和仅本次启动有效的凭证交给工作台。工作台通过 `Authorization: Bearer` 访问 HTTP API，并在 WebSocket 子协议握手中传递凭证。重启服务会更换凭证，工作台只向宿主提供的地址发送凭证。
 

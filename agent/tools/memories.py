@@ -31,6 +31,7 @@ from ..context import AgentContext
 # 记忆服务函数统一处理 namespace、输入限制和 Store CRUD，
 # 工具层只负责把参数和结果转换成对模型友好的文本。
 from ..memory import (
+    MemoryConflictError,
     MemoryValidationError,
     delete_memory_record,
     list_memory_records,
@@ -89,6 +90,8 @@ def save_memory(
     scope: str = "project",
     memory_type: str = "preference",
     memory_id: str = "",
+    expiration_policy: str = "never",
+    expected_revision: int = 0,
 ) -> str:
     """仅在用户明确要求“记住”时，新建或修改一条跨会话偏好或事实。
 
@@ -97,6 +100,8 @@ def save_memory(
         scope: project 只在当前项目复用；user 可在该用户的所有项目复用。
         memory_type: preference 表示用户偏好，fact 表示明确事实。
         memory_id: 修改已有记忆时传 list_memories 返回的 ID；新建时留空。
+        expiration_policy: never 永不过期，也可选 30_days、90_days、365_days。
+        expected_revision: 修改时必须传 list_memories 返回的 revision；新建时保持 0。
     """
     try:
         record = save_memory_record(
@@ -105,7 +110,14 @@ def save_memory(
             memory_kind=memory_type,
             content=content,
             memory_id=memory_id or None,
+            source="agent",
+            expiration_policy=expiration_policy,
+            expected_revision=expected_revision if memory_id else None,
         )
+    except MemoryConflictError as exc:
+        # 冲突不是瞬时工具故障，自动重试仍会继续使用旧修订号；明确要求模型
+        # 重新调用 list_memories，才能避免覆盖设置页或另一次工具调用的修改。
+        return f"长期记忆存在冲突：{exc}。请重新查看记忆后再操作。"
     except MemoryValidationError as exc:
         # 参数错误不会通过抛异常触发三次工具重试；直接告诉模型如何修正。
         return f"长期记忆未保存：{exc}"
@@ -123,19 +135,24 @@ def delete_memory(
     memory_id: str,
     runtime: ToolRuntime[AgentContext, dict],
     scope: str = "project",
+    expected_revision: int = 0,
 ) -> str:
     """仅在用户明确要求遗忘或删除时，删除一条指定的长期记忆。
 
     Args:
         memory_id: list_memories 返回的长期记忆 ID。
         scope: 该记忆所在作用域，必须是 project 或 user。
+        expected_revision: list_memories 返回的 revision，用于避免误删已被修改的记录。
     """
     try:
         deleted = delete_memory_record(
             _runtime_store(runtime),
             scope=scope,
             memory_id=memory_id,
+            expected_revision=expected_revision,
         )
+    except MemoryConflictError as exc:
+        return f"长期记忆存在冲突：{exc}。请重新查看记忆后再操作。"
     except MemoryValidationError as exc:
         return f"长期记忆未删除：{exc}"
 

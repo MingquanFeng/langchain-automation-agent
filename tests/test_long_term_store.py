@@ -19,6 +19,9 @@ from __future__ import annotations
 # Path：给测试辅助函数标注临时数据库路径类型。
 from pathlib import Path
 
+# datetime：用固定 UTC 时间验证过期边界，不依赖测试运行当天。
+from datetime import datetime, timedelta, timezone
+
 # SimpleNamespace：构造只包含测试所需字段的最小 RUNTIME 替身。
 from types import SimpleNamespace
 
@@ -36,6 +39,7 @@ import agent.memory as memory_module
 
 # 命名空间与记录服务是本组隔离测试的直接被测对象。
 from agent.memory import (
+    MemoryConflictError,
     MemoryValidationError,
     build_memory_namespaces,
     delete_memory_record,
@@ -280,9 +284,14 @@ def test_memory_records_can_be_created_updated_listed_and_deleted(monkeypatch, t
         scope="project",
         memory_kind="preference",
         content="  默认使用简体中文  ",
+        source="settings",
     )
     assert created["id"].startswith("mem_")
     assert created["content"] == "默认使用简体中文"
+    assert created["created_source"] == "settings"
+    assert created["updated_source"] == "settings"
+    assert created["revision"] == 1
+    assert created["expiration_policy"] == "never"
 
     updated = save_memory_record(
         store,
@@ -290,9 +299,17 @@ def test_memory_records_can_be_created_updated_listed_and_deleted(monkeypatch, t
         memory_kind="fact",
         content="项目使用 Python 3.13",
         memory_id=created["id"],
+        source="agent",
+        expiration_policy="90_days",
+        expected_revision=created["revision"],
     )
     assert updated["id"] == created["id"]
     assert updated["memory_type"] == "fact"
+    assert updated["created_source"] == "settings"
+    assert updated["updated_source"] == "agent"
+    assert updated["revision"] == 2
+    assert updated["expiration_policy"] == "90_days"
+    assert updated["expires_at"] is not None
 
     listed = list_memory_records(store, scope="project")
     assert listed["items"] == [updated]
@@ -302,11 +319,13 @@ def test_memory_records_can_be_created_updated_listed_and_deleted(monkeypatch, t
         store,
         scope="project",
         memory_id=created["id"],
+        expected_revision=updated["revision"],
     ) is True
     assert delete_memory_record(
         store,
         scope="project",
         memory_id=created["id"],
+        expected_revision=updated["revision"],
     ) is False
 
 
@@ -319,12 +338,14 @@ def test_user_and_project_record_lists_do_not_mix(monkeypatch, tmp_path):
         scope="user",
         memory_kind="preference",
         content="所有项目默认用中文",
+        source="settings",
     )
     project_record = save_memory_record(
         store,
         scope="project",
         memory_kind="fact",
         content="当前项目使用 SQLite",
+        source="settings",
     )
 
     assert list_memory_records(store, scope="user")["items"] == [user_record]
@@ -348,4 +369,102 @@ def test_memory_record_validation_rejects_unsafe_shapes(
     """不允许公共作用域、整段对话类别或空内容进入 Store。"""
     _use_memory_context(monkeypatch, tmp_path / "project")
     with pytest.raises(MemoryValidationError, match=message):
-        save_memory_record(InMemoryStore(), **kwargs)
+        save_memory_record(InMemoryStore(), source="settings", **kwargs)
+
+
+def test_expired_records_are_hidden_and_lazily_deleted(monkeypatch, tmp_path):
+    """到期记录不再出现在列表中，并从 Store 惰性清理。"""
+    _use_memory_context(monkeypatch, tmp_path / "project")
+    store = InMemoryStore()
+    start = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(memory_module, "_utc_now", lambda: start)
+
+    created = save_memory_record(
+        store,
+        scope="project",
+        memory_kind="fact",
+        content="临时迁移窗口持续 30 天",
+        source="settings",
+        expiration_policy="30_days",
+    )
+    assert created["expires_at"] == (start + timedelta(days=30)).isoformat()
+
+    # 跨过截止时间后，业务列表先隐藏记录，再执行实际删除。
+    monkeypatch.setattr(
+        memory_module,
+        "_utc_now",
+        lambda: start + timedelta(days=31),
+    )
+    assert list_memory_records(store, scope="project")["items"] == []
+    namespace = memory_module.current_memory_namespaces().project
+    assert store.get(namespace, created["id"]) is None
+
+
+def test_stale_revision_and_duplicate_content_are_rejected(monkeypatch, tmp_path):
+    """重复新建和基于旧修订号的覆盖都返回明确冲突。"""
+    _use_memory_context(monkeypatch, tmp_path / "project")
+    store = InMemoryStore()
+    created = save_memory_record(
+        store,
+        scope="project",
+        memory_kind="preference",
+        content="默认生成 Markdown 报告",
+        source="settings",
+    )
+
+    with pytest.raises(MemoryConflictError, match="已经存在"):
+        save_memory_record(
+            store,
+            scope="project",
+            memory_kind="preference",
+            content="默认生成 Markdown 报告",
+            source="agent",
+        )
+
+    updated = save_memory_record(
+        store,
+        scope="project",
+        memory_kind="preference",
+        content="默认生成 HTML 报告",
+        memory_id=created["id"],
+        source="agent",
+        expected_revision=created["revision"],
+    )
+    assert updated["revision"] == 2
+
+    second = save_memory_record(
+        store,
+        scope="project",
+        memory_kind="preference",
+        content="默认生成纯文本报告",
+        source="settings",
+    )
+    with pytest.raises(MemoryConflictError, match="已经存在"):
+        save_memory_record(
+            store,
+            scope="project",
+            memory_kind="preference",
+            content=updated["content"],
+            memory_id=second["id"],
+            source="settings",
+            expected_revision=second["revision"],
+        )
+
+    with pytest.raises(MemoryConflictError, match="刷新后重试"):
+        save_memory_record(
+            store,
+            scope="project",
+            memory_kind="preference",
+            content="用旧表单覆盖",
+            memory_id=created["id"],
+            source="settings",
+            expected_revision=created["revision"],
+        )
+
+    with pytest.raises(MemoryConflictError, match="刷新后重试"):
+        delete_memory_record(
+            store,
+            scope="project",
+            memory_id=created["id"],
+            expected_revision=created["revision"],
+        )

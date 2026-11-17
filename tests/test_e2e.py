@@ -313,7 +313,7 @@ def test_context_injected_into_system_prompt():
     assert "运行时上下文" in joined
     assert "prompt-test" in joined
     # override 是替换语义，这段断言守住「原系统提示词不能被冲掉」
-    assert "自动化日常事务助手" in joined
+    assert "你是阿序（Axu）" in joined
     # 普通任务必须在聊天中回答，不能再沿用旧规则自动调用通知工具。
     assert "普通进度和最终结果直接回复当前聊天" in joined
     assert "只有用户明确要求" in joined
@@ -383,6 +383,9 @@ def test_explicit_memory_tool_uses_injected_store():
     records = list_memory_records(store, scope="project")["items"]
     assert len(records) == 1
     assert records[0]["content"] == "默认使用简体中文"
+    assert records[0]["created_source"] == "agent"
+    assert records[0]["updated_source"] == "agent"
+    assert records[0]["revision"] == 1
 
 
 def test_memory_tool_without_approval_does_not_persist():

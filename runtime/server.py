@@ -58,6 +58,7 @@ from agent.context import AgentContext
 # 长期记忆服务：HTTP 管理入口与 Agent 工具共用同一套校验和 CRUD。
 from agent.memory import (
     MAX_MEMORY_CONTENT_CHARS,
+    MemoryConflictError,
     MemoryValidationError,
     delete_memory_record,
     list_memory_records,
@@ -153,7 +154,7 @@ async def lifespan(app: FastAPI):
 # lifespan 通过构造参数传进去，
 # 这是 FastAPI 0.135+ 推荐的写法，
 # 不要再用 @app.on_event("startup") / @app.on_event("shutdown")。
-app = FastAPI(title="Automation Agent", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="阿序 · Axu", version="0.1.0", lifespan=lifespan)
 app.state.desktop_access = None
 
 
@@ -229,6 +230,13 @@ class MemoryWriteRequest(BaseModel):
 
     # Pydantic 先做基础长度校验，agent.memory 仍会 strip 后再次校验。
     content: str = Field(min_length=1, max_length=MAX_MEMORY_CONTENT_CHARS)
+
+    # 固定策略让界面无需处理任意日期，同时覆盖临时事实和长期偏好。
+    expiration_policy: Literal["never", "30_days", "90_days", "365_days"] = "never"
+
+    # 新建时省略；修改时必须带上列表中看到的修订号，服务端据此拒绝
+    # 已经过期的编辑表单，避免多个入口静默互相覆盖。
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 # ============================================================
@@ -349,7 +357,12 @@ def create_memory_api(req: MemoryWriteRequest) -> dict:
             scope=req.scope,
             memory_kind=req.memory_type,
             content=req.content,
+            source="settings",
+            expiration_policy=req.expiration_policy,
+            expected_revision=req.expected_revision,
         )
+    except MemoryConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except MemoryValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HTTPException:
@@ -369,7 +382,12 @@ def update_memory_api(memory_id: str, req: MemoryWriteRequest) -> dict:
             memory_kind=req.memory_type,
             content=req.content,
             memory_id=memory_id,
+            source="settings",
+            expiration_policy=req.expiration_policy,
+            expected_revision=req.expected_revision,
         )
+    except MemoryConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except MemoryValidationError as exc:
         status = 404 if str(exc) == "要修改的长期记忆不存在" else 422
         raise HTTPException(status_code=status, detail=str(exc)) from exc
@@ -384,6 +402,7 @@ def update_memory_api(memory_id: str, req: MemoryWriteRequest) -> dict:
 def delete_memory_api(
     memory_id: str,
     scope: Literal["user", "project"] = Query(default="project"),
+    expected_revision: int = Query(ge=1),
 ) -> dict:
     """由用户明确删除当前作用域中的一条长期记忆。"""
     try:
@@ -391,7 +410,10 @@ def delete_memory_api(
             _agent_memory_store(),
             scope=scope,
             memory_id=memory_id,
+            expected_revision=expected_revision,
         )
+    except MemoryConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except MemoryValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HTTPException:

@@ -1252,7 +1252,7 @@ def personalized_prompt(request: ModelRequest) -> str:
 **🧩 项目走的是另一条路** —— 工具结果清理（`ContextEditingMiddleware` + `ClearToolUsesEdit`），
 属于 08 章 3.8，不是裁剪/删除/摘要。这条路还没走。
 
-### 7.10 长期记忆 store（🧩 项目未启用）
+### 7.10 长期记忆 store（✅ 项目已启用）
 
 📘 09 章 PAGE 40-44 —— 四层架构 `store → namespace → key → value`：
 
@@ -1265,7 +1265,16 @@ store.put(namespace, key, value)
 
 三个基础 API：`store.put(namespace, key, value)` / `store.get(namespace, key)` / `store.search(namespace_prefix, query=..., filter=..., limit=10)`。
 
-🧩 项目注入了 `InMemoryStore()`（`graph.py:584-588`）但**没有任何工具或中间件读写它**。
+✅ 项目生产环境默认使用独立的 `SqliteStore`，测试使用 `InMemoryStore` 隔离。`agent/memory.py` 负责用户级与项目级命名空间和 CRUD，`list_memories` / `save_memory` / `delete_memory` 通过 `ToolRuntime` 访问同一个 Store；设置页通过 `/memories` API 管理同一批数据。
+
+项目没有自动抽取整段对话。只有用户明确要求“记住”时 Agent 才能调用写工具，并且写入、删除都要逐次审批。记录 value 除偏好/事实正文外，还保存：
+
+- `created_source` / `updated_source`：由 Agent 工具或设置页可信入口写入；
+- `revision`：修改和删除必须提交当前修订号，旧表单返回冲突；
+- `expiration_policy` / `expires_at`：支持永不过期或 30/90/365 天，查询时隐藏并惰性清理到期记录；
+- `schema_version`：为以后迁移保留明确版本。
+
+Store 自带的 `created_at` / `updated_at` 作为展示时间；相同作用域内类型与内容完全相同的有效记录不会重复创建。语义相反但文本不同的事实不做模型自动合并，由用户在设置页明确修改或删除。
 
 **坑**
 - 📘 09 章 43 页：`InMemoryStore` 每次 `put` 都创建**新 Item**（`created_at` 与 `updated_at` 始终一致）；

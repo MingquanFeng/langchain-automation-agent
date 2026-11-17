@@ -1,8 +1,8 @@
 [package]
 name = "automation-agent-desktop"
 version = "0.1.0"
-description = "Automation Agent 的 Tauri 桌面窗口"
-authors = ["Automation Agent"]
+description = "阿序 · Axu 的 Tauri 桌面窗口"
+authors = ["阿序 · Axu"]
 edition = "2021"
 build = "build.rs"
 

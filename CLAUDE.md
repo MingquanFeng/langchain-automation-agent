@@ -135,7 +135,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 
 - `config.py` — 唯一的配置出口。`MODEL` 和 `RUNTIME` 两个 frozen dataclass 在模块导入时从环境变量读一次。改配置只改这里 + `.env`。`MEMORY_BACKEND` 同时决定会话 Checkpointer 和长期 Store 的后端（`sqlite` 分别落盘到 `data/memory.sqlite` 与 `data/store.sqlite`，`memory` 只在内存）。
 - `context.py` — `AgentContext`，每次调用的静态运行时配置（任务名、触发来源、是否允许写）。`trigger` 用 `Literal["schedule", "api", "cli", "lab"]` 限定，新增触发方式要同步改这个类型别名。
-- `memory.py` — 长期记忆命名空间与 CRUD。用户身份和规范化项目路径只生成稳定短哈希，不把原文直接写入 namespace；用户 `profile` 和项目 `projects/<hash>` 是同一用户根节点下的并列分支，保证前缀查询不串数据。哈希不是加密，数据库文件权限仍需单独控制。
+- `memory.py` — 长期记忆命名空间与 CRUD。用户身份和规范化项目路径只生成稳定短哈希，不把原文直接写入 namespace；用户 `profile` 和项目 `projects/<hash>` 是同一用户根节点下的并列分支，保证前缀查询不串数据。记录包含可信写入来源、修订号和过期策略；更新/删除必须匹配当前修订号，列表查询会隐藏并惰性删除到期记录。哈希不是加密，数据库文件权限仍需单独控制。
 - `graph.py` — **装配中心**。`build_agent()` 是唯一创建 Agent 的地方，模型/工具/记忆后端都从这里注入。中间件栈在这里组装：`EVENT_BRIDGE`（事件桥接，**最外层**）→ `LIMITS`（限次）→ `RETRY`（重试）→ `TODO`（任务拆解）→ `CONTEXT_EDITING`（上下文清理）→ `PII`（脱敏）→ `CUSTOM_MIDDLEWARE`（自定义守卫）。
 - `tools/` — L1 能力层。`files.py` 的文件工具被沙箱限制在 `data/` 目录内；读文件有 **200,000 字节硬上限**（`MAX_READ_BYTES`，超出即截断并把「还有多少行、传什么 offset」告诉模型），默认每次返回 200 行（`limit` 参数模型可传大，但字节上限始终生效）；二进制文件拒绝；记忆库（`memory.sqlite` 及其 WAL/SHM）禁读 —— 否则 agent 一句「看下这个文件」就能撑爆上下文窗口；`notify.py` 是通知出口，webhook 未配置时降级为终端输出。
   - **沙箱越界不抛异常，返回一句给模型看的中文说明**（`_resolve_safe`）。`_resolve()` 仍然抛 `ValueError`，但那是给 Python 调用方用的；工具层用它会让 `ToolRetryMiddleware`（默认 `retry_on=(Exception,)`）把同一个错参数重试 3 次、空耗约 3 秒，模型最后收到的还是 `failed after 3 attempts ... Please try again.` 这种没法照做的英文提示。
@@ -163,7 +163,7 @@ runtime/   — 运行时外壳（课件未覆盖，需自行实现）
 |---|---|---|
 | `create_agent()` | `agent/graph.py` | 返回 `CompiledStateGraph`（底层 Pregel）。**项目不手写 `StateGraph`** |
 | `InMemorySaver` / `SqliteSaver` | `agent/graph.py` | checkpointer（短期记忆），二选一 |
-| `InMemoryStore` / `SqliteStore` | `agent/graph.py`、`agent/memory.py` | store（长期记忆）。生产默认使用独立的 SQLite 持久库；显式工具和 `/memories` API 提供查看、新建、修改与删除，写入/删除需逐次审批 |
+| `InMemoryStore` / `SqliteStore` | `agent/graph.py`、`agent/memory.py` | store（长期记忆）。生产默认使用独立的 SQLite 持久库；显式工具和 `/memories` API 提供带来源、过期策略和修订冲突控制的 CRUD，工具写入/删除需逐次审批 |
 | `Runtime` | `agent/middleware/custom.py` | 运行时上下文，`runtime.context` |
 | `langgraph_node` 元数据 | `runtime/events.py` | 过滤中间件插入的例行提示 |
 | `thread_id` | `runtime/runner.py` | checkpointer 的会话键 |

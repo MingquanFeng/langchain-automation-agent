@@ -1,4 +1,4 @@
-//! Automation Agent 桌面应用入口与 Python sidecar 生命周期管理。
+//! 阿序 · Axu 桌面应用入口与 Python sidecar 生命周期管理。
 
 use serde::Serialize;
 use std::{
@@ -303,7 +303,7 @@ fn create_runtime_state(app: &tauri::AppHandle) -> Result<Arc<RuntimeState>, Str
     if !config_path.exists() {
         fs::write(
             &config_path,
-            "# Automation Agent 桌面运行时配置。修改后重启应用生效。\n\
+            "# 阿序 · Axu 桌面运行时配置。修改后重启应用生效。\n\
              LLM_PROVIDER=openai\n\
              LLM_MODEL=MiniMax-M3\n\
              LLM_BASE_URL=https://api.minimaxi.com/v1\n\
@@ -561,7 +561,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("启动 Automation Agent 桌面应用失败");
+        .expect("启动阿序 · Axu 桌面应用失败");
 
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {

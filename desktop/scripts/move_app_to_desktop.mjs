@@ -3,7 +3,7 @@ import { homedir, platform } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const appName = "Automation Agent.app";
+const appName = "阿序 · Axu.app";
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const buildOutput = path.join(
   desktopDir,
@@ -29,8 +29,8 @@ try {
 
 const desktopPath = path.join(homedir(), "Desktop");
 const destination = path.join(desktopPath, appName);
-const staging = path.join(desktopPath, `.Automation Agent.${process.pid}.new.app`);
-const previous = path.join(desktopPath, `.Automation Agent.${process.pid}.previous.app`);
+const staging = path.join(desktopPath, `.Axu.${process.pid}.new.app`);
+const previous = path.join(desktopPath, `.Axu.${process.pid}.previous.app`);
 
 let sourceMoved = false;
 let sourceCopied = false;

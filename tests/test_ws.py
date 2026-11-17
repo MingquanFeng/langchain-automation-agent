@@ -225,6 +225,9 @@ def test_memory_api_supports_explicit_crud(client):
     created = created_response.json()
     assert created["id"].startswith("mem_")
     assert created["content"] == "默认使用简体中文"
+    assert created["created_source"] == "settings"
+    assert created["revision"] == 1
+    assert created["expiration_policy"] == "never"
 
     listed = client.get("/memories?scope=project").json()
     assert listed["items"] == [created]
@@ -233,14 +236,19 @@ def test_memory_api_supports_explicit_crud(client):
         "scope": "project",
         "memory_type": "fact",
         "content": "当前项目使用 SQLite",
+        "expiration_policy": "30_days",
+        "expected_revision": created["revision"],
     })
     assert updated_response.status_code == 200
     updated = updated_response.json()
     assert updated["memory_type"] == "fact"
     assert updated["content"] == "当前项目使用 SQLite"
+    assert updated["revision"] == 2
+    assert updated["updated_source"] == "settings"
+    assert updated["expires_at"] is not None
 
     deleted = client.delete(
-        f"/memories/{created['id']}?scope=project"
+        f"/memories/{created['id']}?scope=project&expected_revision={updated['revision']}"
     )
     assert deleted.status_code == 200
     assert deleted.json()["deleted"] is True
@@ -248,13 +256,30 @@ def test_memory_api_supports_explicit_crud(client):
 
 
 def test_memory_api_rejects_invalid_or_missing_records(client):
-    """非法类别、空内容、错误 ID 和不存在的更新都有明确状态码。"""
+    """非法类别、伪造来源、空内容、错误 ID 和不存在更新都被拒绝。"""
     invalid_kind = client.post("/memories", json={
         "scope": "project",
         "memory_type": "conversation",
         "content": "不要保存整段对话",
     })
     assert invalid_kind.status_code == 422
+
+    # 来源只能由服务端根据可信入口填写，客户端不能把设置页写入伪装成 Agent。
+    spoofed_source = client.post("/memories", json={
+        "scope": "project",
+        "memory_type": "fact",
+        "content": "尝试伪造来源",
+        "created_source": "agent",
+    })
+    assert spoofed_source.status_code == 422
+
+    invalid_expiration = client.post("/memories", json={
+        "scope": "project",
+        "memory_type": "fact",
+        "content": "任意过期策略",
+        "expiration_policy": "tomorrow",
+    })
+    assert invalid_expiration.status_code == 422
 
     empty_content = client.post("/memories", json={
         "scope": "project",
@@ -271,8 +296,41 @@ def test_memory_api_rejects_invalid_or_missing_records(client):
         "scope": "project",
         "memory_type": "fact",
         "content": "不存在",
+        "expected_revision": 1,
     })
     assert missing.status_code == 404
+
+
+def test_memory_api_rejects_duplicate_and_stale_revision(client):
+    """HTTP 管理入口用 409 区分重复内容和过期编辑表单。"""
+    payload = {
+        "scope": "project",
+        "memory_type": "preference",
+        "content": "默认输出简体中文",
+    }
+    created = client.post("/memories", json=payload).json()
+    duplicate = client.post("/memories", json=payload)
+    assert duplicate.status_code == 409
+
+    updated = client.put(f"/memories/{created['id']}", json={
+        **payload,
+        "content": "默认输出中英双语",
+        "expected_revision": created["revision"],
+    })
+    assert updated.status_code == 200
+    assert updated.json()["revision"] == 2
+
+    stale_update = client.put(f"/memories/{created['id']}", json={
+        **payload,
+        "content": "旧表单内容",
+        "expected_revision": created["revision"],
+    })
+    assert stale_update.status_code == 409
+
+    stale_delete = client.delete(
+        f"/memories/{created['id']}?scope=project&expected_revision={created['revision']}"
+    )
+    assert stale_delete.status_code == 409
 
 
 # ---------- 取消 ----------
