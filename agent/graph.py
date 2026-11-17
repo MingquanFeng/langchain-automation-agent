@@ -21,8 +21,11 @@ Agent 装配模块（graph.py）。
 from __future__ import annotations
 
 # SQLite：Python 内置的轻量级数据库模块。
-# 用于创建数据库连接，持久化 Agent 的执行状态。
+# 用于创建数据库连接，持久化 Agent 的执行状态和长期记忆。
 import sqlite3
+
+# os：用于收紧长期记忆数据库的本机文件权限。
+import os
 
 # Path：用于处理文件路径、获取父目录和创建目录。
 from pathlib import Path
@@ -89,17 +92,19 @@ from langgraph.checkpoint.memory import InMemorySaver
 # 支持程序重启后恢复已保存的对话和执行状态。
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-# InMemoryStore：
-# 提供跨会话访问的内存键值存储。
+# InMemoryStore / SqliteStore：
+# 提供跨会话访问的键值存储。
 #
 # 注意：
 # Store 与 Checkpointer 的职责不同。
 # Checkpointer 主要保存线程的执行状态。
 # Store 用于存储可跨线程访问的数据。
 #
-# InMemoryStore 不会自动持久化到磁盘，
-# 也不会自动提取或保存用户偏好。
+# InMemoryStore 用于显式选择 memory 后端和测试隔离；
+# SqliteStore 是默认的持久化长期记忆后端。
+# 两者都不会自动提取或保存用户偏好。
 from langgraph.store.memory import InMemoryStore
+from langgraph.store.sqlite import SqliteStore
 
 
 # ============================================================
@@ -424,7 +429,93 @@ def _build_checkpointer():
 
 
 # ============================================================
-# 10. Agent 构建函数
+# 10. Store 构建函数
+# ============================================================
+
+def _build_store():
+    """
+    根据运行配置创建跨会话长期记忆 Store。
+
+    MEMORY_BACKEND=sqlite 时，Store 使用独立的 store.sqlite 数据库，
+    与保存会话状态的 memory.sqlite 分离；其他值使用进程内存。
+
+    本函数只提供持久化容器。哪些内容允许成为长期记忆、如何查看
+    和删除，将由后续的显式记忆入口负责，当前不会自动复制对话。
+    """
+    # --------------------------------------------------------
+    # 10.1 判断是否使用 SQLite
+    # --------------------------------------------------------
+
+    # MEMORY_BACKEND 与 Checkpointer 共用同一个总开关：
+    # - sqlite：会话状态和长期记忆都持久化，但使用不同数据库；
+    # - 其他值：两者都只保存在当前进程内存中。
+    if RUNTIME.memory_backend != "sqlite":
+        return InMemoryStore()
+
+    # --------------------------------------------------------
+    # 10.2 准备数据库路径
+    # --------------------------------------------------------
+
+    # expanduser() 支持配置中使用 ~；resolve() 将相对路径固定为绝对路径，
+    # 避免后续工作目录变化时同一个进程连接到不同文件。
+    path = Path(RUNTIME.store_path).expanduser().resolve()
+
+    # 首次启动时 data/ 可能不存在。parents=True 递归创建父目录，
+    # exist_ok=True 允许目录已经存在。
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # --------------------------------------------------------
+    # 10.3 建立适合 SqliteStore 的连接
+    # --------------------------------------------------------
+
+    # timeout 与 busy_timeout 让短暂写锁等待一段时间，避免桌面运行时
+    # 因一次并发写入立刻失败；SqliteStore 自身还会用锁串行化连接访问。
+    conn = sqlite3.connect(
+        path,
+        check_same_thread=False,
+        timeout=10,
+        # SqliteStore 会显式执行 BEGIN / COMMIT；连接必须使用 autocommit，
+        # 这也与它官方 from_conn_string() 的连接方式一致。
+        isolation_level=None,
+    )
+
+    # sqlite3.connect(timeout=10) 设置连接层的锁等待时间；
+    # busy_timeout 再明确设置 SQLite 连接当前使用的毫秒值。
+    conn.execute("PRAGMA busy_timeout=10000")
+
+    # WAL 允许读操作与单个写操作更好地并行，适合桌面应用持续运行场景。
+    # SQLite 仍然只有一个写者，因此它不是跨进程并发协调方案。
+    conn.execute("PRAGMA journal_mode=WAL")
+
+    # --------------------------------------------------------
+    # 10.4 初始化 Store 表结构
+    # --------------------------------------------------------
+
+    # 将已经配置好的连接交给 LangGraph Store。
+    store = SqliteStore(conn)
+
+    # setup() 创建和迁移 Store 所需表结构，是幂等操作，可以每次启动调用。
+    store.setup()
+
+    # 限制 checkpoint 或连接关闭后可保留的 WAL 大小。
+    # 64 MiB 是上限目标，不代表运行期间 WAL 绝不会临时超过该值。
+    conn.execute("PRAGMA journal_size_limit=67108864")
+
+    # --------------------------------------------------------
+    # 10.5 收紧文件权限并返回 Store
+    # --------------------------------------------------------
+
+    # 长期记忆可能包含用户偏好或事实，不应沿用常见的 0644 默认权限。
+    # setup() 已确保主数据库文件存在，再把它收紧为仅当前用户可读写。
+    os.chmod(path, 0o600)
+
+    # 连接不能在这里关闭：SqliteStore 会在整个 Agent 生命周期中复用它。
+    # 当前 Agent 是运行时单例，连接随 sidecar 进程结束而释放。
+    return store
+
+
+# ============================================================
+# 11. Agent 构建函数
 # ============================================================
 
 def build_agent(
@@ -461,7 +552,7 @@ def build_agent(
 
         store：
             自定义 Store。
-            不传时使用 InMemoryStore()。
+            不传时调用 _build_store()；默认使用 SQLite 持久化 Store。
 
     这种设计称为依赖注入：
         调用方可以替换组件，
@@ -472,7 +563,7 @@ def build_agent(
     """
 
     # --------------------------------------------------------
-    # 10.1 组装中间件列表
+    # 11.1 组装中间件列表
     # --------------------------------------------------------
 
     middleware = [
@@ -519,7 +610,7 @@ def build_agent(
     ]
 
     # --------------------------------------------------------
-    # 10.2 创建并返回 Agent
+    # 11.2 创建并返回 Agent
     # --------------------------------------------------------
 
     return create_agent(
@@ -584,16 +675,18 @@ def build_agent(
 
         # 如果传入 store，则使用自定义 Store。
         #
-        # 否则创建 InMemoryStore。
+        # 否则调用 _build_store()，根据 MEMORY_BACKEND
+        # 创建 SQLite 持久化 Store 或 InMemoryStore。
         #
         # Store 可以保存跨线程访问的数据，
         # 但需要工具或中间件实现具体读写逻辑。
         #
-        # InMemoryStore 不会在重启后保留数据。
+        # SQLite Store 与 Checkpointer 使用不同数据库：
+        # 一个保存跨会话长期记忆，一个保存 thread 状态。
         store=(
             store
             if store is not None
-            else InMemoryStore()
+            else _build_store()
         ),
 
         # ------------------------
@@ -628,7 +721,7 @@ def build_agent(
 
 
 # ============================================================
-# 11. TodoList 任务拆解中间件
+# 12. TodoList 任务拆解中间件
 # ============================================================
 
 # TodoListMiddleware 为 Agent 提供待办事项管理能力。

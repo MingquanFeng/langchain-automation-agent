@@ -117,7 +117,7 @@
 | 层次 | 是什么 | 本项目的载体 |
 |---|---|---|
 | 动态运行时上下文 | state，随对话变化 | `AgentState`（messages / jump_to） |
-| 动态跨会话上下文 | store，跨 thread 共享 | `InMemoryStore`（当前几乎没用） |
+| 动态跨会话上下文 | store，跨 thread 共享 | `SqliteStore`（默认持久化；当前只完成容器与命名空间） |
 | **静态运行时上下文** | context，每次调用传入、不持久 | `AgentContext` |
 
 **课件 09 章 4.1 讲了三种在钩子里读 context 的方式**，项目实现了两种：
@@ -162,7 +162,7 @@ LangChain 课件讲的是「怎么用 `create_agent`」，这套课件讲的是�
 |---|---|---|
 | `agent/graph.py:424` `build_agent()` | `create_agent()` 返回 `CompiledStateGraph`（底层 Pregel）。项目用的每一张图都是它画的 | 01 章 2.2「编译状态图」 |
 | `agent/graph.py:292` `_build_checkpointer()` | 短期记忆：`SqliteSaver` / `InMemorySaver` 二选一 | 03 章 6.2「启用可恢复执行」/ 7.1 |
-| `agent/graph.py:102` `InMemoryStore` | 长期记忆：跨 thread 的键值存储。**目前只挂了没用**（全项目没有 `store.put`/`get`/`search` 调用） | 03 章 7.2「长期记忆」 |
+| `agent/graph.py` `SqliteStore` | 长期记忆：跨 thread 的键值存储，默认落盘到独立的 `data/store.sqlite`；用户级与项目级命名空间见 `agent/memory.py` | 03 章 7.2「长期记忆」 |
 | `agent/middleware/custom.py:38` `Runtime` | `runtime.context` 就是 LangGraph 的运行时上下文 | 03 章 7.3「运行时上下文」 |
 | `agent/middleware/custom.py:98` `after_model` | 钩子插在 `model` 与 `tools` **两个节点之间**，所以它能拦下写工具 | 02 章 4.2「分支结构」 |
 | `runtime/events.py` `ThinkFilter` | 滤掉模型混在正文里的 `<think>` 思考块（MiniMax 这类推理模型） | 05 章 11.2 `stream`/`astream` |
@@ -201,7 +201,7 @@ __start__ → model → tools → model → … → __end__
 |---|---|---|
 | 06 结构化输出 | 只有手写的 `save_json` | 用 `model.with_structured_output(PydanticModel)` 让模型直接返回结构化对象，比让模型「输出 JSON 字符串再解析」可靠得多。四种模式见课件 06 章 2.1-2.4（Pydantic / TypedDict / JSON Schema / dataclass） |
 | 07 章 7.3 `ToolStrategy` | 没用 `response_format` | 让 Agent 直接返回结构化对象。注意 1.x **必须显式** `ToolStrategy(Schema)`，直接传 `Schema` 会报错 |
-| 09 章 3 长期记忆 | store 只挂了 `InMemoryStore` 没实际用 | 用 `store.put(namespace, key, value)` / `store.search()` 实现跨会话记忆 |
+| 09 章 3 长期记忆 | 已接入持久化 `SqliteStore` 和用户/项目命名空间，尚无面向用户的记忆写入与管理入口 | 用显式工具实现 `put/get/search/delete`，只保存用户要求跨会话复用的偏好和事实 |
 | 10 RAG | requirements 里被注释掉了 | 需要向量库 + 切分，最后再碰 |
 
 LangGraph 专项课件（`courseware/langGraph/`）里还没接入的：

@@ -339,6 +339,35 @@ class RuntimeConfig:
         )
     )
 
+    # 长期记忆 Store 的 SQLite 数据库文件路径。
+    #
+    # Checkpointer 与 Store 职责不同，因此分开使用两个数据库：
+    # - memory.sqlite：按 thread_id 保存会话和执行状态；
+    # - store.sqlite：保存允许跨会话复用的长期记忆。
+    #
+    # 桌面版默认都位于 AUTOMATION_AGENT_HOME/data，
+    # 不会随当前选择的项目工作目录变化。
+    store_path: Path = field(
+        default_factory=lambda: Path(
+            _env(
+                "STORE_PATH",
+                str(_MEMORY_DIR / "store.sqlite")
+            )
+        )
+    )
+
+    # 本地记忆主体标识。
+    #
+    # 当前桌面版是单用户应用，默认主体为 local。
+    # 该值只参与生成稳定的用户命名空间哈希，
+    # 原文不会直接写入 Store 命名空间。
+    memory_user_id: str = field(
+        default_factory=lambda: _env(
+            "MEMORY_USER_ID",
+            "local"
+        )
+    )
+
     # ------------------------
     # 通知配置
     # ------------------------

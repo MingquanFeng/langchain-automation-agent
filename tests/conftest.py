@@ -21,6 +21,7 @@ pytest 的全局配置。
 
 import langsmith.utils as ls_utils
 import pytest
+from langgraph.store.memory import InMemoryStore
 
 
 @pytest.fixture(autouse=True)
@@ -33,3 +34,15 @@ def disable_langsmith_tracing(monkeypatch):
     （项目的 .env 用 `load_dotenv(override=True)`，会盖掉环境变量）。
     """
     monkeypatch.setattr(ls_utils, "tracing_is_enabled", lambda *a, **k: False)
+
+
+@pytest.fixture(autouse=True)
+def isolate_long_term_store(monkeypatch):
+    """测试默认使用内存 Store，避免把假数据写入真实长期记忆库。
+
+    生产代码的 build_agent() 仍默认调用 SQLite Store；专门的 Store
+    回归测试会直接调用原始构建函数验证持久化、权限和命名空间隔离。
+    """
+    import agent.graph as graph_module
+
+    monkeypatch.setattr(graph_module, "_build_store", InMemoryStore)
