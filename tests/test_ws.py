@@ -577,7 +577,9 @@ def test_malformed_approval_response_is_recoverable(client):
 def desktop_access(monkeypatch):
     """为当前测试启用桌面托管模式，使用可控的测试凭证。"""
     access = server_mod.DesktopAccess("a" * 64, "b" * 64)
-    monkeypatch.setattr(app.state, "desktop_access", access)
+    # Starlette State 将业务属性保存在内部映射中；上一次 monkeypatch
+    # 回收后该动态属性可能不存在，因此允许在这里重新创建。
+    monkeypatch.setattr(app.state, "desktop_access", access, raising=False)
     return access
 
 

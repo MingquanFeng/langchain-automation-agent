@@ -135,7 +135,7 @@ async def lifespan(app: FastAPI):
     configure_persistence(store)
     app.state.runtime_store = store
 
-    if RUNTIME.scheduler_enabled and app.state.desktop_access is None:
+    if RUNTIME.scheduler_enabled and getattr(app.state, "desktop_access", None) is None:
         start_scheduler()
         logger.info("定时任务已启动")
 
@@ -147,6 +147,9 @@ async def lifespan(app: FastAPI):
     for handle in app.state.run_manager.active():
         app.state.run_manager.cancel(handle.run_id, disconnect=True)
     stop_scheduler()
+    # Starlette 的 TestClient 会在测试夹具回收时还原 app.state 属性。
+    # 保持这个可选状态存在，避免下一次生命周期启动时读取不到它。
+    app.state.desktop_access = None
 
 
 # app：FastAPI 应用实例。
@@ -161,7 +164,7 @@ app.state.desktop_access = None
 @app.middleware("http")
 async def authorize_desktop_http(request: Request, call_next):
     """保护托管服务的 HTTP 接口，健康检查仅提供启动状态。"""
-    access = request.app.state.desktop_access
+    access = getattr(request.app.state, "desktop_access", None)
     if access is None or (request.method == "GET" and request.url.path == "/health"):
         return await call_next(request)
 
@@ -257,7 +260,7 @@ def health(request: Request) -> dict:
     不是「调度器此刻是否真的在跑」。
     两者在服务启动失败时可能不一致。
     """
-    access = request.app.state.desktop_access
+    access = getattr(request.app.state, "desktop_access", None)
     if access is not None:
         return {"status": "ok", "scheduler": False, "readiness": access.readiness}
     return {"status": "ok", "scheduler": RUNTIME.scheduler_enabled}
@@ -676,7 +679,7 @@ def create_task(req: ScheduledTaskRequest, request: Request) -> dict:
     所以这里直接调用是安全的。
 
     """
-    if request.app.state.desktop_access is not None:
+    if getattr(request.app.state, "desktop_access", None) is not None:
         raise HTTPException(status_code=403, detail="桌面托管服务未启用定时任务管理")
     try:
         CronTrigger.from_crontab(req.cron, timezone=RUNTIME.timezone)
@@ -709,7 +712,7 @@ def delete_task(name: str, request: Request) -> dict:
     同样需要重启调度器才生效，
     这里已经顺手调了 start_scheduler()。
     """
-    if request.app.state.desktop_access is not None:
+    if getattr(request.app.state, "desktop_access", None) is not None:
         raise HTTPException(status_code=403, detail="桌面托管服务未启用定时任务管理")
     removed = remove_task(name)
     start_scheduler()
@@ -790,7 +793,7 @@ async def websocket_events(websocket: WebSocket) -> None:
     3. **连接断开要清理** —— 断开时取消这个连接上的所有 run，
        否则消费线程会一直跑下去。
     """
-    access = websocket.app.state.desktop_access
+    access = getattr(websocket.app.state, "desktop_access", None)
     if access is not None:
         origin = websocket.headers.get("origin")
         protocols = websocket.scope.get("subprotocols", [])
