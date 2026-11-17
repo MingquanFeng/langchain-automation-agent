@@ -265,9 +265,15 @@
     /* 阿序 · Axu dashboard */
     body { background: radial-gradient(ellipse at 34% 0%, #e8edff 0, transparent 44%), #f4f6fb; }
     main.chat-app {
-      width: min(1580px, calc(100% - 28px)); height: calc(100vh - 92px); min-height: 520px;
-      margin: 14px auto; display: grid; grid-template-columns: 188px minmax(360px, 1fr) 264px;
-      gap: 13px; align-items: stretch; position: relative;
+      /*
+       * 三栏工作台必须跟随窗口宽度，而不是在 1580px 后停止增长。
+       * clamp() 让两侧栏在普通窗口保持紧凑，在超宽屏上适度增加信息密度；
+       * 中央列承担剩余空间，因此窗口左右不再出现与内容无关的大块空白。
+       */
+      width: calc(100% - clamp(16px, 1.5vw, 28px)); height: calc(100vh - 92px); min-height: 520px;
+      margin: clamp(8px, .75vw, 14px) auto; display: grid;
+      grid-template-columns: clamp(188px, 11vw, 224px) minmax(360px, 1fr) clamp(264px, 17vw, 320px);
+      gap: clamp(9px, .7vw, 13px); align-items: stretch; position: relative;
     }
     .sidebar, .assistant-rail, .chat-panel {
       min-width: 0; border: 1px solid #dfe5f4; border-radius: 18px;
@@ -387,7 +393,8 @@
     .chat-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 20px; background: rgb(255 255 255 / 82%); }
     .messages { min-height: 0; flex: 1; overflow: auto; padding: 18px clamp(16px, 2.2vw, 34px); scroll-behavior: smooth; }
     .messages.empty-state { display: flex; flex-direction: column; justify-content: center; }
-    .messages.empty-state .welcome { margin: 0 0 30px; }
+    /* 中央列变宽后，欢迎内容仍保持在聊天区视觉中心，不贴在左上角。 */
+    .messages.empty-state .welcome { width: min(640px, 100%); margin: 0 auto 30px; }
     .welcome { max-width: none; display: grid; grid-template-columns: 57px minmax(0, 1fr); align-items: center; gap: 0 15px; margin: 12px 0 25px; text-align: left; color: #72809a; }
     .welcome-mark { grid-row: 1 / span 3; width: 56px; height: 56px; margin: 0; border-radius: 18px; box-shadow: 0 8px 22px #4364c32c; }
     .welcome h2 { color: #202e49; font-size: clamp(17px, 1.8vw, 21px); letter-spacing: -.045em; }
@@ -476,7 +483,13 @@
     .execution-todo-empty[hidden] { display: none; }
 
     .embedded > body > .topbar { display: none; }
-    .embedded main.chat-app { width: min(1580px, calc(100% - 28px)); height: calc(100vh - 28px); min-height: 0; margin: 14px auto; }
+    /* 桌面 App 通过 iframe 嵌入工作台；嵌入模式同样使用完整可用宽度。 */
+    .embedded main.chat-app {
+      width: calc(100% - clamp(16px, 1.5vw, 28px));
+      height: calc(100vh - clamp(16px, 1.5vw, 28px));
+      min-height: 0;
+      margin: clamp(8px, .75vw, 14px) auto;
+    }
     @media (max-width: 1120px) {
       main.chat-app { grid-template-columns: 176px minmax(320px, 1fr) 238px; gap: 10px; }
       .sidebar { padding: 13px 9px; }
