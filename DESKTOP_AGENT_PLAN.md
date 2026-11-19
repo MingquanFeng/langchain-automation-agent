@@ -436,7 +436,7 @@ asyncio.run(main())
 - [x] WebSocket、同步 / 定时任务和会话删除共用进程内会话占用表；验证不同会话并发使用 SQLite checkpointer 和运行记录库不会串线，工作线程退出前不释放占用。
 - [x] 扩展跨进程 SQLite 锁竞争与磁盘故障注入测试：运行记录库在另一进程短暂持有写锁时，会在 10 秒 busy timeout 内等待后成功；`disk I/O error` 会回滚，不留下 `running` 半条记录。LangGraph SQLite Checkpointer 在生产路径完成 schema 初始化后，也能等待另一进程短暂写锁并完成会话写入（2026-11-19，`tests/test_reliability.py`）。
 - [x] 统一服务退出、进程崩溃、事件队列关闭和记录写入失败的终态：首个 `succeeded` / `failed` / `cancelled` 终态不可被迟到事件覆盖；worker 无法启动时立即写入 `failed`；断连或队列关闭会先持久化 `cancelled`，再停止投递；进程退出前未能结束的 `running` 在下次启动统一收敛为 `interrupted`；终态写入暂时失败不改变客户端事件，数据库恢复后的下一次启动会完成该收敛（2026-11-19，`tests/test_runs.py`、`tests/test_storage.py`、`tests/test_consumer.py`）。
-- [ ] 展示可恢复错误和最终错误，保留必要诊断信息，同时避免把凭据写入运行记录。
+- [x] 展示可恢复错误和最终错误，并避免凭据写入运行记录：工作台将不结束任务的协议问题显示为“可恢复问题”，将终态失败显示为“任务未完成”；运行记录在写入指令、输出和错误时替换常见 API Key、Bearer Token、密码与 URL 凭据值，同时保留错误类型和必要诊断上下文（2026-11-19，`runtime/redaction.py`、`tests/test_storage.py`）。
 
 **验收标准**：模型或工具超时后 run 在限定时间内结束；取消状态与实际工具副作用一致；服务重启后无 run 永久停留在 `running`；并发任务不会串会话或破坏运行历史。
 

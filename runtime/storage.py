@@ -39,6 +39,7 @@ from typing import Iterator
 
 # RUNTIME：运行配置提供 Checkpointer 路径；运行数据数据库放在同目录。
 from agent.config import RUNTIME
+from runtime.redaction import redact_sensitive_text
 
 
 # ============================================================
@@ -290,7 +291,7 @@ class RuntimeStore:
                 ) VALUES (?, ?, ?, ?, ?, 'running', ?)
                 """,
                 (
-                    run_id, thread_id, task_name, trigger, instruction,
+                    run_id, thread_id, task_name, trigger, redact_sensitive_text(instruction),
                     started_at if started_at is not None else time.time(),
                 ),
             )
@@ -330,7 +331,9 @@ class RuntimeStore:
                   AND status = 'running'
                 """,
                 (
-                    status, output, error, duration_ms, message_count,
+                    status, redact_sensitive_text(output),
+                    redact_sensitive_text(error) if error is not None else None,
+                    duration_ms, message_count,
                     finished_at if finished_at is not None else time.time(), run_id,
                 ),
             )

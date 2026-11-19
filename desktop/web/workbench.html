@@ -221,6 +221,7 @@
     .approval-allow:hover:not(:disabled) { background: #835316; }
     .run-notice { margin: 0 0 17px 37px; color: #8a94a3; font-size: 10px; }
     .run-notice.error { color: #a6503e; }
+    .run-notice.warning { color: #936b25; }
     .composer-wrap { border-top: 1px solid var(--line); padding: 14px clamp(14px, 4vw, 36px) 12px; background: #fff; }
     .composer { border: 1px solid #dce2eb; border-radius: 12px; background: #fff; padding: 11px 12px 9px; box-shadow: 0 5px 18px #26354d0a; }
     .composer:focus-within { border-color: #aebff3; box-shadow: 0 0 0 3px #315fe80d, 0 5px 18px #26354d0a; }
@@ -1688,9 +1689,11 @@
       return bubble;
     }
 
-    function addNotice(text, isError = false) {
+    function addNotice(text, tone = "info") {
       const notice = document.createElement("div");
-      notice.className = `run-notice${isError ? " error" : ""}`;
+      // 保留旧调用的布尔参数兼容，新增 warning 用于不会结束当前任务的问题。
+      if (typeof tone === "boolean") tone = tone ? "error" : "info";
+      notice.className = `run-notice${tone === "info" ? "" : ` ${tone}`}`;
       notice.textContent = text;
       messages.append(notice);
       scrollToBottom();
@@ -1949,8 +1952,12 @@
         void loadSidebarThreads();
         input.focus();
       } else if (event.type === "run.error") {
-        addNotice(event.message || "发生未知错误", true);
         // recoverable 错误只说明某条命令无效（例如重复应答），不代表 run 已结束。
+        const message = event.message || "发生未知错误";
+        addNotice(
+          event.recoverable ? `可恢复问题 · ${message}` : `任务未完成 · ${message}`,
+          event.recoverable ? "warning" : "error",
+        );
         if (!event.recoverable && (!event.run_id || event.run_id === activeRunId)) {
           closePendingApprovals("expired", "任务发生错误；本次工具未执行。");
           activeRunId = null;

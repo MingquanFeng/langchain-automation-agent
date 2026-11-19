@@ -198,6 +198,32 @@ def test_first_terminal_state_wins_over_a_late_terminal_event(tmp_path):
     assert row["error"] == "用户取消"
 
 
+def test_run_records_redact_credentials_but_keep_diagnostic_context(tmp_path):
+    """历史记录不可保存凭据，但仍保留错误类型和可操作的上下文。"""
+    store = RuntimeStore(tmp_path / "runtime.sqlite3")
+    store.start_run(
+        run_id="run-redaction",
+        thread_id="thread-redaction",
+        task_name="脱敏测试",
+        trigger="test",
+        instruction="检查 api_key=sk-secret-value 是否可用",
+    )
+    store.finish_run(
+        "run-redaction",
+        status="failed",
+        output="Authorization: Bearer token-secret-value",
+        error="ProviderError: password=hunter2 请求失败",
+    )
+
+    row = store.list_runs(limit=1)[0]
+    serialized = "\n".join(str(row[key]) for key in ("instruction", "output", "error"))
+    assert "sk-secret-value" not in serialized
+    assert "token-secret-value" not in serialized
+    assert "hunter2" not in serialized
+    assert "ProviderError" in row["error"]
+    assert "[已隐藏]" in serialized
+
+
 def test_database_file_is_private_on_posix(tmp_path):
     """POSIX 环境下运行记录数据库权限限制为当前用户读写。"""
     store = RuntimeStore(tmp_path / "runtime.sqlite3")

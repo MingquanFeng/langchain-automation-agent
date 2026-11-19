@@ -65,6 +65,7 @@ from runtime.events import (
     RunError,
     StreamNormalizer,
 )
+from runtime.redaction import redact_sensitive_text
 
 # AgentContext：运行时上下文。
 from agent.context import AgentContext, TaskCancelledError, check_cancelled
@@ -222,7 +223,7 @@ class StreamConsumer:
             # 异常路径必须发出一条结束事件。
             self._emit_terminal(RunError(
                 run_id=self.run_id,
-                message=f"{type(exc).__name__}: {exc}",
+                message=redact_sensitive_text(f"{type(exc).__name__}: {exc}"),
                 recoverable=False,
             ))
             return
