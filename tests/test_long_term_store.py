@@ -58,6 +58,7 @@ from agent.memory import (
 # 这里保留的是函数对象，不是 Store 实例；每个测试仍会创建自己的连接，
 # 不会在测试之间共享数据库状态。
 _BUILD_STORE = graph_module._build_store
+_BUILD_CHECKPOINTER = graph_module._build_checkpointer
 
 
 def _sqlite_store(monkeypatch, path: Path) -> SqliteStore:
@@ -78,6 +79,16 @@ def _sqlite_store(monkeypatch, path: Path) -> SqliteStore:
     # 使用前面保留的生产函数，避免 tests/conftest.py 的自动隔离 fixture
     # 把这次调用替换成 InMemoryStore。
     return _BUILD_STORE()
+
+
+def _sqlite_checkpointer(monkeypatch, path: Path):
+    """构建使用临时文件的生产 SQLite Checkpointer。"""
+    monkeypatch.setattr(
+        graph_module,
+        "RUNTIME",
+        SimpleNamespace(memory_backend="sqlite", sqlite_path=path),
+    )
+    return _BUILD_CHECKPOINTER()
 
 
 # ============================================================
@@ -118,6 +129,15 @@ def test_sqlite_store_file_is_private(monkeypatch, tmp_path):
 
     # 屏蔽文件类型等高位，只比较 rwx 权限位：0600 = 当前用户可读写，
     # 同组用户和其他用户均无权限。
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_sqlite_checkpointer_file_is_private(monkeypatch, tmp_path):
+    """会话检查点同样只允许当前系统用户读写。"""
+    path = tmp_path / "memory.sqlite"
+    checkpointer = _sqlite_checkpointer(monkeypatch, path)
+    checkpointer.conn.close()
+
     assert path.stat().st_mode & 0o777 == 0o600
 
 
