@@ -272,7 +272,7 @@
        */
       width: calc(100% - clamp(16px, 1.5vw, 28px)); height: calc(100vh - 92px); min-height: 520px;
       margin: clamp(8px, .75vw, 14px) auto; display: grid;
-      grid-template-columns: clamp(188px, 11vw, 224px) minmax(360px, 1fr) clamp(264px, 17vw, 320px);
+      grid-template-columns: clamp(244px, 17vw, 290px) minmax(360px, 1fr) clamp(264px, 17vw, 320px);
       gap: clamp(9px, .7vw, 13px); align-items: stretch; position: relative;
     }
     .sidebar, .assistant-rail, .chat-panel {
@@ -280,27 +280,34 @@
       background: rgb(255 255 255 / 78%); box-shadow: 0 12px 34px #253a6a08;
       backdrop-filter: blur(18px);
     }
-    .sidebar { display: flex; flex-direction: column; padding: 18px 12px 13px; }
-    .sidebar-caption { padding: 2px 10px 12px; color: #98a3b8; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
-    .side-nav { display: grid; gap: 5px; }
+    .sidebar { display: flex; flex-direction: column; padding: 20px 16px 14px; }
+    .sidebar-caption { display: none; }
+    .sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 1px 5px 20px; }
+    .sidebar-brand img { width: 38px; height: 38px; border-radius: 13px; box-shadow: 0 5px 13px #397b5630; }
+    .sidebar-brand strong { display: block; color: #26342e; font-size: 17px; letter-spacing: -.045em; line-height: 1.1; }
+    .sidebar-brand span { display: block; margin-top: 3px; color: #86928b; font-size: 10px; }
+    .side-nav { display: grid; gap: 3px; }
     .nav-item {
       width: 100%; min-height: 43px; display: flex; align-items: center; gap: 11px;
-      padding: 0 11px; border: 0; border-radius: 11px; background: transparent; color: #596987;
-      text-align: left; font-size: 12px; font-weight: 570; transition: background .16s, color .16s, transform .16s;
+      padding: 0 11px; border: 0; border-radius: 10px; background: transparent; color: #4f5c55;
+      text-align: left; font-size: 12px; font-weight: 590; transition: background .16s, color .16s, transform .16s;
     }
-    .nav-item:hover { background: #f0f3ff; color: #345fe5; }
+    .nav-item:hover { background: #edf5f0; color: #277044; }
     .nav-item:active { transform: scale(.985); }
-    .nav-item.active { background: linear-gradient(110deg, #e8edff, #f0f3ff); color: #315fe8; font-weight: 680; }
+    .nav-item.active { background: #edf6f0; color: #1f7744; font-weight: 700; }
     .nav-item svg { width: 19px; height: 19px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .nav-item kbd { margin-left: auto; color: #438157; font: 10px var(--mono); }
+    .nav-item em { margin-left: auto; border-radius: 99px; padding: 2px 5px; color: #89958d; background: #f0f3f1; font-size: 8px; font-style: normal; font-weight: 650; }
+    .nav-item.nav-coming { cursor: not-allowed; opacity: .72; }
     .sidebar-bottom { display: none; }
-    .embedded .sidebar-bottom { display: block; position: relative; overflow: hidden; margin-top: auto; padding: 13px 11px 12px; border: 1px solid #e4e9f6; border-radius: 13px; background: linear-gradient(145deg, #f2f5ff, #fbfcff); }
+    .embedded .sidebar-bottom { display: block; position: relative; overflow: hidden; margin-top: 13px; padding: 13px 12px 12px; border: 1px solid #e1ebe4; border-radius: 14px; background: linear-gradient(135deg, #f5faf6, #edf5ef); }
     .connection-summary-head { min-width: 0; display: flex; align-items: center; gap: 8px; }
-    .connection-summary-head strong { min-width: 0; overflow: hidden; color: #34425c; font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .connection-summary-head strong { min-width: 0; overflow: hidden; color: #3d5145; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
     .connection-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #c3cad5; }
     .sidebar-bottom[data-state="connected"] .connection-dot { background: #35ad78; box-shadow: 0 0 0 3px #35ad7819; }
     .sidebar-bottom[data-state="connecting"] .connection-dot { background: #d59638; box-shadow: 0 0 0 3px #d5963819; }
     .sidebar-bottom[data-state="error"] .connection-dot { background: #ca5c51; box-shadow: 0 0 0 3px #ca5c5119; }
-    .connection-url { display: block; margin: 5px 0 0 16px; overflow: hidden; color: #8995ac; font: 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .connection-url { display: block; margin: 5px 0 0 16px; overflow: hidden; color: #82938a; font: 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-retry { flex: 0 0 auto; border: 1px solid #dce4f4; border-radius: 6px; padding: 3px 6px; color: #51688f; background: #fff; font-size: 8px; font-weight: 650; }
     .settings-dialog { width: min(480px, calc(100vw - 32px)); border: 1px solid #e1e6f0; border-radius: 18px; padding: 0; color: #26334b; background: #fff; box-shadow: 0 24px 80px #1c2d4b30; }
     .settings-dialog::backdrop { background: #18243c66; backdrop-filter: blur(3px); }
@@ -390,6 +397,30 @@
     .conversation-column { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .side-nav .new-chat { min-height: 40px; justify-content: flex-start; padding: 0 10px; border: 1px solid #dce4f7; border-radius: 11px; background: #f1f4ff; color: #315fe8; font-weight: 650; }
     .side-nav .new-chat svg { width: 18px; height: 18px; }
+    /* 工作目录是会话的容器：左栏只放近期入口，完整管理仍在运行历史。 */
+    .thread-rail { min-height: 0; display: flex; flex: 1; flex-direction: column; margin: 20px 0 5px; border-top: 1px solid #e5e9e6; padding-top: 15px; }
+    .thread-rail-head { display: flex; align-items: center; gap: 8px; padding: 0 5px 11px; color: #536059; font-size: 12px; font-weight: 720; }
+    .thread-rail-head svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .thread-project-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 5px 8px; }
+    .thread-project-name { min-width: 0; overflow: hidden; color: #24362b; font-size: 13px; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; }
+    .thread-project-path { min-width: 0; overflow: hidden; color: #89968f; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .directory-add { border: 1px solid #d9e5dc; border-radius: 999px; padding: 4px 8px; color: #52715d; background: #fff; font-size: 9px; font-weight: 680; white-space: nowrap; }
+    .directory-add:hover { color: #217045; border-color: #b9d7c2; background: #f4faf5; }
+    .thread-project { border-radius: 13px; padding: 10px; background: linear-gradient(120deg, #eff7f1, #f7fbf8); }
+    .thread-project-row { display: flex; align-items: center; gap: 8px; }
+    .thread-project-row > svg { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: #26844c; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .thread-project-copy { min-width: 0; flex: 1; }
+    .thread-list { min-height: 0; display: grid; align-content: start; gap: 2px; overflow: auto; margin: 7px 0 0 26px; padding: 0 0 1px; }
+    .thread-item { width: 100%; min-width: 0; display: block; position: relative; border: 0; border-radius: 9px; padding: 7px 8px 7px 28px; color: #47554d; background: transparent; text-align: left; }
+    .thread-item::before { content: ""; position: absolute; top: 9px; left: 9px; width: 11px; height: 8px; border: 1.5px solid currentColor; border-radius: 3px; opacity: .72; }
+    .thread-item::after { content: ""; position: absolute; top: 15px; left: 12px; width: 3px; height: 3px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); opacity: .72; }
+    .thread-item:hover { color: #207445; background: #edf6f0; }
+    .thread-item.active { color: #176c3b; background: #e4f1e7; font-weight: 680; }
+    .thread-item-title { display: block; overflow: hidden; font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+    .thread-item-meta { display: block; overflow: hidden; margin-top: 2px; color: #9ba59e; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+    .thread-rail-status { padding: 9px 8px; color: #98a39c; font-size: 10px; line-height: 1.5; }
+    .thread-more { align-self: flex-start; border: 0; padding: 8px 8px 2px 34px; color: #6f8075; background: transparent; font-size: 10px; font-weight: 680; }
+    .thread-more:hover { color: #207445; }
     .chat-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 20px; background: rgb(255 255 255 / 82%); }
     .messages { min-height: 0; flex: 1; overflow: auto; padding: 18px clamp(16px, 2.2vw, 34px); scroll-behavior: smooth; }
     .messages.empty-state { display: flex; flex-direction: column; justify-content: center; }
@@ -498,7 +529,8 @@
     @media (max-width: 860px) {
       main.chat-app { grid-template-columns: 64px minmax(320px, 1fr); }
       .sidebar { align-items: center; padding: 13px 7px; }
-      .sidebar-caption, .nav-item span { display: none; }
+      .sidebar-caption, .sidebar-brand div, .nav-item span, .nav-item kbd, .nav-item em { display: none; }
+      .thread-rail { display: none; }
       .nav-item { justify-content: center; width: 46px; padding: 0; }
       .side-nav .new-chat { justify-content: center; padding: 0; }
       .embedded .sidebar-bottom { width: 40px; height: 40px; display: grid; place-items: center; margin: auto auto 0; padding: 0; border: 0; border-radius: 50%; background: transparent; }
@@ -558,13 +590,22 @@
 
   <main class="chat-app">
     <aside class="sidebar" aria-label="主导航">
-      <div class="sidebar-caption">工作空间</div>
+      <div class="sidebar-brand">
+        <img src="./assets/automation-agent-logo.png" alt="阿序标志">
+        <div><strong>阿序 · Axu</strong><span>个人桌面 AI Agent</span></div>
+      </div>
       <nav class="side-nav">
         <button class="nav-item new-chat" id="newChatButton" type="button" aria-label="新会话" title="新会话">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新会话</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新建会话</span><kbd>⌘ N</kbd>
         </button>
         <button class="nav-item active" type="button" data-nav-target="chat" aria-label="首页" title="首页" aria-current="page">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3.5 10 8.5-7 8.5 7v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1V10Z"/><path d="M9 20.5v-7h6v7"/></svg><span>首页</span>
+        </button>
+        <button class="nav-item nav-coming" type="button" aria-label="任务中心即将推出" title="任务中心即将推出" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="m8 5 1-2M16 5l-1-2M8 12l2 2 5-5"/></svg><span>任务中心</span><em>即将推出</em>
+        </button>
+        <button class="nav-item nav-coming" type="button" aria-label="知识库即将推出" title="知识库即将推出" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 8 4.5-8 4.5L4 8l8-4.5Z"/><path d="m4 12 8 4.5 8-4.5M4 16l8 4.5 8-4.5"/></svg><span>知识库</span><em>即将推出</em>
         </button>
         <button class="nav-item" type="button" data-nav-target="history" aria-label="运行历史" title="运行历史">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span>运行历史</span>
@@ -573,6 +614,22 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.1.9-1.2 2.1-1.4-.5a7.8 7.8 0 0 1-1.6.9l-.3 1.5h-2.4l-.3-1.5a7.8 7.8 0 0 1-1.6-.9l-1.4.5-1.2-2.1 1.1-.9a7 7 0 0 1 0-1.8l-1.1-.9 1.2-2.1 1.4.5a7.8 7.8 0 0 1 1.6-.9l.3-1.5h2.4l.3 1.5a7.8 7.8 0 0 1 1.6.9l1.4-.5 1.2 2.1-1.1.9a7 7 0 0 1 0 1.8Z" transform="translate(-1 -1)"/></svg><span>设置</span>
         </button>
       </nav>
+      <section class="thread-rail" aria-labelledby="sidebarThreadTitle">
+        <div class="thread-rail-head">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l1.7 2h9.3v9.8a1.2 1.2 0 0 1-1.2 1.2H4.7a1.2 1.2 0 0 1-1.2-1.2V7.7a1.2 1.2 0 0 1 0-1.2Z"/></svg>
+          <span id="sidebarThreadTitle">工作目录</span>
+          <button class="directory-add" id="sidebarChooseDirectory" type="button">更换目录</button>
+        </div>
+        <div class="thread-project">
+          <div class="thread-project-row">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l1.7 2h9.3v9.8a1.2 1.2 0 0 1-1.2 1.2H4.7a1.2 1.2 0 0 1-1.2-1.2V7.7a1.2 1.2 0 0 1 0-1.2Z"/></svg>
+            <div class="thread-project-copy"><div class="thread-project-name" id="sidebarProjectName" title="当前工作目录">工作目录</div><div class="thread-project-path" id="sidebarProjectPath">选择一个工作目录开始</div></div>
+          </div>
+          <div class="thread-list" id="sidebarThreadList" aria-live="polite"></div>
+        </div>
+        <div class="thread-rail-status" id="sidebarThreadStatus">连接后加载最近会话</div>
+        <button class="thread-more" id="sidebarThreadMoreButton" type="button" hidden>查看全部会话</button>
+      </section>
       <div class="sidebar-bottom" id="sidebarConnection" data-state="connecting" role="status">
         <div class="connection-summary-head">
           <span class="connection-dot" aria-hidden="true"></span>
@@ -822,6 +879,12 @@
     const sidebarConnectionText = $("#sidebarConnectionText");
     const sidebarConnectionUrl = $("#sidebarConnectionUrl");
     const sidebarRetryButton = $("#sidebarRetryButton");
+    const sidebarProjectName = $("#sidebarProjectName");
+    const sidebarProjectPath = $("#sidebarProjectPath");
+    const sidebarChooseDirectory = $("#sidebarChooseDirectory");
+    const sidebarThreadList = $("#sidebarThreadList");
+    const sidebarThreadStatus = $("#sidebarThreadStatus");
+    const sidebarThreadMoreButton = $("#sidebarThreadMoreButton");
     const taskStatusCard = $("#taskStatusCard");
     const taskStateBadge = $("#taskStateBadge");
     const taskStateDescription = $("#taskStateDescription");
@@ -851,6 +914,7 @@
     let historyHasMore = false;
     let historyLoading = false;
     let memoryRecords = [];
+    let sidebarThreadsLoading = false;
 
     function serviceFetch(path, { method = "GET", body } = {}) {
       const headers = serviceAccessToken ? { Authorization: `Bearer ${serviceAccessToken}` } : {};
@@ -891,6 +955,11 @@
       workingDirectoryAnnouncement.textContent = currentWorkingDirectory
         ? `当前工作目录：${currentWorkingDirectory}`
         : "尚未收到工作目录信息";
+      sidebarProjectName.textContent = directoryName;
+      sidebarProjectName.title = currentWorkingDirectory || "当前工作目录";
+      sidebarProjectPath.textContent = currentWorkingDirectory
+        ? currentWorkingDirectory.replace(/^\/Users\/[^/]+/, "~")
+        : "选择一个工作目录开始";
     }
 
     // 把协议风险等级转换成界面上的简短说明，帮助用户快速判断操作影响。
@@ -1201,6 +1270,48 @@
       clearHistoryButton.disabled = historyLoading || historyOffset === 0;
     }
 
+    function renderSidebarThread(session) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "thread-item";
+      item.classList.toggle("active", session.thread_id === threadId);
+      item.title = session.title || "未命名会话";
+
+      const title = document.createElement("span");
+      title.className = "thread-item-title";
+      title.textContent = session.title || "未命名会话";
+      const meta = document.createElement("span");
+      meta.className = "thread-item-meta";
+      meta.textContent = `${session.message_count || 0} 条消息`;
+      item.append(title, meta);
+      item.addEventListener("click", () => recoverThread({
+        thread_id: session.thread_id,
+        instruction: session.title,
+      }));
+      return item;
+    }
+
+    async function loadSidebarThreads() {
+      if (sidebarThreadsLoading) return;
+      sidebarThreadsLoading = true;
+      sidebarThreadStatus.textContent = "正在加载会话…";
+      sidebarThreadMoreButton.hidden = true;
+      try {
+        const response = await serviceFetch("/threads?limit=8&offset=0");
+        if (!response.ok) throw await apiError(response, "读取会话列表失败");
+        const payload = await response.json();
+        if (!Array.isArray(payload.threads)) throw new Error("会话列表格式无效");
+        sidebarThreadList.replaceChildren(...payload.threads.map(renderSidebarThread));
+        sidebarThreadStatus.textContent = payload.threads.length ? "" : "还没有已保存的会话";
+        sidebarThreadMoreButton.hidden = !payload.threads.length;
+      } catch (error) {
+        sidebarThreadList.replaceChildren();
+        sidebarThreadStatus.textContent = error.message;
+      } finally {
+        sidebarThreadsLoading = false;
+      }
+    }
+
     function renderHistoryThread(session) {
       const item = document.createElement("article");
       item.className = "history-session-item";
@@ -1441,6 +1552,7 @@
 
         setBusy(false);
         setTaskState("idle", "已恢复历史会话，可以继续发送消息。未自动重发任何任务。");
+        void loadSidebarThreads();
         document.querySelectorAll(".nav-item").forEach((button) => {
           const active = button.dataset.navTarget === "chat";
           button.classList.toggle("active", active);
@@ -1808,6 +1920,7 @@
         setBusy(false);
         finishCurrentTask("done", "任务已完成，可以继续安排下一项。");
         currentAssistantBubble = null;
+        void loadSidebarThreads();
         input.focus();
       } else if (event.type === "run.cancelled") {
         addNotice("本轮已取消");
@@ -1816,6 +1929,7 @@
         setBusy(false);
         finishCurrentTask("cancelled", "任务已取消，可以调整要求后再试。");
         currentAssistantBubble = null;
+        void loadSidebarThreads();
         input.focus();
       } else if (event.type === "run.error") {
         addNotice(event.message || "发生未知错误", true);
@@ -1826,6 +1940,7 @@
           setBusy(false);
           finishCurrentTask("error", "任务未能完成，请查看对话中的错误信息。");
           currentAssistantBubble = null;
+          void loadSidebarThreads();
           input.focus();
         }
       } else if (event.type === "run.progress") {
@@ -1858,6 +1973,7 @@
           settled = true;
           connectPromise = null;
           setConnection("connected", "已连接");
+          void loadSidebarThreads();
           resolve(currentSocket);
         }, { once: true });
         currentSocket.addEventListener("error", () => {
@@ -1994,6 +2110,12 @@
     });
 
     closeHistoryButton.addEventListener("click", () => historyDialog.close());
+    sidebarChooseDirectory.addEventListener("click", () => workingDirectoryButton.click());
+    sidebarThreadMoreButton.addEventListener("click", () => {
+      historyDialog.showModal();
+      void loadThreadHistory(true);
+      void loadRunHistory(true);
+    });
     refreshHistoryButton.addEventListener("click", () => {
       void loadThreadHistory(true);
       void loadRunHistory(true);
