@@ -51,7 +51,7 @@ from agent.context import AgentContext
 # StreamConsumer：真正地执行体（阶段 3）。
 from runtime.consumer import StreamConsumer
 from runtime.approvals import ApprovalBroker
-from runtime.events import BaseEvent
+from runtime.events import BaseEvent, RunError
 from runtime.concurrency import THREAD_RUNS, RunBusyError, ThreadLease
 
 
@@ -219,7 +219,19 @@ class RunManager:
 
         try:
             worker = loop.run_in_executor(None, work)
-        except Exception:
+        except Exception as exc:
+            # on_started 已登记为 running；若连工作线程都无法启动，必须立即
+            # 落一个 failed 终态，不能等下一次服务启动再被动修复成 interrupted。
+            if on_terminal is not None:
+                try:
+                    on_terminal(RunError(
+                        run_id=run_id,
+                        message=f"执行工作线程启动失败：{type(exc).__name__}: {exc}",
+                        recoverable=False,
+                    ))
+                except Exception:
+                    # 调用方仍要收到原始启动异常；终态持久化失败交给其日志处理。
+                    pass
             handle.worker_finished.set()
             self.finish(run_id)
             raise

@@ -305,7 +305,7 @@ class RuntimeStore:
         duration_ms: int | None = None,
         message_count: int | None = None,
         finished_at: float | None = None,
-    ) -> None:
+    ) -> bool:
         """更新运行终态与结果。
 
         参数：
@@ -314,21 +314,27 @@ class RuntimeStore:
             error：失败或取消说明；正常完成时为 None。
             duration_ms：运行耗时；未知时为 None。
             message_count：Agent 最终消息数；未知时为 None。
+
+        返回：
+            True 表示本次调用完成了从 running 到终态的转换；False 表示
+            记录不存在或已经是终态。终态一经写入不能被迟到的错误覆盖。
         """
         self.initialize()
         with self._connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE agent_runs
                 SET status = ?, output = ?, error = ?, duration_ms = ?,
                     message_count = ?, finished_at = ?
                 WHERE run_id = ?
+                  AND status = 'running'
                 """,
                 (
                     status, output, error, duration_ms, message_count,
                     finished_at if finished_at is not None else time.time(), run_id,
                 ),
             )
+            return cursor.rowcount > 0
 
     def mark_interrupted_runs(self) -> int:
         """将服务上次退出时未结束的运行改为 `interrupted`。

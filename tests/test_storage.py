@@ -181,6 +181,23 @@ def test_service_restart_marks_only_running_records_interrupted(tmp_path):
     assert rows["run-finished"]["status"] == "succeeded"
 
 
+def test_first_terminal_state_wins_over_a_late_terminal_event(tmp_path):
+    """取消、错误等迟到终态不能覆盖已经写入的最终结果。"""
+    store = RuntimeStore(tmp_path / "runtime.sqlite3")
+    _start_record(store, "run-final-once", started_at=100.0)
+
+    assert store.finish_run(
+        "run-final-once", status="cancelled", error="用户取消", finished_at=101.0
+    ) is True
+    assert store.finish_run(
+        "run-final-once", status="failed", error="迟到的工作线程错误", finished_at=102.0
+    ) is False
+
+    row = store.list_runs(limit=1)[0]
+    assert row["status"] == "cancelled"
+    assert row["error"] == "用户取消"
+
+
 def test_database_file_is_private_on_posix(tmp_path):
     """POSIX 环境下运行记录数据库权限限制为当前用户读写。"""
     store = RuntimeStore(tmp_path / "runtime.sqlite3")

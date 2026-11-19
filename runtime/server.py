@@ -999,6 +999,8 @@ def _record_terminal_event(store, event: BaseEvent) -> None:
         )
     except Exception:
         # 运行记录写入失败不能中断事件推送或改变 Agent 的实际结果。
+        # 若数据库恢复前无法落终态，记录会暂时保持 running；下次服务启动会由
+        # mark_interrupted_runs() 统一收敛为 interrupted，避免永久执行中。
         logger.exception("无法保存 Agent 运行结果：%s", event.run_id)
 
 

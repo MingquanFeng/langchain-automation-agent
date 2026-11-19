@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import multiprocessing
 import sqlite3
 import threading
 
@@ -25,6 +26,18 @@ from runtime import runner
 from runtime.consumer import StreamConsumer
 from runtime.runs import RunBusyError, RunManager
 from runtime.storage import RuntimeStore
+
+
+def _hold_sqlite_write_lock(database_path: str, locked, release) -> None:
+    """在独立进程中持有写锁，模拟另一实例正在提交运行记录。"""
+    connection = sqlite3.connect(database_path, timeout=1)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        locked.set()
+        assert release.wait(5)
+        connection.commit()
+    finally:
+        connection.close()
 
 
 # ============================================================
@@ -239,3 +252,136 @@ def test_parallel_tasks_keep_sqlite_checkpoints_and_runs_separate(monkeypatch, t
             assert instructions == [f"指令-{i}"]
     finally:
         connection.close()
+
+
+# ============================================================
+# 4. 跨进程 SQLite 锁竞争与磁盘故障
+# ============================================================
+
+def test_runtime_store_waits_for_a_cross_process_sqlite_write_lock(tmp_path):
+    """另一进程短暂持有写锁时，运行记录写入等待后成功而不是报 locked。"""
+    database = tmp_path / "runtime.sqlite3"
+    store = RuntimeStore(database)
+    store.initialize()
+
+    # spawn 避免 macOS fork 继承 pytest 运行时状态，也更接近两个独立桌面进程。
+    context = multiprocessing.get_context("spawn")
+    locked = context.Event()
+    release = context.Event()
+    holder = context.Process(
+        target=_hold_sqlite_write_lock,
+        args=(str(database), locked, release),
+    )
+    holder.start()
+    try:
+        assert locked.wait(3), "持锁子进程未能取得 SQLite 写锁"
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                store.start_run,
+                run_id="run-cross-process-lock",
+                thread_id="thread-cross-process-lock",
+                task_name="跨进程锁竞争",
+                trigger="test",
+                instruction="等待另一进程提交",
+            )
+            # 锁仍未释放时，调用应处于 SQLite 的 busy 等待，而非立即失败。
+            with pytest.raises(TimeoutError):
+                future.result(timeout=0.2)
+            release.set()
+            future.result(timeout=3)
+    finally:
+        release.set()
+        holder.join(5)
+        if holder.is_alive():
+            holder.terminate()
+            holder.join(2)
+
+    assert holder.exitcode == 0
+    assert store.list_runs(limit=1)[0]["run_id"] == "run-cross-process-lock"
+
+
+def test_sqlite_checkpointer_waits_for_a_cross_process_write_lock(tmp_path):
+    """会话 Checkpointer 遇到另一进程的短暂写锁后仍可完成同一会话写入。"""
+    from langchain_core.messages import HumanMessage
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    database = tmp_path / "memory.sqlite"
+    connection = sqlite3.connect(database, timeout=3, check_same_thread=False)
+    saver = SqliteSaver(connection)
+    # 生产路径在 _build_checkpointer() 中主动调用 setup()；先复现该初始化顺序。
+    saver.setup()
+    agent = build_agent(
+        model=FakeModel(messages=iter([AIMessage(content="检查点写入完成")])),
+        checkpointer=saver,
+    )
+
+    context = multiprocessing.get_context("spawn")
+    locked = context.Event()
+    release = context.Event()
+    holder = context.Process(
+        target=_hold_sqlite_write_lock,
+        args=(str(database), locked, release),
+    )
+    holder.start()
+    try:
+        assert locked.wait(3), "持锁子进程未能取得 SQLite 写锁"
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                agent.invoke,
+                {"messages": [HumanMessage(content="检查跨进程锁")]},
+                {"configurable": {"thread_id": "checkpoint-cross-process-lock"}},
+                context=AgentContext(),
+            )
+            with pytest.raises(TimeoutError):
+                future.result(timeout=0.2)
+            release.set()
+            result = future.result(timeout=3)
+    finally:
+        release.set()
+        holder.join(5)
+        if holder.is_alive():
+            holder.terminate()
+            holder.join(2)
+        connection.close()
+
+    assert holder.exitcode == 0
+    assert result["messages"][-1].content == "检查点写入完成"
+
+
+def test_runtime_store_rolls_back_when_record_write_hits_disk_error(monkeypatch, tmp_path):
+    """磁盘写入异常必须回滚事务，不能留下 status=running 的半条运行记录。"""
+    store = RuntimeStore(tmp_path / "runtime.sqlite3")
+    store.initialize()
+    original_connect = sqlite3.connect
+
+    class FailingConnection:
+        def __init__(self, connection):
+            object.__setattr__(self, "_connection", connection)
+
+        def __setattr__(self, name, value):
+            # RuntimeStore 会设置 row_factory；代理必须把它传给真实连接。
+            setattr(self._connection, name, value)
+
+        def execute(self, statement, parameters=()):
+            if "INSERT INTO agent_runs" in statement:
+                raise sqlite3.OperationalError("disk I/O error")
+            return self._connection.execute(statement, parameters)
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+    monkeypatch.setattr(
+        "runtime.storage.sqlite3.connect",
+        lambda *args, **kwargs: FailingConnection(original_connect(*args, **kwargs)),
+    )
+
+    with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
+        store.start_run(
+            run_id="run-disk-error",
+            thread_id="thread-disk-error",
+            task_name="磁盘故障",
+            trigger="test",
+            instruction="模拟运行记录写入失败",
+        )
+
+    assert RuntimeStore(store.path).list_runs() == []

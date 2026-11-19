@@ -16,12 +16,15 @@
     }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-    body { display: grid; grid-template-rows: 54px minmax(0, 1fr); }
+    /* 工作台自身已经提供了导航和设置入口，不再额外占用一行品牌栏。 */
+    body { display: grid; grid-template-rows: minmax(0, 1fr); }
     button, input { font: inherit; }
     .topbar {
       z-index: 2; display: flex; align-items: center; justify-content: space-between;
       gap: 16px; padding: 0 20px; border-bottom: 1px solid #e5e8ec; background: #fff;
     }
+    /* `.topbar` 的 display 声明优先级会覆盖浏览器对 hidden 的默认样式。 */
+    .topbar[hidden] { display: none; }
     .brand { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 650; }
     .brand-logo { display: block; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 8px; object-fit: cover; }
     .top-actions, .connection { display: flex; align-items: center; gap: 10px; }
@@ -115,7 +118,8 @@
   </style>
 </head>
 <body>
-  <header class="topbar">
+  <!-- 此区域仅承载现有连接与设置脚本；界面入口统一移至工作台侧栏。 -->
+  <header class="topbar" hidden>
     <div class="brand"><img class="brand-logo" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true"><span>阿序 · Axu</span></div>
     <div class="top-actions">
       <div class="connection" id="connection" data-state="connecting" role="status" hidden>

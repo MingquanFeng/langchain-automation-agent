@@ -280,6 +280,32 @@ def test_start_record_failure_releases_thread():
     asyncio.run(scenario())
 
 
+def test_executor_start_failure_emits_failed_terminal_and_releases_thread():
+    """工作线程无法启动时，已登记的运行必须同步变成失败终态。"""
+    class FailingLoop:
+        def run_in_executor(self, *_args, **_kwargs):
+            raise RuntimeError("executor unavailable")
+
+    manager = RunManager()
+    terminals = []
+    with pytest.raises(RuntimeError, match="executor unavailable"):
+        manager.start(
+            owner="executor-failure",
+            instruction="测试",
+            task_name="测试",
+            thread_id="executor-failure-thread",
+            agent=object(),
+            queue=asyncio.Queue(),
+            loop=FailingLoop(),
+            ctx=_ctx(),
+            on_terminal=terminals.append,
+        )
+
+    assert manager.active() == []
+    assert [event.type for event in terminals] == ["run.error"]
+    assert "执行工作线程启动失败" in terminals[0].message
+
+
 def test_disconnect_cleans_pending_events_after_worker_has_finished():
     """worker 已结束、终态仍在等队列空位时，断线也必须清理残留投递。"""
     async def scenario():
