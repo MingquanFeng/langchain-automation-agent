@@ -41,6 +41,12 @@ def test_side_effect_tools_require_approval_by_default(tool_name):
     assert decide_tool_permission(tool_name, allow_write=False) == "require_approval"
 
 
+def test_command_tool_requires_approval_even_with_legacy_write_permission():
+    """高风险命令不得被旧 allow_write=True 绕过。"""
+    assert decide_tool_permission("run_command", allow_write=False) == "require_approval"
+    assert decide_tool_permission("run_command", allow_write=True) == "require_approval"
+
+
 @pytest.mark.parametrize("tool_name", ["write_file", "notify", "unregistered_tool"])
 def test_legacy_write_permission_remains_an_explicit_override(tool_name):
     assert decide_tool_permission(tool_name, allow_write=True) == "allow"

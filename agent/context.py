@@ -177,3 +177,7 @@ class AgentContext:
 
     # 由执行入口注入，与审批等待、流消费器共用；不写入会话检查点。
     cancel_event: threading.Event | None = field(default=None, repr=False, compare=False)
+
+    # 本次执行的短生命周期标识。命令工具用它把审计记录关联到运行历史；
+    # 不属于会话状态，不能写入 Checkpointer。
+    run_id: str = field(default="", repr=False, compare=False)

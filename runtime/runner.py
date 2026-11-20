@@ -169,6 +169,7 @@ def run_task(
 def _execute_task(instruction, ctx, config, run_id, resolved_thread_id) -> dict[str, Any]:
     """在调用方持有会话占用期间登记、执行并保存终态。"""
     started_at = time.time()
+    ctx.run_id = run_id
     store = get_runtime_store()
     recorded = False
     try:

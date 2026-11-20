@@ -171,6 +171,31 @@ class RuntimeStore:
                     "ON agent_runs(thread_id)"
                 )
 
+                # 开发命令是高风险本机副作用；独立审计表保存最小可追溯信息，
+                # 不混入最终自然语言输出，也不保存环境变量。
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS command_executions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT NOT NULL,
+                        call_id TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        argv TEXT NOT NULL,
+                        cwd TEXT NOT NULL,
+                        timeout_seconds INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        exit_code INTEGER,
+                        output_summary TEXT NOT NULL DEFAULT '',
+                        started_at REAL NOT NULL,
+                        finished_at REAL
+                    )
+                    """
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_command_executions_run_id "
+                    "ON command_executions(run_id, id)"
+                )
+
             # 指令和输出可能包含用户数据；POSIX 下数据库文件仅允许当前用户读写。
             if os.name != "nt":
                 self.path.chmod(0o600)
@@ -338,6 +363,57 @@ class RuntimeStore:
                 ),
             )
             return cursor.rowcount > 0
+
+    def start_command_execution(
+        self,
+        *,
+        run_id: str,
+        call_id: str,
+        category: str,
+        argv: str,
+        cwd: str,
+        timeout_seconds: int,
+        started_at: float | None = None,
+    ) -> int:
+        """写入一条待完成的开发命令审计记录并返回其主键。"""
+        self.initialize()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO command_executions(
+                    run_id, call_id, category, argv, cwd, timeout_seconds, status, started_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
+                """,
+                (
+                    run_id, call_id, category, redact_sensitive_text(argv), cwd,
+                    timeout_seconds, started_at if started_at is not None else time.time(),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def finish_command_execution(
+        self,
+        execution_id: int,
+        *,
+        status: str,
+        exit_code: int | None,
+        output_summary: str,
+        finished_at: float | None = None,
+    ) -> None:
+        """收敛命令审计终态；仅允许首次从 running 写入。"""
+        self.initialize()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE command_executions
+                SET status = ?, exit_code = ?, output_summary = ?, finished_at = ?
+                WHERE id = ? AND status = 'running'
+                """,
+                (
+                    status, exit_code, redact_sensitive_text(output_summary),
+                    finished_at if finished_at is not None else time.time(), execution_id,
+                ),
+            )
 
     def mark_interrupted_runs(self) -> int:
         """将服务上次退出时未结束的运行改为 `interrupted`。

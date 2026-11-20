@@ -234,6 +234,32 @@ def test_database_file_is_private_on_posix(tmp_path):
     assert store.path.stat().st_mode & 0o777 == 0o600
 
 
+def test_command_audit_records_only_the_first_terminal_state(tmp_path):
+    """开发命令审计关联 run/call，且终态不能被迟到更新覆盖。"""
+    store = RuntimeStore(tmp_path / "runtime.sqlite3")
+    execution_id = store.start_command_execution(
+        run_id="run-command", call_id="call-command", category="python_test",
+        argv='["python", "-m", "pytest"]', cwd=".", timeout_seconds=60,
+        started_at=1.0,
+    )
+    store.finish_command_execution(
+        execution_id, status="succeeded", exit_code=0, output_summary="ok", finished_at=2.0,
+    )
+    store.finish_command_execution(
+        execution_id, status="failed", exit_code=1, output_summary="late", finished_at=3.0,
+    )
+
+    with store._connect() as connection:
+        row = connection.execute(
+            "SELECT run_id, call_id, status, exit_code, output_summary, finished_at "
+            "FROM command_executions WHERE id = ?", (execution_id,),
+        ).fetchone()
+    assert dict(row) == {
+        "run_id": "run-command", "call_id": "call-command", "status": "succeeded",
+        "exit_code": 0, "output_summary": "ok", "finished_at": 2.0,
+    }
+
+
 # ============================================================
 # 3. 同步 runner 持久化
 # ============================================================

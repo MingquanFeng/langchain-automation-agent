@@ -139,6 +139,24 @@ def test_tool_is_callable(tool, tmp_path, monkeypatch):
                 "scope": "project",
             })
         result = tool.func(**memory_args)
+    elif tool.name == "run_command":
+        # 命令工具需要运行上下文与审计库；用内存替身避免该枚举测试写入真实历史。
+        class _AuditStore:
+            def start_command_execution(self, **_kwargs):
+                return 1
+
+            def finish_command_execution(self, *_args, **_kwargs):
+                return None
+
+        import runtime.storage as storage_mod
+
+        monkeypatch.setattr(storage_mod, "get_runtime_store", lambda: _AuditStore())
+        result = tool.func(
+            argv=["git", "status", "--short"],
+            cwd=".",
+            timeout_seconds=10,
+            runtime=SimpleNamespace(context=AgentContext(), tool_call_id="probe-command"),
+        )
     elif tool.name in {"edit_file", "restore_file_backup"}:
         result = tool.invoke({
             "name": tool.name,

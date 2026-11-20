@@ -18,6 +18,7 @@ ToolRiskLevel = Literal[
     "internal_state",
     "persistent_state_write",
     "workspace_write",
+    "workspace_command",
     "external_effect",
 ]
 PermissionDecision = Literal["allow", "require_approval", "deny"]
@@ -29,6 +30,7 @@ RISK_LEVELS: frozenset[str] = frozenset({
     "internal_state",
     "persistent_state_write",
     "workspace_write",
+    "workspace_command",
     "external_effect",
 })
 
@@ -64,6 +66,10 @@ TOOL_RISK_LEVELS: dict[str, ToolRiskLevel] = {
     "edit_file": "workspace_write",
     "restore_file_backup": "workspace_write",
 
+    # 受控开发命令可能启动本地子进程；即使旧入口传入 allow_write，
+    # 也必须在交互式工作台逐次批准。
+    "run_command": "workspace_command",
+
     # 通知工具：可能向 webhook 接收方投递消息。
     "notify": "external_effect",
     "notify_summary": "external_effect",
@@ -93,14 +99,17 @@ def decide_tool_permission(
     当前桌面工作台不发送这个开关，而是通过 `approval_handler` 对有副作用的
     工具逐次确认。未分类工具在没有整轮显式授权时始终拒绝。
     """
-    # 旧入口显式授权整轮写操作时，保持原有行为。
-    if allow_write:
-        return "allow"
-
     name = tool_name or ""
     risk_level = TOOL_RISK_LEVELS.get(name)
     if risk_level is None:
         risk_level = INTERNAL_TOOL_RISK_LEVELS.get(name)
+    # 命令执行不能被旧的整轮 allow_write 绕过：它只在工作台获得本次授权
+    # 后才会执行；没有 approval_handler 的入口默认拒绝。
+    if risk_level == "workspace_command":
+        return "require_approval"
+    # 旧入口显式授权整轮写操作时，保持既有文件/通知兼容语义。
+    if allow_write:
+        return "allow"
     if risk_level is None:
         return "deny"
     if risk_level in {"read_only", "internal_state"}:

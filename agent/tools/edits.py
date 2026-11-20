@@ -61,6 +61,7 @@ from agent.context import AgentContext
 
 # 复用文件工具的沙箱、敏感路径判断和原子写实现，确保安全规则一致。
 from agent.tools import files as files_mod
+from agent.tools.commands import prepare_command_preview
 
 
 # ============================================================
@@ -382,6 +383,9 @@ def prepare_approval_preview(
         change, err = _prepare_edit(args)
     elif tool_name == "restore_file_backup":
         change, err = _prepare_restore(args)
+    elif tool_name == "run_command":
+        display, err = prepare_command_preview(args)
+        return ApprovalPreview(args=display, error=err)
     else:
         return ApprovalPreview(args=dict(args))
     if change is None:

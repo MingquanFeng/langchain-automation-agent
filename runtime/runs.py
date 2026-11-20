@@ -202,6 +202,7 @@ class RunManager:
             self._consumers.setdefault(owner, weakref.WeakSet()).add(consumer)
         ctx.approval_handler = broker.request
         ctx.cancel_event = handle.cancel_event
+        ctx.run_id = run_id
 
         # executor 执行同步消费器；仅工作线程的 finally 能释放会话。
         # 消费器结束时自己会发结束事件（run.end / run.cancelled / run.error），

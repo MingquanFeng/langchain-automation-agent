@@ -983,6 +983,7 @@
     // 把协议风险等级转换成界面上的简短说明，帮助用户快速判断操作影响。
     const riskLabels = {
       workspace_write: "修改数据文件",
+      workspace_command: "运行开发命令",
       external_effect: "发送到外部",
       persistent_state_write: "修改长期记忆",
     };
@@ -992,6 +993,7 @@
       save_json: "将创建或覆盖数据目录中的 JSON 文件。",
       edit_file: "将按差异预览修改现有文本；批准后会先保存可恢复备份。",
       restore_file_backup: "将按反向差异恢复文件；恢复前的当前状态也会保存为备份。",
+      run_command: "将在当前项目内运行已白名单的检查、测试、构建或格式检查命令。",
       save_memory: "将新建或修改一条跨会话长期记忆。",
       delete_memory: "将永久删除一条指定的长期记忆。",
       notify: "将消息发送到已配置的通知渠道。",
@@ -1729,6 +1731,7 @@
 
     // 更新某条授权卡片的状态，并同步按钮可用状态。
     function setApprovalState(entry, state, label, disableActions = true) {
+      entry.state = state;
       entry.card.dataset.state = state;
       entry.status.textContent = label;
       if (disableActions) {
