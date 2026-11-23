@@ -54,6 +54,19 @@ def check_cancelled(ctx) -> None:
     if event is not None and event.is_set():
         raise TaskCancelledError("任务已请求取消")
 
+
+@dataclass
+class RepairSession:
+    """一次失败检查修复闭环的短生命周期限制。"""
+
+    argv: list[str]
+    cwd: str
+    timeout_seconds: int
+    output_summary: str
+    attempts: int = 0
+    edited_since_check: bool = False
+    edit_pending: bool = False
+
 # 各取值的含义：
 #
 # schedule：定时调度器触发（runtime/scheduler.py）。
@@ -181,3 +194,7 @@ class AgentContext:
     # 本次执行的短生命周期标识。命令工具用它把审计记录关联到运行历史；
     # 不属于会话状态，不能写入 Checkpointer。
     run_id: str = field(default="", repr=False, compare=False)
+
+    # 仅由桌面端“修复此检查”入口注入，不进入会话检查点。
+    repair_session: RepairSession | None = field(default=None, repr=False, compare=False)
+    command_results: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False, compare=False)

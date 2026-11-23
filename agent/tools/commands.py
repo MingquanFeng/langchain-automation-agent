@@ -261,6 +261,10 @@ def run_command(
     if error:
         return f"命令未执行：{error}"
 
+    def record_result(status: str, exit_code: int | None) -> None:
+        if context is not None:
+            context.command_results[call_id] = {"status": status, "exit_code": exit_code}
+
     # storage 依赖 runtime 包；只在工具真正被执行后导入，避免 graph → tools →
     # runtime → runner → graph 的启动循环。
     from runtime.storage import get_runtime_store
@@ -282,17 +286,20 @@ def run_command(
         audit_store.finish_command_execution(
             audit_id, status="cancelled", exit_code=None, output_summary="用户取消命令",
         )
+        record_result("cancelled", None)
         raise
     except OSError as exc:
         message = f"无法启动命令：{type(exc).__name__}: {exc}"
         audit_store.finish_command_execution(
             audit_id, status="failed", exit_code=None, output_summary=message,
         )
+        record_result("failed", None)
         return message
 
     audit_store.finish_command_execution(
         audit_id, status=status, exit_code=exit_code, output_summary=output,
     )
+    record_result(status, exit_code)
     label = {"succeeded": "完成", "failed": "失败", "timed_out": "超时"}[status]
     return f"命令{label}（退出码 {exit_code}）：\n{output or '（无输出）'}"
 

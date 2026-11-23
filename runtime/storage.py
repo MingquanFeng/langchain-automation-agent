@@ -15,6 +15,7 @@ from __future__ import annotations
 
 # os：区分 POSIX 与 Windows，决定是否设置 Unix 文件权限。
 import os
+import json
 
 # sqlite3：保存任务注册表与 Agent 执行记录。
 import sqlite3
@@ -414,6 +415,31 @@ class RuntimeStore:
                     finished_at if finished_at is not None else time.time(), execution_id,
                 ),
             )
+
+    def get_failed_command_for_thread(self, *, run_id: str, call_id: str, thread_id: str) -> dict | None:
+        """读取同一会话内可用于修复的失败命令审计记录。"""
+        self.initialize()
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT c.argv, c.cwd, c.timeout_seconds, c.output_summary
+                FROM command_executions AS c
+                JOIN agent_runs AS r ON r.run_id = c.run_id
+                WHERE c.run_id = ? AND c.call_id = ? AND r.thread_id = ?
+                  AND c.status = 'failed'
+                LIMIT 1
+                """,
+                (run_id, call_id, thread_id),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            argv = json.loads(row["argv"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
+            return None
+        return {"argv": argv, "cwd": row["cwd"], "timeout_seconds": row["timeout_seconds"], "output_summary": row["output_summary"]}
 
     def mark_interrupted_runs(self) -> int:
         """将服务上次退出时未结束的运行改为 `interrupted`。

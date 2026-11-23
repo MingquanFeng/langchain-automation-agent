@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent.context import AgentContext, TaskCancelledError
+from agent.context import AgentContext, RepairSession, TaskCancelledError
+from agent.middleware.events import _command_result, _repair_error
 from agent.tools import commands as commands_mod
 from agent.tools import files as files_mod
 from agent.tools.edits import prepare_approval_preview
@@ -100,6 +101,42 @@ def test_run_command_records_audited_success(command_workspace, monkeypatch):
     assert "命令完成" in result
     assert records[0][1]["run_id"] == "run-command-test"
     assert records[1][2]["status"] == "succeeded"
+    assert context.command_results["call-command-test"] == {"status": "succeeded", "exit_code": 0}
+
+
+def test_repair_session_only_allows_source_and_three_validation_attempts():
+    session = RepairSession(
+        argv=["npm", "run", "lint"], cwd=".", timeout_seconds=120, output_summary="lint failed",
+    )
+    context = AgentContext(repair_session=session)
+
+    assert "先完成一次" in _repair_error(context, "run_command", {
+        "argv": ["npm", "run", "lint"], "cwd": ".", "timeout_seconds": 120,
+    })
+    assert "源码" in _repair_error(context, "edit_file", {"path": "package.json"})
+    assert not _repair_error(context, "edit_file", {"path": "src/page.tsx"})
+
+    session.edited_since_check = True
+    assert "只允许一次编辑" in _repair_error(context, "edit_file", {"path": "src/page.tsx"})
+    assert "原始命令" in _repair_error(context, "run_command", {
+        "argv": ["npm", "run", "build"], "cwd": ".", "timeout_seconds": 120,
+    })
+    assert not _repair_error(context, "run_command", {
+        "argv": ["npm", "run", "lint"], "cwd": ".", "timeout_seconds": 120,
+    })
+    session.edit_pending = True
+    assert "正在等待" in _repair_error(context, "edit_file", {"path": "src/page.tsx"})
+    session.edit_pending = False
+    session.attempts = 3
+    assert "3 次上限" in _repair_error(context, "edit_file", {"path": "src/page.tsx"})
+
+
+def test_command_result_falls_back_to_controlled_tool_output():
+    result = SimpleNamespace(content="命令失败（退出码 1）：\n诊断", status="success")
+    assert _command_result(AgentContext(), "missing", result) == {"status": "failed", "exit_code": 1}
+
+    block_result = SimpleNamespace(content=[{"type": "text", "text": "命令失败（退出码 2）：\n诊断"}], status="success")
+    assert _command_result(AgentContext(), "missing", block_result) == {"status": "failed", "exit_code": 2}
 
 
 def test_process_output_is_bounded_and_redacted(command_workspace):

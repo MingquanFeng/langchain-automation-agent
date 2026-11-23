@@ -53,7 +53,7 @@ from apscheduler.triggers.cron import CronTrigger
 from agent.config import RUNTIME
 
 # AgentContext：单次调用的运行时上下文。
-from agent.context import AgentContext
+from agent.context import AgentContext, RepairSession
 
 # 长期记忆服务：HTTP 管理入口与 Agent 工具共用同一套校验和 CRUD。
 from agent.memory import (
@@ -742,6 +742,8 @@ class StartCommand(WSCommand):
     task_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)] | None = None
     thread_id: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
     allow_write: bool = False
+    repair_source_run_id: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
+    repair_source_call_id: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
 
 
 class CancelCommand(WSCommand):
@@ -914,6 +916,28 @@ async def _handle_run_start(
     """启动一次执行。"""
     instruction = command.instruction
     task_name = command.task_name or instruction[:30]
+    repair_session = None
+    if command.repair_source_run_id or command.repair_source_call_id:
+        if not (command.repair_source_run_id and command.repair_source_call_id and command.thread_id):
+            await queue.put(RunError(run_id="", message="修复来源必须包含同一会话中的 run_id、call_id 和 thread_id", recoverable=True))
+            return
+        source = app.state.runtime_store.get_failed_command_for_thread(
+            run_id=command.repair_source_run_id,
+            call_id=command.repair_source_call_id,
+            thread_id=command.thread_id,
+        )
+        if source is None:
+            await queue.put(RunError(run_id="", message="找不到当前会话中的失败检查记录", recoverable=True))
+            return
+        repair_session = RepairSession(**source)
+        instruction = (
+            "修复以下失败开发检查。先分析诊断，再以最小改动修复源码或测试文件。"
+            "每次 edit_file 和验证命令都会单独请求用户批准；只可复跑原命令，最多 3 次。"
+            "检查通过后立即汇总；第三次仍失败时停止并说明剩余问题。\n\n"
+            f"原命令：{source['argv']}\ncwd：{source['cwd']}\n超时：{source['timeout_seconds']} 秒\n"
+            f"失败输出：\n{source['output_summary']}"
+        )
+        task_name = "修复失败检查"
 
     # Agent 在首次调用时才惰性初始化。配置缺失（例如桌面版尚未填 API Key）
     # 必须转换成协议错误；否则异常会逃出 WebSocket handler，连接关闭后 UI 会一直显示运行中。
@@ -933,6 +957,7 @@ async def _handle_run_start(
         trigger="api",
         allow_write=command.allow_write,
         notify_channel=RUNTIME.notify_channel,
+        repair_session=repair_session,
     )
 
     try:

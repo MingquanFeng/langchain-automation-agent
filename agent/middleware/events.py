@@ -45,6 +45,8 @@ from __future__ import annotations
 
 # time：算工具执行的耗时。
 import time
+import re
+from pathlib import Path
 
 # Any：typing 的任意类型标注。
 from typing import Any
@@ -73,6 +75,49 @@ from ..context import check_cancelled
 # 完整塞进事件里会撑爆客户端的界面与网络。
 # 客户端要完整结果的话，让它自己去查文件。
 RESULT_PREVIEW_LIMIT = 500
+_REPAIR_EXTENSIONS = frozenset({".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".c", ".h", ".cc", ".cpp", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php", ".cs", ".vue", ".svelte", ".html", ".css", ".scss", ".sass", ".less"})
+
+
+def _repair_error(ctx: object, name: str, args: dict[str, Any]) -> str:
+    session = getattr(ctx, "repair_session", None)
+    if session is None:
+        return ""
+    if name == "edit_file":
+        path = args.get("path")
+        if session.attempts >= 3:
+            return "修复验证已达到 3 次上限，不能再编辑。"
+        if session.edit_pending:
+            return "修复模式正在等待上一处编辑的批准或完成。"
+        if session.edited_since_check:
+            return "修复模式每次只允许一次编辑；请先复跑原检查。"
+        if not isinstance(path, str) or Path(path).suffix.lower() not in _REPAIR_EXTENSIONS:
+            return "修复模式只允许修改源码、样式或测试文件。"
+        return ""
+    if name == "run_command":
+        if session.attempts >= 3:
+            return "修复验证已达到 3 次上限，不能再运行检查。"
+        if not session.edited_since_check:
+            return "修复模式必须先完成一次已批准的编辑，才能复跑检查。"
+        if args.get("argv") != session.argv or args.get("cwd", ".") != session.cwd or args.get("timeout_seconds", 60) != session.timeout_seconds:
+            return "修复模式只能复跑来源失败检查的原始命令。"
+        return ""
+    risk = decide_tool_permission(name, allow_write=False)
+    if risk != "allow":
+        return "修复模式不允许此工具；只允许读取、编辑源码/测试文件和复跑原检查。"
+    return ""
+
+
+def _command_result(ctx: object, call_id: str, result: Any) -> dict[str, Any] | None:
+    """读取命令工具写入的终态；兼容中间件重试包装后丢失上下文的旧路径。"""
+    recorded = getattr(ctx, "command_results", {}).pop(call_id, None)
+    if recorded is not None:
+        return recorded
+    content = _preview(result)
+    match = re.match(r"命令(完成|失败|超时)（退出码 ([-\d]+|None)）", content)
+    if match is None:
+        return None
+    status = {"完成": "succeeded", "失败": "failed", "超时": "timed_out"}[match.group(1)]
+    return {"status": status, "exit_code": None if match.group(2) == "None" else int(match.group(2))}
 
 
 # ============================================================
@@ -90,9 +135,15 @@ def _preview(result: Any) -> str:
         拿不到文本时返回空字符串。
     """
     content = getattr(result, "content", None)
-    if not isinstance(content, str):
-        return ""
-    return content[:RESULT_PREVIEW_LIMIT]
+    if isinstance(content, str):
+        return content[:RESULT_PREVIEW_LIMIT]
+    if isinstance(content, list):
+        text = "".join(
+            block.get("text", "") for block in content
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+        )
+        return text[:RESULT_PREVIEW_LIMIT]
+    return ""
 
 
 # ============================================================
@@ -146,6 +197,13 @@ class EventBridgeMiddleware(AgentMiddleware):
             name,
             allow_write=bool(getattr(ctx, "allow_write", False)),
         )
+        repair_error = _repair_error(ctx, name, args)
+        if repair_error:
+            self._emit({"type": "tool.error", "name": name, "call_id": call_id, "message": repair_error})
+            return ToolMessage(content=repair_error, name=name, tool_call_id=call_id, status="error")
+        session = getattr(ctx, "repair_session", None)
+        if session is not None and name == "edit_file":
+            session.edit_pending = True
         # 结构化编辑在批准前只计算差异并保存内存快照，不产生文件副作用。
         # 发送给客户端的是安全展示参数，避免把完整 old/new 文本重复塞进事件。
         try:
@@ -157,6 +215,8 @@ class EventBridgeMiddleware(AgentMiddleware):
             preview_error = approval_preview.error
         event_args = approval_preview.args if approval_preview is not None else {}
         if preview_error:
+            if session is not None and name == "edit_file":
+                session.edit_pending = False
             discard_approval_preview(ctx, call_id)
             self._emit({
                 "type": "tool.error",
@@ -185,9 +245,13 @@ class EventBridgeMiddleware(AgentMiddleware):
             try:
                 check_cancelled(ctx)
             except Exception:
+                if session is not None and name == "edit_file":
+                    session.edit_pending = False
                 discard_approval_preview(ctx, call_id)
                 raise
             if not approved:
+                if session is not None and name == "edit_file":
+                    session.edit_pending = False
                 discard_approval_preview(ctx, call_id)
                 if decision == "deny":
                     message = f"工具 {name or '<未知>'} 没有风险登记，按默认拒绝策略未执行。"
@@ -230,8 +294,16 @@ class EventBridgeMiddleware(AgentMiddleware):
         finally:
             # handler 正常消费后为空；校验层提前返回或异常时也不能残留快照。
             discard_approval_preview(ctx, call_id)
+            if session is not None and name == "edit_file":
+                session.edit_pending = False
 
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        if session is not None and name == "edit_file" and getattr(result, "status", None) != "error":
+            session.edited_since_check = True
+        if session is not None and name == "run_command" and getattr(result, "status", None) != "error":
+            session.attempts += 1
+            session.edited_since_check = False
 
         # 没抛异常，但重试中间件可能把失败包成了一条 error 状态的 ToolMessage。
         # 那种情况要报失败，不能报成功。
@@ -252,6 +324,7 @@ class EventBridgeMiddleware(AgentMiddleware):
             "ok": True,
             "duration_ms": duration_ms,
             "result_preview": _preview(result),
+            "command_result": _command_result(ctx, call_id, result) if name == "run_command" else None,
         })
         return result
 

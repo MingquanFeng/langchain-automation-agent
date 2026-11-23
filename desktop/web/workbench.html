@@ -1724,7 +1724,7 @@
       }
       activity.append(details);
       messages.append(activity);
-      toolCards.set(event.call_id, { activity, details, meta });
+      toolCards.set(event.call_id, { activity, details, meta, runId: event.run_id, args: event.args || {} });
       currentAssistantBubble = null;
       scrollToBottom();
     }
@@ -1862,6 +1862,34 @@
       pendingApprovals.clear();
     }
 
+    function addRepairAction(card, source) {
+      if (card.repairButton || !threadId) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "approval-allow";
+      button.textContent = "修复此检查";
+      button.addEventListener("click", async () => {
+        if (activeRunId) return;
+        const instruction = "修复刚才失败的开发检查，使用受控修复流程。";
+        addMessage("user", "你", instruction);
+        beginRecentTask(instruction);
+        setBusy(true);
+        try {
+          const ws = await connect();
+          ws.send(JSON.stringify({
+            type: "run.start", instruction, task_name: "修复失败检查", thread_id: threadId,
+            repair_source_run_id: source.runId, repair_source_call_id: source.callId,
+          }));
+        } catch (error) {
+          setBusy(false);
+          finishCurrentTask("error", "无法启动修复任务。");
+          addNotice(error.message, true);
+        }
+      });
+      card.details.append(button);
+      card.repairButton = button;
+    }
+
     function showEvent(event) {
       if (event.type === "run.start") {
         activeRunId = event.run_id;
@@ -1928,6 +1956,9 @@
             setApprovalState(approval, "expired", "工具执行失败；请查看下方错误信息。");
           }
         }
+        if (event.name === "run_command" && event.command_result?.status === "failed") {
+          card.repairSource = { runId: event.run_id, callId: event.call_id };
+        }
         currentAssistantBubble = null;
       } else if (event.type === "approval.request") {
         addApprovalRequest(event);
@@ -1940,6 +1971,9 @@
         addNotice(`完成 · ${event.duration_ms ?? 0} ms · ${event.messages ?? 0} 条消息`);
         closePendingApprovals("expired", "任务已结束；本次工具不会继续执行。");
         activeRunId = null;
+        for (const card of toolCards.values()) {
+          if (card.runId === event.run_id && card.repairSource) addRepairAction(card, card.repairSource);
+        }
         setBusy(false);
         finishCurrentTask("done", "任务已完成，可以继续安排下一项。");
         currentAssistantBubble = null;

@@ -142,6 +142,9 @@ class ToolEnd(BaseEvent):
     # 结果预览。第一版只带一小段，避免大结果灌满界面。
     result_preview: str | None = None
 
+    # 受控开发命令附带机器可读终态，工作台不用解析展示文本判断失败。
+    command_result: dict[str, Any] | None = None
+
 
 class ToolError(BaseEvent):
     """工具执行失败。"""
