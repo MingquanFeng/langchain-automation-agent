@@ -203,9 +203,15 @@ class StreamConsumer:
             # 显式关闭生成器，让图的工作线程和检查点写入完成后再发送终态。
             with closing(stream):
                 for mode, payload in stream:
-                    check_cancelled(ctx)
+                    # 审批取消时，先让当前工具节点提交匹配的 ToolMessage。
+                    # 立刻抛取消异常会关闭生成器，留下只有 tool_call 的检查点。
+                    if ctx.pending_approval_tool_call is None:
+                        check_cancelled(ctx)
                     if mode == "values":
                         final_state = payload
+                        if self.cancel_event.is_set() and self._pending_approval_result_committed(ctx, payload):
+                            ctx.pending_approval_tool_call = None
+                            raise TaskCancelledError("审批取消结果已写入检查点")
                         continue
 
                     for event in self.normalizer.normalize(mode, payload):
@@ -247,6 +253,18 @@ class StreamConsumer:
             repair_status=repair.terminal_status or None if repair else None,
             repair_message=repair.terminal_message or None if repair else None,
         ))
+
+    @staticmethod
+    def _pending_approval_result_committed(ctx: AgentContext, state: dict) -> bool:
+        """确认待审批调用的 ToolMessage 已进入当前完整状态。"""
+        pending = ctx.pending_approval_tool_call
+        if not pending:
+            return False
+        call_id = pending.get("id", "")
+        return bool(call_id) and any(
+            isinstance(message, ToolMessage) and message.tool_call_id == call_id
+            for message in state.get("messages", [])
+        )
 
     def _persist_cancelled_approval_result(self, ctx: AgentContext, thread_id: str) -> None:
         """补齐审批取消时未进入检查点的工具结果。"""

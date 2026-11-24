@@ -265,6 +265,19 @@ def test_cancelled_approval_persists_missing_tool_result():
         loop.close()
 
 
+def test_cancel_waits_for_pending_tool_result_checkpoint():
+    """取消前必须观察到待审批调用对应的 ToolMessage。"""
+    ctx = AgentContext(pending_approval_tool_call={"id": "c-wait", "name": "write_file"})
+    state = {
+        "messages": [
+            AIMessage(content="", tool_calls=[{"name": "write_file", "args": {}, "id": "c-wait", "type": "tool_call"}]),
+            ToolMessage(content="任务已取消，工具未执行。", tool_call_id="c-wait", status="error"),
+        ],
+    }
+
+    assert StreamConsumer._pending_approval_result_committed(ctx, state) is True
+
+
 # ---------- 异常 ----------
 
 
