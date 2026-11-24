@@ -54,7 +54,7 @@ from contextlib import closing
 from typing import Any, Callable
 
 # AIMessage / HumanMessage：agent 循环的消息类型。
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 # BaseEvent / ModelText / RunCancelled / RunEnd / RunError：事件模型。
 from runtime.events import (
@@ -217,6 +217,7 @@ class StreamConsumer:
 
         except Exception as exc:
             if isinstance(exc, TaskCancelledError) or self.cancel_event.is_set():
+                self._persist_cancelled_approval_result(ctx, thread_id)
                 if ctx.repair_session is not None:
                     ctx.repair_session.close("cancelled", "修复已停止：用户取消了任务。")
                 self._emit_terminal(RunCancelled(run_id=self.run_id, reason="用户取消"))
@@ -246,6 +247,41 @@ class StreamConsumer:
             repair_status=repair.terminal_status or None if repair else None,
             repair_message=repair.terminal_message or None if repair else None,
         ))
+
+    def _persist_cancelled_approval_result(self, ctx: AgentContext, thread_id: str) -> None:
+        """补齐审批取消时未进入检查点的工具结果。"""
+        pending = ctx.pending_approval_tool_call
+        if not pending:
+            return
+        call_id = pending.get("id", "")
+        name = pending.get("name", "")
+        if not call_id:
+            return
+        config = {"configurable": {"thread_id": thread_id}}
+        try:
+            snapshot = self.agent.get_state(config)
+            messages = list((getattr(snapshot, "values", None) or {}).get("messages", []))
+            answered = any(
+                isinstance(message, ToolMessage) and message.tool_call_id == call_id
+                for message in messages
+            )
+            # 当前 pending 由 EventBridge 在模型发出 tool_call 后登记。流被关闭时
+            # get_state() 可能暂时还看不到该 AIMessage，不能因此漏补结果。
+            if not answered:
+                self.agent.update_state(
+                    config,
+                    {"messages": [ToolMessage(
+                        content="任务已取消，工具未执行。",
+                        name=name,
+                        tool_call_id=call_id,
+                        status="error",
+                    )]},
+                )
+        except Exception:
+            # 取消本身必须完成；检查点补偿失败不能卡住桌面终态。
+            logger.exception("取消时补齐工具结果失败：%s", call_id)
+        finally:
+            ctx.pending_approval_tool_call = None
 
     def _emit_terminal(self, event: BaseEvent) -> None:
         """先保存最终状态，再向连接发送对应结束事件。"""

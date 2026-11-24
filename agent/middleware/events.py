@@ -256,6 +256,9 @@ class EventBridgeMiddleware(AgentMiddleware):
             approval_handler = getattr(ctx, "approval_handler", None)
             approved = False
             if decision == "require_approval" and callable(approval_handler):
+                # 取消可能让消费器在图提交结果前关闭流；记住这一项，
+                # 由消费器在取消收尾阶段确认 ToolMessage 已写入检查点。
+                ctx.pending_approval_tool_call = {"id": call_id, "name": name}
                 try:
                     approved = approval_handler(name, call_id, event_args) is True
                 except Exception:
@@ -294,6 +297,8 @@ class EventBridgeMiddleware(AgentMiddleware):
                 discard_approval_preview(ctx, call_id)
                 raise
             if not approved:
+                if ctx is not None:
+                    ctx.pending_approval_tool_call = None
                 if session is not None and name == "edit_file":
                     session.edit_pending = False
                 discard_approval_preview(ctx, call_id)
@@ -323,6 +328,10 @@ class EventBridgeMiddleware(AgentMiddleware):
                     tool_call_id=call_id,
                     status="error",
                 )
+
+            # 已获批准的调用会由正常工具链写入结果，无需取消补偿。
+            if ctx is not None:
+                ctx.pending_approval_tool_call = None
 
         self._emit({
             "type": "tool.start",

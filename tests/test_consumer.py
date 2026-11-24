@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # 第三方库：消息类型与假模型。
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 # 项目内部：
 from agent.context import AgentContext
@@ -217,6 +217,52 @@ def test_cancel_midway_stops_the_run():
     types = [e.type for e in events]
     assert types[-1] == "run.cancelled"
     assert "run.end" not in types
+
+
+def test_cancelled_approval_persists_missing_tool_result():
+    """取消审批后，消费器必须补齐 checkpoint 中悬空的工具调用。"""
+    tool_call = AIMessage(
+        content="",
+        tool_calls=[{"name": "write_file", "args": {}, "id": "c-cancel", "type": "tool_call"}],
+    )
+
+    class _Snapshot:
+        values = {"messages": [HumanMessage(content="创建文件"), tool_call]}
+
+    class _Agent:
+        updated = None
+
+        def get_state(self, config):
+            return _Snapshot()
+
+        def update_state(self, config, values):
+            self.updated = (config, values)
+
+    loop = asyncio.new_event_loop()
+    try:
+        agent = _Agent()
+        consumer = StreamConsumer(
+            agent=agent,
+            run_id="run-cancel",
+            queue=asyncio.Queue(),
+            loop=loop,
+        )
+        ctx = AgentContext(
+            pending_approval_tool_call={"id": "c-cancel", "name": "write_file"},
+        )
+
+        consumer._persist_cancelled_approval_result(ctx, "thread-cancel")
+
+        assert agent.updated is not None
+        config, values = agent.updated
+        result = values["messages"][0]
+        assert config == {"configurable": {"thread_id": "thread-cancel"}}
+        assert isinstance(result, ToolMessage)
+        assert result.tool_call_id == "c-cancel"
+        assert result.status == "error"
+        assert ctx.pending_approval_tool_call is None
+    finally:
+        loop.close()
 
 
 # ---------- 异常 ----------

@@ -212,3 +212,10 @@ class AgentContext:
     edit_results: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
     # 审批通道回填批准、拒绝、超时或取消，受控修复据此决定是否关闭。
     approval_results: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
+    # 审批等待中的工具调用。取消可在图提交 ToolMessage 前中断流消费器；
+    # 此字段让消费器在关闭流后补偿持久化对应结果，避免污染会话协议。
+    pending_approval_tool_call: dict[str, str] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
