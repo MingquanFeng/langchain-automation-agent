@@ -543,11 +543,26 @@ def test_read_file_refuses_binary():
 
 
 def test_read_file_refuses_memory_database():
-    """记忆库是运行时自己的产物，读它会撑爆上下文。"""
+    """存在的记忆库必须在二进制读取前被安全策略拦下。"""
+    from agent.tools.files import read_file
+
+    # 测试不能依赖开发机 data/ 中遗留的真实数据库；只需最小 SQLite
+    # 文件头即可覆盖“文件存在且文件名受保护”的分支。
+    database = SANDBOX / "memory.sqlite"
+    database.write_bytes(b"SQLite format 3\x00")
+    try:
+        out = read_file.invoke({"path": "memory.sqlite"})
+        assert "记忆库" in out
+    finally:
+        database.unlink()
+
+
+def test_read_file_reports_missing_memory_database():
+    """缺失的记忆库仍应走普通的不存在提示，而不是伪装成受保护文件。"""
     from agent.tools.files import read_file
 
     out = read_file.invoke({"path": "memory.sqlite"})
-    assert "记忆库" in out
+    assert out == "文件不存在：memory.sqlite"
 
 
 # ---------- 8c. 工具能力补强 ----------

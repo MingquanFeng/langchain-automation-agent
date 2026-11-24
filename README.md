@@ -24,19 +24,17 @@
 
 ### 1. 装依赖
 
-需要 Python 3.13+：
+需要 Python 3.13。项目的运行、测试和桌面构建依赖由
+`pyproject.toml` 与 `uv.lock` 固定；先安装 [uv](https://docs.astral.sh/uv/)。
 
 ```bash
-pip install langchain langchain-core langgraph langgraph-checkpoint-sqlite \
-            fastapi uvicorn httpx pydantic python-dotenv apscheduler pytest
+uv sync --group dev
 ```
 
-按需补装模型供应商包与追踪工具：
+这会创建项目自己的 `.venv`，不使用全局 Python 包。默认模型所需的
+DeepSeek 集成和可选的 OpenAI 兼容集成已包含在锁定依赖中。
 
-```bash
-pip install langchain-deepseek langchain-openai   # 模型供应商
-pip install langsmith                             # 可观测性（LangSmith）
-```
+桌面构建再安装 PyInstaller：`uv sync --group desktop-build`。
 
 ### 2. 配置
 
@@ -49,9 +47,11 @@ cp .env.example .env
 ### 3. 跑测试
 
 ```bash
-python -m pytest tests/ -q
+uv run --frozen --group dev pytest
 ```
 
+这是从干净检出开始的测试命令。测试进程会建立独立临时应用目录，
+不读取个人 `.env`，不使用已有 SQLite 数据库，结束时自动删除临时数据。
 测试全部使用假模型，不需要 API key；运行结果以本地实际 pytest 输出为准。
 
 ### 4. 起服务

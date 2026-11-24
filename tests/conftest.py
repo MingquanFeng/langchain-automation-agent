@@ -19,9 +19,33 @@ pytest 的全局配置。
 仍然由 `.env` 的 `LANGSMITH_TRACING` 决定，不受影响。
 """
 
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
 import langsmith.utils as ls_utils
 import pytest
 from langgraph.store.memory import InMemoryStore
+
+
+# ============================================================
+# 1. 测试进程隔离
+# ============================================================
+
+# 必须在收集测试模块前设置。agent.config 在首次导入时读取
+# AUTOMATION_AGENT_HOME：把它指到每次 pytest 独有的临时目录后，
+# 测试既不会读取开发者的项目 .env，也不会复用 data/ 下的 SQLite 数据库。
+#
+# 临时目录由 pytest 会话结束钩子删除；即使某个测试失败，也不会把测试
+# 产生的记忆库、运行记录或备份留在仓库中。
+_TEST_APP_HOME = Path(tempfile.mkdtemp(prefix="automation-agent-tests-"))
+os.environ["AUTOMATION_AGENT_HOME"] = str(_TEST_APP_HOME)
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """删除本次测试专用的应用目录，避免 /tmp 遗留 SQLite 数据。"""
+    shutil.rmtree(_TEST_APP_HOME, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
