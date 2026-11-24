@@ -18,6 +18,7 @@ from __future__ import annotations
 
 # 标准库：sys / pathlib 处理导入路径。
 import sys
+import threading
 from pathlib import Path
 
 # 把项目根目录与 tests/ 插到 sys.path 最前面。
@@ -169,6 +170,45 @@ def test_missing_stream_writer_is_silent():
     # 图外调 get_stream_writer() 会抛 RuntimeError，中间件必须兜住。
     result = mw.wrap_tool_call(_Req(), handler)
     assert result.content == "pong"
+
+
+def test_cancelled_approval_returns_tool_message_for_checkpoint():
+    """审批期间取消也必须闭合 tool_call，避免同会话下一轮请求触发协议 400。"""
+    from langchain_core.messages import ToolMessage
+
+    cancel_event = threading.Event()
+
+    def cancel_while_waiting(name, call_id, args):
+        """模拟用户在审批卡片出现后点击取消。"""
+        cancel_event.set()
+        return False
+
+    context = AgentContext(
+        allow_write=False,
+        approval_handler=cancel_while_waiting,
+        cancel_event=cancel_event,
+    )
+
+    class _Req:
+        tool_call = {
+            "name": "write_file",
+            "args": {"path": "out/cancelled.md", "content": "x"},
+            "id": "cancel-call",
+        }
+        tool = None
+        state = {}
+
+    _Req.runtime = type("_Runtime", (), {"context": context})()
+
+    def must_not_run(request):
+        raise AssertionError("取消后的工具不应执行")
+
+    result = EventBridgeMiddleware().wrap_tool_call(_Req(), must_not_run)
+
+    assert isinstance(result, ToolMessage)
+    assert result.tool_call_id == "cancel-call"
+    assert result.status == "error"
+    assert result.content == "任务已取消，工具未执行。"
 
 
 def test_result_preview_is_truncated():

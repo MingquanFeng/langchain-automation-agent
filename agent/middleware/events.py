@@ -61,7 +61,7 @@ from ..tools.edits import (
     discard_approval_preview,
     prepare_approval_preview,
 )
-from ..context import check_cancelled
+from ..context import TaskCancelledError, check_cancelled
 
 
 # ============================================================
@@ -265,6 +265,29 @@ class EventBridgeMiddleware(AgentMiddleware):
             # 用户批准与取消可能同时到达；等待结束后必须再次检查。
             try:
                 check_cancelled(ctx)
+            except TaskCancelledError:
+                # 取消恰好发生在审批等待期间时，模型已经发出了 tool_call。
+                # 必须先返回同一 call_id 的 ToolMessage，让检查点补齐这次调用；
+                # 否则下次复用会话时，兼容接口会因缺少工具结果而返回 HTTP 400。
+                if session is not None and name == "edit_file":
+                    session.edit_pending = False
+                discard_approval_preview(ctx, call_id)
+                if session is not None and name in {"edit_file", "run_command"}:
+                    _close_repair(session, "cancelled", "修复已停止：用户取消了审批。")
+                message = "任务已取消，工具未执行。"
+                self._emit({
+                    "type": "tool.error",
+                    "name": name,
+                    "call_id": call_id,
+                    "message": message,
+                    **_repair_payload(session),
+                })
+                return ToolMessage(
+                    content=message,
+                    name=name,
+                    tool_call_id=call_id,
+                    status="error",
+                )
             except Exception:
                 if session is not None and name == "edit_file":
                     session.edit_pending = False
