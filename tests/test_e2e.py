@@ -335,6 +335,7 @@ def test_context_injected_into_system_prompt():
     # 普通任务必须在聊天中回答，不能再沿用旧规则自动调用通知工具。
     assert "普通进度和最终结果直接回复当前聊天" in joined
     assert "只有用户明确要求" in joined
+    assert "成功后立刻汇报并停止调用工具" in joined
 
 
 def test_notification_tool_descriptions_require_explicit_user_request():
