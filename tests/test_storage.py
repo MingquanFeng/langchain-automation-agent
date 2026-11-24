@@ -529,6 +529,65 @@ def _seed_finished_run(
     )
 
 
+def test_desktop_history_follows_workspace_and_preserves_unfiled_threads(
+    isolated_server_store, tmp_path, monkeypatch
+):
+    """两个同名目录分别恢复历史；清空运行记录不会抹掉归属；旧会话续聊时才归档。"""
+    import runtime.server as server
+    from agent.graph import build_agent
+
+    agent = build_agent(
+        model=FakeModel(messages=iter(AIMessage(content="已记录") for _ in range(5))),
+        checkpointer=InMemorySaver(),
+    )
+    agent.invoke({"messages": [HumanMessage(content="旧版对话")]}, {"configurable": {"thread_id": "old"}})
+    monkeypatch.setattr(server, "get_agent", lambda: agent)
+    access = server.DesktopAccess("a" * 64, "b" * 64)
+    monkeypatch.setattr(server.app.state, "desktop_access", access, raising=False)
+    project_a, project_b = tmp_path / "甲" / "项目", tmp_path / "乙" / "项目"
+    headers = {"Authorization": f"Bearer {access.token}"}
+    protocols = [server.DESKTOP_WS_PROTOCOL, f"bearer.{access.token}"]
+
+    with TestClient(server.app, headers=headers) as client:
+        def run(instruction, thread_id=None):
+            with client.websocket_connect("/ws", subprotocols=protocols) as websocket:
+                websocket.send_json({"type": "run.start", "instruction": instruction, "thread_id": thread_id})
+                return _receive_until_terminal(websocket, {"run.end", "run.error"})
+
+        def titles(scope="current", **params):
+            page = client.get("/threads", params={"scope": scope, **params}).json()
+            return [item["title"] for item in page["threads"]]
+
+        monkeypatch.setattr(server, "DATA_DIR", project_a)
+        events_a = run("甲的对话")
+        assert events_a[-1]["type"] == "run.end"
+        thread_a, run_a = events_a[0]["thread_id"], events_a[0]["run_id"]
+        assert titles() == ["甲的对话"]
+        assert titles("legacy") == ["旧版对话"]
+
+        monkeypatch.setattr(server, "DATA_DIR", project_b)
+        assert titles() == []
+        assert client.get("/runs").json() == []
+        assert client.get("/threads/messages", params={"thread_id": thread_a}).status_code == 404
+        assert client.delete("/threads", params={"thread_id": thread_a}).status_code == 404
+        assert client.delete(f"/runs/{run_a}").json()["deleted"] is False
+        assert run("错误目录续聊", thread_a)[-1]["type"] == "run.error"
+        assert run("乙的对话")[-1]["type"] == "run.end"
+        assert titles() == ["乙的对话"]
+        assert client.delete("/runs").json() == {"deleted": 1}
+        assert titles() == ["乙的对话"]
+
+        monkeypatch.setattr(server, "DATA_DIR", project_a)
+        assert [row["run_id"] for row in client.get("/runs").json()] == [run_a]
+        previous = client.get("/threads/messages", params={"thread_id": thread_a}).json()
+        assert previous["messages"][0]["content"] == "甲的对话"
+        assert run("继续旧版对话", "old")[-1]["type"] == "run.end"
+        assert titles("legacy") == []
+        assert titles(limit=1, offset=1) == ["甲的对话"]
+        assert client.delete("/threads", params={"thread_id": "old"}).json()["deleted_runs"] == 1
+        assert "old" not in RuntimeStore(isolated_server_store.path).thread_workspaces()
+
+
 def test_thread_messages_restore_and_continue_the_same_thread(
     isolated_server_store, monkeypatch
 ):

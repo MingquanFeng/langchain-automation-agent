@@ -47,6 +47,10 @@ from runtime.redaction import redact_sensitive_text
 # 1. RuntimeStore：运行时数据访问层
 # ============================================================
 
+class ThreadWorkspaceConflict(ValueError):
+    """会话已经归属于另一个工作目录。"""
+
+
 class RuntimeStore:
     """使用独立 SQLite 文件保存运行时数据。
 
@@ -170,6 +174,17 @@ class RuntimeStore:
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS idx_agent_runs_thread_id "
                     "ON agent_runs(thread_id)"
+                )
+
+                # Checkpointer 以 thread_id 保存对话。单独记录它所属的目录，
+                # 清空运行记录后仍能找到会话；旧版没有归属的会话留在未归档区。
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS thread_workspaces "
+                    "(thread_id TEXT PRIMARY KEY, workspace TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_thread_workspaces_workspace "
+                    "ON thread_workspaces(workspace)"
                 )
 
                 # 开发命令是高风险本机副作用；独立审计表保存最小可追溯信息，
@@ -301,6 +316,7 @@ class RuntimeStore:
         trigger: str,
         instruction: str,
         started_at: float | None = None,
+        workspace: str | None = None,
     ) -> None:
         """登记一次 Agent 运行。
 
@@ -309,6 +325,18 @@ class RuntimeStore:
         """
         self.initialize()
         with self._connect() as connection:
+            if workspace is not None:
+                # 归属和首条运行在同一事务内提交。两次启动即使来自不同进程，
+                # 也只会有一个目录取得这个会话，失败的一方不会留下运行记录。
+                connection.execute(
+                    "INSERT INTO thread_workspaces(thread_id, workspace) VALUES (?, ?) "
+                    "ON CONFLICT(thread_id) DO NOTHING", (thread_id, workspace),
+                )
+                owner = connection.execute(
+                    "SELECT workspace FROM thread_workspaces WHERE thread_id = ?", (thread_id,),
+                ).fetchone()["workspace"]
+                if owner != workspace:
+                    raise ThreadWorkspaceConflict("此会话属于其他工作目录，请先切换目录。")
             connection.execute(
                 """
                 INSERT INTO agent_runs(
@@ -461,7 +489,28 @@ class RuntimeStore:
             )
             return cursor.rowcount
 
-    def list_runs(self, *, limit: int = 50, offset: int = 0) -> list[dict]:
+    def thread_workspaces(self, thread_id: str | None = None) -> dict[str, str]:
+        """读取会话归属索引；列出检查点时一次取回，恢复或删除时只查指定会话。"""
+        self.initialize()
+        with self._connect() as connection:
+            sql = "SELECT thread_id, workspace FROM thread_workspaces"
+            params = ()
+            if thread_id is not None:
+                sql += " WHERE thread_id = ?"
+                params = (thread_id,)
+            rows = connection.execute(sql, params)
+            return {row["thread_id"]: row["workspace"] for row in rows}
+
+    @staticmethod
+    def _run_scope(workspace: str | None) -> tuple[str, tuple]:
+        """None 保留独立服务的全库视图，空串查旧版未归档记录，路径查对应目录。"""
+        if workspace is None:
+            return "1", ()
+        if workspace == "":
+            return "thread_id NOT IN (SELECT thread_id FROM thread_workspaces)", ()
+        return "thread_id IN (SELECT thread_id FROM thread_workspaces WHERE workspace = ?)", (workspace,)
+
+    def list_runs(self, *, limit: int = 50, offset: int = 0, workspace: str | None = None) -> list[dict]:
         """按开始时间倒序分页读取运行历史。
 
         参数：
@@ -472,36 +521,41 @@ class RuntimeStore:
             JSON 可序列化的运行记录列表，时间字段使用 UTC ISO 格式。
         """
         self.initialize()
+        scope, params = self._run_scope(workspace)
         with self._connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT run_id, thread_id, task_name, trigger_source, instruction,
                        status, output, error, started_at, finished_at,
                        duration_ms, message_count
                 FROM agent_runs
+                WHERE {scope}
                 ORDER BY started_at DESC, rowid DESC
                 LIMIT ? OFFSET ?
                 """,
-                (limit, offset),
+                (*params, limit, offset),
             ).fetchall()
         return [self._serialize_run(row) for row in rows]
 
-    def delete_run(self, run_id: str) -> bool:
+    def delete_run(self, run_id: str, *, workspace: str | None = None) -> bool:
         """删除一条运行记录，不修改它所属会话的 Checkpointer。"""
         self.initialize()
+        scope, params = self._run_scope(workspace)
         with self._connect() as connection:
             cursor = connection.execute(
-                "DELETE FROM agent_runs WHERE run_id = ?", (run_id,)
+                f"DELETE FROM agent_runs WHERE run_id = ? AND status != 'running' AND {scope}",
+                (run_id, *params),
             )
             return cursor.rowcount > 0
 
-    def is_run_running(self, run_id: str) -> bool:
+    def is_run_running(self, run_id: str, *, workspace: str | None = None) -> bool:
         """判断运行记录是否仍处于执行态。"""
         self.initialize()
+        scope, params = self._run_scope(workspace)
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT 1 FROM agent_runs WHERE run_id = ? AND status = 'running'",
-                (run_id,),
+                f"SELECT 1 FROM agent_runs WHERE run_id = ? AND status = 'running' AND {scope}",
+                (run_id, *params),
             ).fetchone()
         return row is not None
 
@@ -515,12 +569,13 @@ class RuntimeStore:
             ).fetchone()
         return row is not None
 
-    def has_running_runs(self) -> bool:
+    def has_running_runs(self, *, workspace: str | None = None) -> bool:
         """判断是否存在运行中的持久化任务。"""
         self.initialize()
+        scope, params = self._run_scope(workspace)
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT 1 FROM agent_runs WHERE status = 'running' LIMIT 1"
+                f"SELECT 1 FROM agent_runs WHERE status = 'running' AND {scope} LIMIT 1", params,
             ).fetchone()
         return row is not None
 
@@ -528,16 +583,18 @@ class RuntimeStore:
         """删除会话关联的全部运行记录；Checkpointer 由服务层单独清理。"""
         self.initialize()
         with self._connect() as connection:
+            connection.execute("DELETE FROM thread_workspaces WHERE thread_id = ?", (thread_id,))
             cursor = connection.execute(
                 "DELETE FROM agent_runs WHERE thread_id = ?", (thread_id,)
             )
             return cursor.rowcount
 
-    def clear_runs(self) -> int:
+    def clear_runs(self, *, workspace: str | None = None) -> int:
         """清空运行记录，保留任务定义与会话 Checkpointer。"""
         self.initialize()
+        scope, params = self._run_scope(workspace)
         with self._connect() as connection:
-            cursor = connection.execute("DELETE FROM agent_runs")
+            cursor = connection.execute(f"DELETE FROM agent_runs WHERE status != 'running' AND {scope}", params)
             return cursor.rowcount
 
     @staticmethod

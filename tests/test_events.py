@@ -65,6 +65,7 @@ def test_all_event_types_registered():
         "tool.end",
         "tool.error",
         "approval.request",
+        "approval.expired",
         "run.progress",
         "run.end",
         "run.cancelled",

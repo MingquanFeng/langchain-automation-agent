@@ -6,6 +6,8 @@ from __future__ import annotations
 import queue
 import threading
 
+import pytest
+
 from runtime.approvals import ApprovalBroker
 
 
@@ -67,27 +69,33 @@ def test_cancel_wakes_waiting_request_and_clears_it():
     broker, cancel_event, emitted = _broker(timeout=5)
     result, thread = _start_request(broker, "call-cancel")
     emitted.get(timeout=1)
+    queued_result, queued_thread = _start_request(broker, "call-queued")
 
     # RunManager 先置取消标志，再唤醒 broker 中的等待者。
     cancel_event.set()
     broker.cancel_pending()
     thread.join(timeout=1)
+    queued_thread.join(timeout=1)
 
     assert not thread.is_alive()
     assert result["approved"] is False
+    assert queued_result["approved"] is False
+    assert emitted.empty()
     assert broker._pending == {}
 
 
 def test_concurrent_calls_keep_decisions_separate():
-    """两个并发 call_id 各自等待，允许一个不会误放行另一个。"""
+    """并行工具按登记顺序逐项审批；提前应答队尾不能放行。"""
     broker, _, emitted = _broker(timeout=2)
     first_result, first_thread = _start_request(broker, "call-a")
+    assert emitted.get(timeout=1).call_id == "call-a"
     second_result, second_thread = _start_request(broker, "call-b")
 
-    calls = {emitted.get(timeout=1).call_id, emitted.get(timeout=1).call_id}
-    assert calls == {"call-a", "call-b"}
-
+    with pytest.raises(queue.Empty):
+        emitted.get(timeout=0.05)
+    assert broker.respond("call-b", True) is False
     assert broker.respond("call-a", True) is True
+    assert emitted.get(timeout=1).call_id == "call-b"
     assert broker.respond("call-b", False) is True
     first_thread.join(timeout=1)
     second_thread.join(timeout=1)
@@ -97,6 +105,24 @@ def test_concurrent_calls_keep_decisions_separate():
     assert first_result["approved"] is True
     assert second_result["approved"] is False
     assert broker._pending == {}
+
+
+def test_queued_approval_gets_its_own_timeout():
+    """第一项耗完整个审批时限，第二项展示后仍能获批。"""
+    broker, _, emitted = _broker(timeout=0.25)
+    first, first_thread = _start_request(broker, "slow")
+    assert emitted.get(timeout=1).call_id == "slow"
+    second, second_thread = _start_request(broker, "next")
+
+    expired = emitted.get(timeout=2)
+    assert (expired.type, expired.call_id) == ("approval.expired", "slow")
+    assert emitted.get(timeout=1).call_id == "next"
+    assert broker.respond("slow", True) is False
+    assert broker.respond("next", True) is True
+    first_thread.join(timeout=1)
+    second_thread.join(timeout=1)
+    assert first["approved"] is False
+    assert second["approved"] is True
 
 
 def test_event_emission_failure_cleans_pending_request():

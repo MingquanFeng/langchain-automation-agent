@@ -182,6 +182,13 @@ class ApprovalRequest(BaseEvent):
     risk_level: str
 
 
+class ApprovalExpired(BaseEvent):
+    """收起已超时的审批项，让工作台立即显示下一项。"""
+
+    type: Literal["approval.expired"] = "approval.expired"
+    call_id: str
+
+
 class RunProgress(BaseEvent):
     """任务进度。
 
@@ -250,6 +257,7 @@ EVENT_CLASSES: dict[str, type[BaseEvent]] = {
     "tool.end": ToolEnd,
     "tool.error": ToolError,
     "approval.request": ApprovalRequest,
+    "approval.expired": ApprovalExpired,
     "run.progress": RunProgress,
     "run.end": RunEnd,
     "run.cancelled": RunCancelled,

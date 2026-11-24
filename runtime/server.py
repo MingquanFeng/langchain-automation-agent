@@ -50,7 +50,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from apscheduler.triggers.cron import CronTrigger
 
 # RUNTIME：应用运行配置，这里取调度开关和通知渠道。
-from agent.config import RUNTIME
+from agent.config import DATA_DIR, RUNTIME
 
 # AgentContext：单次调用的运行时上下文。
 from agent.context import AgentContext, RepairSession
@@ -77,7 +77,7 @@ from .concurrency import THREAD_RUNS
 
 # list_jobs / start_scheduler / stop_scheduler：调度器接口。
 from .scheduler import list_jobs, start_scheduler, stop_scheduler
-from .storage import get_runtime_store
+from .storage import ThreadWorkspaceConflict, get_runtime_store
 
 # ScheduledTask / add_task / all_tasks / remove_task：任务表接口。
 from .tasks import ScheduledTask, add_task, all_tasks, configure_persistence, remove_task
@@ -303,13 +303,32 @@ def jobs() -> list[dict]:
     return list_jobs()
 
 
+HistoryScope = Literal["current", "legacy"]
+
+
+def _history_workspace(scope: HistoryScope = "current") -> str | None:
+    """托管服务只使用宿主选定的规范路径。独立服务沿用原有的全局历史接口。"""
+    if getattr(app.state, "desktop_access", None) is None:
+        return None
+    return str(DATA_DIR) if scope == "current" else ""
+
+
+def _check_thread_scope(thread_id: str, scope: HistoryScope) -> None:
+    workspace = _history_workspace(scope)
+    if workspace is not None:
+        owners = app.state.runtime_store.thread_workspaces(thread_id)
+        if owners.get(thread_id, "") != workspace:
+            raise HTTPException(status_code=404, detail="此范围内没有该会话")
+
+
 @app.get("/runs")
 def list_agent_runs(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    scope: HistoryScope = "current",
 ) -> list[dict]:
     """分页查询最近的 Agent 执行记录，包括结果、错误和状态。"""
-    return app.state.runtime_store.list_runs(limit=limit, offset=offset)
+    return app.state.runtime_store.list_runs(limit=limit, offset=offset, workspace=_history_workspace(scope))
 
 
 # ============================================================
@@ -534,9 +553,15 @@ def _serialize_checkpoint_messages(thread_id: str) -> dict:
 def list_checkpoint_threads(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0, le=10000),
+    scope: HistoryScope = "current",
 ) -> dict:
     """分页列出已保存的会话，支持运行记录表尚无条目的旧会话。"""
     try:
+        workspace = _history_workspace(scope)
+        owners = app.state.runtime_store.thread_workspaces() if workspace is not None else {}
+        if workspace and workspace not in owners.values():
+            # 新目录还没有会话，直接返回，避免加载全库的旧检查点。
+            return {"threads": [], "limit": limit, "offset": offset, "has_more": False}
         agent = get_agent()
         checkpointer = getattr(agent, "checkpointer", None)
         list_checkpoints = getattr(checkpointer, "list", None)
@@ -555,6 +580,9 @@ def list_checkpoint_threads(
             if not isinstance(thread_id, str) or not thread_id or thread_id in seen_thread_ids:
                 continue
             seen_thread_ids.add(thread_id)
+            # 先按目录筛选，再分页；其他目录的新会话不会挤掉本目录的旧会话。
+            if workspace is not None and owners.get(thread_id, "") != workspace:
+                continue
 
             checkpoint = checkpoint_tuple.checkpoint or {}
             channel_values = checkpoint.get("channel_values", {})
@@ -597,34 +625,39 @@ def list_checkpoint_threads(
 @app.get("/threads/messages")
 def get_thread_messages(
     thread_id: str = Query(..., min_length=1, max_length=256),
+    scope: HistoryScope = "current",
 ) -> dict:
     """从 Checkpointer 读取会话对话；与运行历史列表分开返回。"""
+    _check_thread_scope(thread_id, scope)
     return _serialize_checkpoint_messages(thread_id)
 
 
 @app.delete("/runs/{run_id}")
-def delete_agent_run(run_id: str) -> dict:
+def delete_agent_run(run_id: str, scope: HistoryScope = "current") -> dict:
     """删除单条运行记录，不删除其会话记忆。"""
     store = app.state.runtime_store
-    if store.is_run_running(run_id):
+    workspace = _history_workspace(scope)
+    if store.is_run_running(run_id, workspace=workspace):
         raise HTTPException(status_code=409, detail="运行中的记录暂时不能删除")
-    deleted = store.delete_run(run_id)
+    deleted = store.delete_run(run_id, workspace=workspace)
     return {"run_id": run_id, "deleted": deleted}
 
 
 @app.delete("/runs")
-def clear_agent_runs() -> dict:
+def clear_agent_runs(scope: HistoryScope = "current") -> dict:
     """清空运行记录；会话 Checkpointer 与定时任务定义保留。"""
     store = app.state.runtime_store
-    if store.has_running_runs():
+    workspace = _history_workspace(scope)
+    if store.has_running_runs(workspace=workspace):
         raise HTTPException(status_code=409, detail="仍有任务运行，暂时不能清空运行记录")
-    deleted = store.clear_runs()
+    deleted = store.clear_runs(workspace=workspace)
     return {"deleted": deleted}
 
 
 @app.delete("/threads")
 def delete_thread(
     thread_id: str = Query(..., min_length=1, max_length=256),
+    scope: HistoryScope = "current",
 ) -> dict:
     """删除会话检查点以及关联的全部运行记录。"""
     try:
@@ -632,6 +665,7 @@ def delete_thread(
     except RunBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     with lease:
+        _check_thread_scope(thread_id, scope)
         return _delete_thread_data(thread_id)
 
 
@@ -782,7 +816,7 @@ async def websocket_events(websocket: WebSocket) -> None:
 
     **服务端 → 客户端**：一条一个 JSON 事件。
     `run.start` / `model.text` / `tool.start` / `tool.end` / `tool.error` /
-    `approval.request` / `run.progress` / `run.end` / `run.cancelled` / `run.error`
+    `approval.request` / `approval.expired` / `run.progress` / `run.end` / `run.cancelled` / `run.error`
 
     注意：
     1. **单一发送点** —— Starlette 的 `WebSocket.send` 没有锁，
@@ -977,12 +1011,13 @@ async def _handle_run_start(
                 trigger=ctx.trigger,
                 instruction=run.instruction,
                 started_at=run.started_at,
+                workspace=_history_workspace(),
             ),
             on_terminal=lambda event: _record_terminal_event(
                 app.state.runtime_store, event
             ),
         )
-    except RunBusyError as exc:
+    except (RunBusyError, ThreadWorkspaceConflict) as exc:
         # 上一轮还在运行 —— 拒绝，不静默取消旧的。
         await queue.put(RunError(run_id="", message=str(exc)))
         return

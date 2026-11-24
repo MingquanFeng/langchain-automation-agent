@@ -33,7 +33,8 @@ struct RuntimeInfo {
     readiness: String,
     config_path: String,
     log_path: String,
-    working_directory: String,
+    working_directory: PathBuf,
+    working_directories: Vec<PathBuf>,
     status: String,
     error: Option<String>,
 }
@@ -43,7 +44,6 @@ struct RuntimeState {
     child: Mutex<Option<CommandChild>>,
     log_file: Mutex<File>,
     app_home: PathBuf,
-    working_directory: Mutex<PathBuf>,
     started_at: Mutex<Instant>,
     exited: AtomicBool,
     stopping: AtomicBool,
@@ -139,37 +139,119 @@ fn restart_runtime(
     start_runtime(&app, state.inner())
 }
 
+// 首次启动或升级时兼容旧的一行配置。返回活动目录以及侧栏应保留的完整清单。
+fn read_working_directories(
+    settings_path: &std::path::Path,
+    default_working_directory: &std::path::Path,
+) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    let mut working_directories = Vec::new();
+    let saved = fs::read_to_string(settings_path).unwrap_or_default();
+    for line in saved.lines().filter(|line| !line.is_empty()) {
+        let path = PathBuf::from(line);
+        // 暂未挂载的外置目录仍保留入口；启动时选第一个可用目录。
+        let path = fs::canonicalize(&path).unwrap_or(path);
+        if !working_directories.contains(&path) {
+            working_directories.push(path);
+        }
+    }
+    let working_directory = working_directories
+        .iter()
+        .find(|path| path.is_dir())
+        .cloned()
+        .unwrap_or(fs::canonicalize(default_working_directory).map_err(|error| {
+            format!("无法确定默认工作目录：{error}")
+        })?);
+    if !working_directories.contains(&working_directory) {
+        working_directories.push(working_directory.clone());
+    }
+    Ok((working_directory, working_directories))
+}
+
+// 把最近选中的目录置顶，保存成功后宿主才切换内存状态和文件工具的目录。
+fn save_working_directory(
+    settings_path: &std::path::Path,
+    previous: &[PathBuf],
+    path: &std::path::Path,
+) -> Result<Vec<PathBuf>, String> {
+    let mut directories = previous.to_vec();
+    directories.retain(|saved| saved != path);
+    directories.insert(0, path.to_path_buf());
+    // 旧配置只有一行。继续每行保存一个规范路径，首行代表上次使用的目录。
+    // 临时文件写完再替换，退出或磁盘写满时仍可读取原清单。
+    let temporary = settings_path.with_extension(format!("{}.tmp", std::process::id()));
+    let save = || -> std::io::Result<()> {
+        let mut options = OpenOptions::new();
+        options.create(true).truncate(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        for directory in &directories {
+            writeln!(file, "{}", directory.display())?;
+        }
+        file.sync_all()?;
+        fs::rename(&temporary, settings_path)
+    };
+    if let Err(error) = save() {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("无法保存工作目录：{error}"));
+    }
+    Ok(directories)
+}
+
+#[cfg(test)]
+mod workspace_tests {
+    use super::*;
+
+    #[test]
+    fn old_selection_and_new_directories_survive_restart() {
+        // 用两个真实存在的目录模拟系统选择框，只在临时目录写一份配置。
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let a = fs::canonicalize(root.join("src")).unwrap();
+        let b = fs::canonicalize(root.join("icons")).unwrap();
+        let settings = std::env::temp_dir().join(format!("axu-directory-test-{}.txt", std::process::id()));
+        fs::write(&settings, a.to_str().unwrap()).unwrap();
+        let (old_active, old_list) = read_working_directories(&settings, &root).unwrap();
+        save_working_directory(&settings, &old_list, &b).unwrap();
+        let (after_restart, saved) = read_working_directories(&settings, &root).unwrap();
+        save_working_directory(&settings, &saved, &a).unwrap();
+        let (switched_back, final_list) = read_working_directories(&settings, &root).unwrap();
+        fs::remove_file(settings).unwrap();
+
+        assert_eq!(old_active, a);
+        assert_eq!(after_restart, b);
+        assert_eq!(switched_back, a);
+        assert_eq!(final_list, [a, b]);
+    }
+}
+
 #[tauri::command]
 fn set_working_directory(
     path: String,
     app: tauri::AppHandle,
     state: State<'_, Arc<RuntimeState>>,
-) -> Result<(), String> {
-    let path = path.trim();
-    if path.is_empty() || path.chars().any(char::is_control) {
+) -> Result<bool, String> {
+    if path.trim().is_empty() || path.chars().any(char::is_control) {
         return Err("请选择有效的工作目录。".into());
     }
     let path = fs::canonicalize(path).map_err(|error| format!("无法访问所选目录：{error}"))?;
     if !path.is_dir() {
         return Err("所选路径不是文件夹。".into());
     }
-
-    let settings_path = state.app_home.join("working-directory.txt");
-    fs::write(&settings_path, path.to_string_lossy().as_bytes())
-        .map_err(|error| format!("无法保存工作目录：{error}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&settings_path, fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("无法限制工作目录配置权限：{error}"))?;
+    if path.to_str().is_none_or(|value| value.chars().any(char::is_control)) {
+        return Err("目录路径无法保存，请选择名称可显示且不含控制字符的文件夹。".into());
     }
-    *state
-        .working_directory
-        .lock()
-        .map_err(|_| "无法更新工作目录状态。".to_string())? = path.clone();
+
     {
         let mut info = state.info.lock().expect("runtime info mutex poisoned");
-        info.working_directory = path.to_string_lossy().into_owned();
+        if path == info.working_directory {
+            return Ok(false);
+        }
+        let settings_path = state.app_home.join("working-directory.txt");
+        info.working_directories = save_working_directory(&settings_path, &info.working_directories, &path)?;
+        info.working_directory = path;
     }
 
     stop_runtime(state.inner());
@@ -177,7 +259,7 @@ fn set_working_directory(
         state.fail(error.clone());
         return Err(error);
     }
-    Ok(())
+    Ok(true)
 }
 
 #[tauri::command]
@@ -290,14 +372,9 @@ fn create_runtime_state(app: &tauri::AppHandle) -> Result<Arc<RuntimeState>, Str
     let default_working_directory = app_home.join("data");
     fs::create_dir_all(&default_working_directory)
         .map_err(|error| format!("无法创建默认工作目录：{error}"))?;
-    let working_directory = fs::read_to_string(app_home.join("working-directory.txt"))
-        .ok()
-        .map(|saved| PathBuf::from(saved.trim()))
-        .and_then(|saved| fs::canonicalize(saved).ok())
-        .filter(|saved| saved.is_dir())
-        .unwrap_or(fs::canonicalize(&default_working_directory).map_err(|error| {
-            format!("无法确定默认工作目录：{error}")
-        })?);
+    let (working_directory, working_directories) = read_working_directories(
+        &app_home.join("working-directory.txt"), &default_working_directory,
+    )?;
 
     let config_path = app_home.join(".env");
     if !config_path.exists() {
@@ -334,14 +411,14 @@ fn create_runtime_state(app: &tauri::AppHandle) -> Result<Arc<RuntimeState>, Str
             readiness: String::new(),
             config_path: config_path.to_string_lossy().into_owned(),
             log_path: log_path.to_string_lossy().into_owned(),
-            working_directory: working_directory.to_string_lossy().into_owned(),
+            working_directory,
+            working_directories,
             status: "starting".into(),
             error: None,
         }),
         child: Mutex::new(None),
         log_file: Mutex::new(log_file),
         app_home,
-        working_directory: Mutex::new(working_directory),
         started_at: Mutex::new(Instant::now()),
         exited: AtomicBool::new(false),
         stopping: AtomicBool::new(false),
@@ -366,9 +443,10 @@ fn start_runtime(app: &tauri::AppHandle, state: &Arc<RuntimeState>) -> Result<()
     let service_url = format!("http://127.0.0.1:{port}");
     let port_arg = port.to_string();
     let working_directory = state
-        .working_directory
+        .info
         .lock()
         .map_err(|_| "无法读取 Agent 工作目录。".to_string())?
+        .working_directory
         .clone();
 
     let command = app

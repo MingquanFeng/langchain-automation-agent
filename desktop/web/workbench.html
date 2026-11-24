@@ -197,22 +197,18 @@
     .activity-meta { margin-left: auto; color: #8b95a4; font: 10px var(--mono); }
     .activity-body { padding: 0 11px 10px; color: #687589; font: 10px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
     /* 授权卡片单独强调一次具体操作；琥珀色边线表示需要用户判断。 */
-    .approval-card { margin: -9px 0 20px 37px; max-width: 680px; border: 1px solid #ead9c3; border-left: 3px solid var(--amber); border-radius: 9px; background: #fffdf9; box-shadow: 0 5px 16px #7c55200a; overflow: hidden; }
+    .approval-card { display: flex; flex: 0 1 auto; flex-direction: column; min-height: 0; max-height: 42vh; margin: 0 14px 8px; border: 1px solid #ead9c3; border-left: 3px solid var(--amber); border-radius: 12px; background: #fffdf9; overflow: hidden; }
+    .approval-card[hidden] { display: none; }
+    .approval-body { min-height: 0; overflow: auto; }
     .approval-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px 8px; }
     .approval-title { margin: 0; color: #76501f; font-size: 12px; font-weight: 700; }
     .approval-risk { flex: 0 0 auto; border: 1px solid #eddcc2; border-radius: 20px; padding: 3px 7px; color: #936123; background: #fff8ed; font-size: 9px; }
     .approval-description { margin: 0; padding: 0 14px 10px; color: #566174; font-size: 11px; line-height: 1.6; }
-    .approval-tool { margin: 0 14px 10px; color: #46546a; font: 600 10px var(--mono); }
     .approval-preview { margin: -3px 14px 9px; color: #707b8d; font: 10px/1.55 var(--mono); overflow-wrap: anywhere; }
     .approval-args { margin: 0 14px 10px; border-top: 1px solid #f0e8dc; padding-top: 8px; }
     .approval-args summary { width: fit-content; color: #8a6b45; cursor: pointer; font-size: 10px; }
     .approval-args pre { max-height: 160px; overflow: auto; margin: 7px 0 0; color: #667184; font: 10px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
     .approval-args pre.approval-diff { max-height: 300px; border: 1px solid #e3e7ef; border-radius: 7px; background: #f8fafc; padding: 9px 10px; color: #48566a; white-space: pre; overflow-wrap: normal; }
-    .approval-status { min-height: 17px; padding: 0 14px 9px; color: #8a6b45; font-size: 10px; }
-    .approval-card[data-state="allowed"], .approval-card[data-state="running"], .approval-card[data-state="done"] { border-color: #cfe3db; border-left-color: var(--green); background: #fbfefc; }
-    .approval-card[data-state="allowed"] .approval-status, .approval-card[data-state="running"] .approval-status, .approval-card[data-state="done"] .approval-status { color: #33735e; }
-    .approval-card[data-state="rejected"], .approval-card[data-state="expired"], .approval-card[data-state="cancelled"] { border-color: #ead8d0; border-left-color: var(--red); background: #fffafa; }
-    .approval-card[data-state="rejected"] .approval-status, .approval-card[data-state="expired"] .approval-status, .approval-card[data-state="cancelled"] .approval-status { color: #9b5148; }
     .approval-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 9px 12px; border-top: 1px solid #f0e8dc; background: #fffaf3; }
     .approval-actions button { min-height: 32px; border: 1px solid transparent; border-radius: 6px; padding: 0 11px; font-size: 10px; font-weight: 650; }
     .approval-reject { border-color: #e3e7ed !important; background: white; color: #657187; }
@@ -247,7 +243,7 @@
       .composer-wrap { padding: 10px; }
       .composer-controls { gap: 7px; }
       .activity { margin-left: 30px; }
-      .approval-card { margin-left: 30px; }
+      .approval-card { margin-inline: 10px; }
     }
     @media (max-width: 520px) {
       .connection { gap: 6px; font-size: 11px; }
@@ -363,6 +359,7 @@
     .history-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 21px 23px 16px; border-bottom: 1px solid #e8ecf4; background: #fff; }
     .history-panel-head h2 { margin: 0; font-size: 19px; letter-spacing: -.03em; }
     .history-panel-head p { margin: 5px 0 0; color: #8390a6; font-size: 11px; line-height: 1.6; }
+    #historyScope { margin-top: 8px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; background: #fff; font: inherit; font-size: 12px; }
     .history-head-actions { display: flex; align-items: center; gap: 8px; }
     .history-clear, .history-refresh, .history-close, .history-action { min-height: 32px; border: 1px solid #dce3f0; border-radius: 8px; padding: 0 10px; color: #52627e; background: #fff; font-size: 10px; font-weight: 650; white-space: nowrap; }
     .history-clear { color: #a14b4b; border-color: #f0d9d9; }
@@ -407,7 +404,13 @@
     .thread-project-path { min-width: 0; overflow: hidden; color: #89968f; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
     .directory-add { border: 1px solid #d9e5dc; border-radius: 999px; padding: 4px 8px; color: #52715d; background: #fff; font-size: 9px; font-weight: 680; white-space: nowrap; }
     .directory-add:hover { color: #217045; border-color: #b9d7c2; background: #f4faf5; }
-    .thread-project { min-height: 0; display: flex; flex: 1; flex-direction: column; border-radius: 13px; padding: 10px; background: linear-gradient(120deg, #eff7f1, #f7fbf8); }
+    .directory-groups { min-height: 0; overflow-y: auto; }
+    .saved-directories { display: grid; gap: 3px; }
+    .saved-directories:not(:empty) { margin: 6px 0; }
+    .saved-directory { width: 100%; min-width: 0; border: 0; border-radius: 10px; padding: 8px 10px; background: transparent; text-align: left; }
+    .saved-directory:hover, .saved-directory[aria-current="true"] { background: #eff7f1; }
+    .saved-directory .thread-project-copy, .saved-directory .thread-project-name, .saved-directory .thread-project-path { display: block; }
+    .thread-project { min-height: 0; border-radius: 13px; padding: 10px; background: linear-gradient(120deg, #eff7f1, #f7fbf8); }
     .thread-project-row { display: flex; align-items: center; gap: 8px; }
     .thread-project-row > svg { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: #26844c; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     .thread-project-copy { min-width: 0; flex: 1; }
@@ -419,9 +422,7 @@
     .directory-collapse svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .16s ease; }
     .thread-project[data-collapsed="true"] .directory-collapse svg { transform: rotate(-90deg); }
     .thread-project[data-collapsed="true"] .thread-list,
-    .thread-project[data-collapsed="true"] + .thread-rail-status,
-    .thread-project[data-collapsed="true"] + .thread-rail-status + .thread-more { display: none; }
-    .thread-project[data-collapsed="true"] { flex: 0 0 auto; }
+    .thread-project[data-collapsed="true"] .thread-rail-status, .thread-rail-status:empty { display: none; }
     .thread-list { min-height: 0; flex: 1; display: grid; align-content: start; gap: 2px; overflow: auto; margin: 7px 0 0 26px; padding: 0 0 1px; }
     .thread-item { width: 100%; min-width: 0; display: block; position: relative; border: 0; border-radius: 9px; padding: 7px 8px 7px 28px; color: #47554d; background: transparent; text-align: left; }
     .thread-item::before { content: ""; position: absolute; top: 9px; left: 9px; width: 11px; height: 8px; border: 1.5px solid currentColor; border-radius: 3px; opacity: .72; }
@@ -452,10 +453,9 @@
     .message-label { color: #8995aa; font-size: 9px; }
     .bubble { border-color: #e5eaf5; border-radius: 4px 13px 13px; padding: 10px 13px; color: #3d4a62; background: #fff; font-size: 13px; line-height: 1.7; box-shadow: 0 3px 12px #293c6608; }
     .message.user .bubble { border-color: #d7e2ff; border-radius: 13px 4px 13px 13px; color: #2f4778; background: linear-gradient(135deg, #eaf0ff, #f3f6ff); }
-    .activity, .approval-card, .run-notice { margin-left: 37px; }
+    .activity, .run-notice { margin-left: 37px; }
     .activity details { border-color: #e3e8f1; border-radius: 11px; background: #fff; }
     .activity summary { padding: 9px 11px; font-size: 10px; }
-    .approval-card { border-radius: 12px; }
     .run-notice { font-size: 9px; }
     .composer-wrap { flex: 0 0 auto; border-top: 1px solid #e8ecf4; padding: 12px 15px 9px; background: #fff; }
     .composer { position: relative; display: flex; align-items: center; gap: 9px; border-color: #e1e6f1; border-radius: 14px; padding: 8px 9px 8px 13px; box-shadow: 0 5px 18px #293c660a; }
@@ -624,18 +624,21 @@
         <div class="thread-rail-head">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l1.7 2h9.3v9.8a1.2 1.2 0 0 1-1.2 1.2H4.7a1.2 1.2 0 0 1-1.2-1.2V7.7a1.2 1.2 0 0 1 0-1.2Z"/></svg>
           <span id="sidebarThreadTitle">工作目录</span>
-          <button class="directory-add" id="sidebarChooseDirectory" type="button">更换目录</button>
+          <button class="directory-add" id="sidebarChooseDirectory" type="button">添加目录</button>
         </div>
-        <div class="thread-project" id="sidebarProject">
-          <div class="thread-project-row">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l1.7 2h9.3v9.8a1.2 1.2 0 0 1-1.2 1.2H4.7a1.2 1.2 0 0 1-1.2-1.2V7.7a1.2 1.2 0 0 1 0-1.2Z"/></svg>
-            <div class="thread-project-copy"><div class="thread-project-name" id="sidebarProjectName" title="当前工作目录">工作目录</div><div class="thread-project-path" id="sidebarProjectPath">选择一个工作目录开始</div></div>
-            <button class="directory-collapse" id="sidebarDirectoryCollapse" type="button" aria-label="收起工作目录会话" aria-controls="sidebarThreadList" aria-expanded="true" title="收起会话列表"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="directory-groups">
+          <div class="thread-project" id="sidebarProject">
+            <div class="thread-project-row">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l1.7 2h9.3v9.8a1.2 1.2 0 0 1-1.2 1.2H4.7a1.2 1.2 0 0 1-1.2-1.2V7.7a1.2 1.2 0 0 1 0-1.2Z"/></svg>
+              <div class="thread-project-copy"><div class="thread-project-name" id="sidebarProjectName" title="当前工作目录">工作目录</div><div class="thread-project-path" id="sidebarProjectPath">选择一个工作目录开始</div></div>
+              <button class="directory-collapse" id="sidebarDirectoryCollapse" type="button" aria-label="收起工作目录会话" aria-controls="sidebarThreadList" aria-expanded="true" title="收起会话列表"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+            </div>
+            <div class="thread-list" id="sidebarThreadList" aria-live="polite"></div>
+            <div class="thread-rail-status" id="sidebarThreadStatus">连接后加载最近会话</div>
           </div>
-          <div class="thread-list" id="sidebarThreadList" aria-live="polite"></div>
+          <div class="saved-directories" id="sidebarSavedDirectories"></div>
         </div>
-        <div class="thread-rail-status" id="sidebarThreadStatus">连接后加载最近会话</div>
-        <button class="thread-more" id="sidebarThreadMoreButton" type="button" hidden>查看全部会话</button>
+        <button class="thread-more" id="sidebarThreadMoreButton" type="button">查看历史会话</button>
       </section>
       <div class="sidebar-bottom" id="sidebarConnection" data-state="connecting" role="status">
         <div class="connection-summary-head">
@@ -662,6 +665,25 @@
             </div>
           </div>
         </div>
+        <span class="sr-only" id="approvalAnnouncement" role="status"></span>
+        <section class="approval-card" id="approvalPanel" aria-labelledby="approvalTitle" hidden>
+          <div class="approval-head">
+            <h3 class="approval-title" id="approvalTitle" tabindex="-1">等待审批</h3>
+            <span class="approval-risk" id="approvalRisk"></span>
+          </div>
+          <div class="approval-body">
+            <p class="approval-description" id="approvalDescription"></p>
+            <div class="approval-preview" id="approvalPreview"></div>
+            <details class="approval-args" id="approvalDetails">
+              <summary id="approvalSummary">查看本次调用参数</summary>
+              <pre id="approvalArgs"></pre>
+            </details>
+          </div>
+          <div class="approval-actions">
+            <button class="approval-reject" type="button" value="reject">拒绝本次</button>
+            <button class="approval-allow" type="button" value="allow">仅允许本次</button>
+          </div>
+        </section>
         <div class="composer-wrap">
           <form class="composer" id="chatForm">
             <button class="working-directory-button" id="workingDirectoryButton" type="button" aria-label="选择工作目录" title="选择工作目录">
@@ -713,6 +735,16 @@
     </aside>
   </main>
 
+  <dialog class="settings-dialog" id="directoryDialog" aria-labelledby="directoryTitle">
+    <section class="settings-panel">
+      <header class="settings-panel-head">
+        <h2 id="directoryTitle">选择工作目录</h2>
+        <button class="settings-close" id="closeDirectoryDialog" type="button" aria-label="关闭目录选择">×</button>
+      </header>
+      <div class="saved-directories" id="directoryChoices"></div>
+      <button class="directory-add" id="addDirectoryChoice" type="button">添加目录</button>
+    </section>
+  </dialog>
   <dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
     <section class="settings-panel">
       <header class="settings-panel-head">
@@ -817,7 +849,11 @@
       <header class="history-panel-head">
         <div>
           <h2 id="historyTitle">历史会话与运行记录</h2>
-          <p>会话列表来自已保存的 Checkpointer，运行记录提供任务状态与结果。恢复会话不会重新发送任务。</p>
+          <select id="historyScope" aria-label="历史记录范围" hidden>
+            <option value="current">当前目录</option>
+            <option value="legacy">未归档（旧版会话）</option>
+          </select>
+          <p id="historyScopeHint">恢复会话后，可以从上次停下的位置继续。</p>
         </div>
         <div class="history-head-actions">
           <button class="history-refresh" id="refreshHistoryButton" type="button">刷新</button>
@@ -879,6 +915,8 @@
     const newMemoryButton = $("#newMemoryButton");
     const cancelMemoryEditButton = $("#cancelMemoryEditButton");
     const historyDialog = $("#historyDialog");
+    const historyScope = $("#historyScope");
+    const historyScopeHint = $("#historyScopeHint");
     const sessionHistoryList = $("#sessionHistoryList");
     const sessionHistoryStatus = $("#sessionHistoryStatus");
     const sessionHistoryLoadMoreButton = $("#sessionHistoryLoadMoreButton");
@@ -900,6 +938,9 @@
     const sidebarProject = $("#sidebarProject");
     const sidebarDirectoryCollapse = $("#sidebarDirectoryCollapse");
     const sidebarChooseDirectory = $("#sidebarChooseDirectory");
+    const sidebarSavedDirectories = $("#sidebarSavedDirectories");
+    const directoryDialog = $("#directoryDialog");
+    const directoryChoices = $("#directoryChoices");
     const sidebarThreadList = $("#sidebarThreadList");
     const sidebarThreadStatus = $("#sidebarThreadStatus");
     const sidebarThreadMoreButton = $("#sidebarThreadMoreButton");
@@ -924,7 +965,9 @@
     const recentTasks = [];
     const toolCards = new Map();
     const pendingApprovals = new Map();
+    const approvalPanel = $("#approvalPanel");
     let currentWorkingDirectory = "";
+    let savedDirectories = [];
     let sessionHistoryOffset = 0;
     let sessionHistoryHasMore = false;
     let sessionHistoryLoading = false;
@@ -932,7 +975,8 @@
     let historyHasMore = false;
     let historyLoading = false;
     let memoryRecords = [];
-    let sidebarThreadsLoading = false;
+    let sidebarRequest = 0;
+    let recoveryRequest = 0;
 
     function serviceFetch(path, { method = "GET", body } = {}) {
       const headers = serviceAccessToken ? { Authorization: `Bearer ${serviceAccessToken}` } : {};
@@ -959,10 +1003,39 @@
       return url.origin;
     }
 
-    function setWorkingDirectory(path) {
+    function directoryLabel(path) {
+      const parts = path.split(/[\\/]/).filter(Boolean);
+      return parts[parts.length - 1] || path || "工作目录";
+    }
+
+    function directoryChoice(path) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "thread-project-row saved-directory";
+      button.title = path;
+      button.disabled = sendButton.disabled;
+      if (path === currentWorkingDirectory) button.setAttribute("aria-current", "true");
+      const copy = document.createElement("span");
+      copy.className = "thread-project-copy";
+      const name = document.createElement("span");
+      name.className = "thread-project-name";
+      name.textContent = directoryLabel(path);
+      const detail = document.createElement("span");
+      detail.className = "thread-project-path";
+      detail.textContent = path.replace(/^\/Users\/[^/]+/, "~");
+      copy.append(name, detail);
+      button.append(sidebarProject.querySelector("svg").cloneNode(true), copy);
+      button.addEventListener("click", () => {
+        directoryDialog.close();
+        if (path !== currentWorkingDirectory) requestDirectory(path);
+      });
+      return button;
+    }
+
+    function setWorkingDirectory(path, directories) {
       currentWorkingDirectory = typeof path === "string" ? path : "";
-      const pathParts = currentWorkingDirectory.split(/[\\/]/).filter(Boolean);
-      const directoryName = pathParts[pathParts.length - 1] || "工作目录";
+      savedDirectories = Array.isArray(directories) ? directories : [];
+      const directoryName = directoryLabel(currentWorkingDirectory);
       workingDirectoryName.textContent = directoryName;
       workingDirectoryButton.title = currentWorkingDirectory
         ? `工作目录：${currentWorkingDirectory}；点击更改`
@@ -978,6 +1051,9 @@
       sidebarProjectPath.textContent = currentWorkingDirectory
         ? currentWorkingDirectory.replace(/^\/Users\/[^/]+/, "~")
         : "选择一个工作目录开始";
+      sidebarSavedDirectories.replaceChildren(...savedDirectories.filter((item) => item !== path).map(directoryChoice));
+      directoryChoices.replaceChildren(...savedDirectories.map(directoryChoice));
+      historyScope.hidden = !currentWorkingDirectory;
     }
 
     // 把协议风险等级转换成界面上的简短说明，帮助用户快速判断操作影响。
@@ -1285,15 +1361,21 @@
 
     function updateHistoryControls() {
       refreshHistoryButton.disabled = sessionHistoryLoading || historyLoading;
+      historyScope.disabled = sessionHistoryLoading || historyLoading;
       sessionHistoryLoadMoreButton.disabled = sessionHistoryLoading;
       historyLoadMoreButton.disabled = historyLoading;
       clearHistoryButton.disabled = historyLoading || historyOffset === 0;
+    }
+
+    function historyPath(path, scope = historyScope.value) {
+      return `${path}${path.includes("?") ? "&" : "?"}scope=${scope}`;
     }
 
     function renderSidebarThread(session) {
       const item = document.createElement("button");
       item.type = "button";
       item.className = "thread-item";
+      item.disabled = sendButton.disabled;
       item.classList.toggle("active", session.thread_id === threadId);
       item.title = session.title || "未命名会话";
 
@@ -1312,23 +1394,20 @@
     }
 
     async function loadSidebarThreads() {
-      if (sidebarThreadsLoading) return;
-      sidebarThreadsLoading = true;
+      const request = ++sidebarRequest;
       sidebarThreadStatus.textContent = "正在加载会话…";
-      sidebarThreadMoreButton.hidden = true;
       try {
         const response = await serviceFetch("/threads?limit=8&offset=0");
         if (!response.ok) throw await apiError(response, "读取会话列表失败");
         const payload = await response.json();
+        if (request !== sidebarRequest) return;
         if (!Array.isArray(payload.threads)) throw new Error("会话列表格式无效");
         sidebarThreadList.replaceChildren(...payload.threads.map(renderSidebarThread));
         sidebarThreadStatus.textContent = payload.threads.length ? "" : "还没有已保存的会话";
-        sidebarThreadMoreButton.hidden = !payload.threads.length;
       } catch (error) {
+        if (request !== sidebarRequest) return;
         sidebarThreadList.replaceChildren();
         sidebarThreadStatus.textContent = error.message;
-      } finally {
-        sidebarThreadsLoading = false;
       }
     }
 
@@ -1358,7 +1437,7 @@
       restore.addEventListener("click", () => recoverThread({
         thread_id: session.thread_id,
         instruction: session.title,
-      }));
+      }, historyScope.value));
 
       const remove = document.createElement("button");
       remove.type = "button";
@@ -1367,10 +1446,10 @@
       remove.addEventListener("click", async () => {
         if (!window.confirm("删除整个会话会清除 Checkpointer 记忆和关联运行记录，且无法恢复。继续吗？")) return;
         try {
-          const response = await serviceFetch(`/threads?thread_id=${encodeURIComponent(session.thread_id)}`, { method: "DELETE" });
+          const response = await serviceFetch(historyPath(`/threads?thread_id=${encodeURIComponent(session.thread_id)}`), { method: "DELETE" });
           if (!response.ok) throw await apiError(response, "删除会话失败");
           if (threadId === session.thread_id) newChatButton.click();
-          await Promise.all([loadThreadHistory(true), loadRunHistory(true)]);
+          await Promise.all([loadThreadHistory(true), loadRunHistory(true), loadSidebarThreads()]);
         } catch (error) {
           sessionHistoryStatus.textContent = error.message;
         }
@@ -1392,7 +1471,7 @@
       updateHistoryControls();
       sessionHistoryStatus.textContent = sessionHistoryOffset ? `已加载 ${sessionHistoryOffset} 个会话，正在读取更多…` : "正在加载会话…";
       try {
-        const response = await serviceFetch(`/threads?limit=50&offset=${sessionHistoryOffset}`);
+        const response = await serviceFetch(historyPath(`/threads?limit=50&offset=${sessionHistoryOffset}`));
         if (!response.ok) throw await apiError(response, "读取会话列表失败");
         const payload = await response.json();
         if (!Array.isArray(payload.threads)) throw new Error("会话列表格式无效");
@@ -1463,7 +1542,7 @@
       restore.textContent = "查看并恢复会话";
       restore.disabled = Boolean(activeRunId) || run.status === "running";
       if (run.status === "running") restore.title = "任务仍在运行；刷新历史状态后再恢复会话";
-      restore.addEventListener("click", () => recoverThread(run));
+      restore.addEventListener("click", () => recoverThread(run, historyScope.value));
 
       const deleteRun = document.createElement("button");
       deleteRun.type = "button";
@@ -1472,7 +1551,7 @@
       deleteRun.addEventListener("click", async () => {
         if (!window.confirm("删除这条运行记录？会话记忆会保留。")) return;
         try {
-          const response = await serviceFetch(`/runs/${encodeURIComponent(run.run_id)}`, { method: "DELETE" });
+          const response = await serviceFetch(historyPath(`/runs/${encodeURIComponent(run.run_id)}`), { method: "DELETE" });
           if (!response.ok) throw await apiError(response, "删除运行记录失败");
           await loadRunHistory(true);
         } catch (error) {
@@ -1487,10 +1566,10 @@
       deleteThread.addEventListener("click", async () => {
         if (!window.confirm("删除整个会话会清除该会话的 Checkpointer 记忆和所有关联运行记录，且无法恢复。继续吗？")) return;
         try {
-          const response = await serviceFetch(`/threads?thread_id=${encodeURIComponent(run.thread_id)}`, { method: "DELETE" });
+          const response = await serviceFetch(historyPath(`/threads?thread_id=${encodeURIComponent(run.thread_id)}`), { method: "DELETE" });
           if (!response.ok) throw await apiError(response, "删除会话失败");
           if (threadId === run.thread_id) newChatButton.click();
-          await Promise.all([loadThreadHistory(true), loadRunHistory(true)]);
+          await Promise.all([loadThreadHistory(true), loadRunHistory(true), loadSidebarThreads()]);
         } catch (error) {
           historyStatus.textContent = error.message;
         }
@@ -1511,7 +1590,7 @@
       updateHistoryControls();
       historyStatus.textContent = historyOffset ? `已加载 ${historyOffset} 条记录，正在读取更多…` : "正在加载运行记录…";
       try {
-        const response = await serviceFetch(`/runs?limit=50&offset=${historyOffset}`);
+        const response = await serviceFetch(historyPath(`/runs?limit=50&offset=${historyOffset}`));
         if (!response.ok) throw await apiError(response, "读取运行记录失败");
         const runs = await response.json();
         if (!Array.isArray(runs)) throw new Error("运行记录格式无效");
@@ -1537,18 +1616,20 @@
       }
     }
 
-    async function recoverThread(run) {
-      if (activeRunId) return;
+    async function recoverThread(run, scope = "current") {
+      if (sendButton.disabled) return;
+      const request = ++recoveryRequest;
       try {
-        const response = await serviceFetch(`/threads/messages?thread_id=${encodeURIComponent(run.thread_id)}`);
+        const response = await serviceFetch(historyPath(`/threads/messages?thread_id=${encodeURIComponent(run.thread_id)}`, scope));
         if (!response.ok) throw await apiError(response, "读取会话内容失败");
         const snapshot = await response.json();
+        if (request !== recoveryRequest) return;
         threadId = snapshot.thread_id || run.thread_id;
         activeRunId = null;
         currentTask = null;
         currentAssistantBubble = null;
         toolCards.clear();
-        closePendingApprovals("expired", "历史会话已恢复；旧授权不能继续使用。");
+        closePendingApprovals();
         renderExecutionTodos([]);
         executionTodoSummary.textContent = "未创建";
         executionTodoEmpty.textContent = "复杂任务拆解后，步骤会显示在这里。";
@@ -1567,6 +1648,7 @@
           addNotice("没有找到保存的对话消息；显示的是运行记录快照。后续消息不会重发这次任务。");
         }
         if (snapshot.truncated) addNotice("会话较长，当前只显示最近 500 条消息；继续对话仍沿用完整会话记忆。");
+        if (scope === "legacy") addNotice(`发送下一条消息后，这个旧会话将归入「${directoryLabel(currentWorkingDirectory)}」。`);
         if (run.status === "interrupted") addNotice("这次运行在服务重启时中断；当前展示的是已保存内容。", true);
         if (run.status === "running") addNotice("历史记录仍标记为执行中；恢复会话不会重新启动任务。", true);
 
@@ -1583,15 +1665,18 @@
         document.querySelector("main.chat-app").dataset.railOpen = "false";
         input.focus();
       } catch (error) {
-        historyStatus.textContent = error.message;
+        if (request !== recoveryRequest) return;
+        if (historyDialog.open) historyStatus.textContent = error.message;
+        else sidebarThreadStatus.textContent = error.message;
       }
     }
 
     async function clearRunHistory() {
       if (historyLoading) return;
-      if (!window.confirm("清空全部运行记录？保存的会话记忆会保留；如需删除会话记忆，请对相应会话使用“删除整个会话”。")) return;
+      const range = currentWorkingDirectory ? historyScope.selectedOptions[0].textContent : "全部";
+      if (!window.confirm(`清空「${range}」的运行记录？保存的会话记忆会保留。`)) return;
       try {
-        const response = await serviceFetch("/runs", { method: "DELETE" });
+        const response = await serviceFetch(historyPath("/runs"), { method: "DELETE" });
         if (!response.ok) throw await apiError(response, "清空运行记录失败");
         await loadRunHistory(true);
       } catch (error) {
@@ -1645,9 +1730,14 @@
     }
 
     function setBusy(busy) {
+      if (busy) recoveryRequest++;
       sendButton.disabled = busy;
       input.disabled = busy;
       newChatButton.disabled = busy;
+      // 宿主切换目录会重启服务。从提交到任务终态都锁定目录和会话入口。
+      workingDirectoryButton.disabled = busy;
+      sidebarChooseDirectory.disabled = busy;
+      document.querySelectorAll(".saved-directory, .thread-item").forEach((item) => { item.disabled = busy; });
       cancelButton.classList.toggle("hidden", !busy);
       sendButton.textContent = busy ? "运行中…" : "发送 ↑";
       cancelButton.disabled = false;
@@ -1729,137 +1819,70 @@
       scrollToBottom();
     }
 
-    // 更新某条授权卡片的状态，并同步按钮可用状态。
-    function setApprovalState(entry, state, label, disableActions = true) {
-      entry.state = state;
-      entry.card.dataset.state = state;
-      entry.status.textContent = label;
-      if (disableActions) {
-        entry.allowButton.disabled = true;
-        entry.rejectButton.disabled = true;
-      }
-    }
-
-    // 展示待执行工具的影响、完整参数和只对本次调用生效的决定按钮。
-    function addApprovalRequest(event) {
-      const card = document.createElement("section");
-      card.className = "approval-card";
-      card.dataset.state = "waiting";
-      card.setAttribute("aria-label", `等待确认：${event.name || "工具调用"}`);
-
-      const header = document.createElement("div");
-      header.className = "approval-head";
-      const title = document.createElement("h3");
-      title.className = "approval-title";
-      title.textContent = "需要确认这次操作";
-      const risk = document.createElement("span");
-      risk.className = "approval-risk";
-      risk.textContent = riskLabels[event.risk_level] || "有副作用的操作";
-      header.append(title, risk);
-
-      const description = document.createElement("p");
-      description.className = "approval-description";
-      description.textContent = toolDescriptions[event.name] || "Agent 请求执行一个可能产生副作用的工具。";
-
-      const tool = document.createElement("div");
-      tool.className = "approval-tool";
-      tool.textContent = event.name || "未知工具";
-
-      // 结构化编辑展示路径、统计和 unified diff；其他工具仍显示参数摘要。
-      const argsPreview = document.createElement("div");
-      argsPreview.className = "approval-preview";
-      const argumentEntries = Object.entries(event.args || {});
-      const diffText = typeof event.args?.diff === "string" ? event.args.diff : "";
-      if (diffText) {
-        argsPreview.textContent = `${event.args.path || "文件"} · ${event.args.summary || "内容将发生变化"}`;
-      } else {
-        argsPreview.textContent = argumentEntries.length
-          ? `参数：${argumentEntries.slice(0, 3).map(([key, value]) => {
-            const preview = typeof value === "string" ? value : JSON.stringify(value);
-            const shortValue = preview.length > 72 ? `${preview.slice(0, 72)}…` : preview;
-            return `${key}=${shortValue}`;
-          }).join(" · ")}${argumentEntries.length > 3 ? " · …" : ""}`
-          : "本次调用没有额外参数。";
-      }
-
-      const argsDetails = document.createElement("details");
-      argsDetails.className = "approval-args";
-      const argsSummary = document.createElement("summary");
-      argsSummary.textContent = diffText ? "查看变更差异" : "查看本次调用参数";
-      const args = document.createElement("pre");
-      if (diffText) args.className = "approval-diff";
-      args.textContent = diffText || JSON.stringify(event.args || {}, null, 2);
-      argsDetails.append(argsSummary, args);
-
-      const status = document.createElement("div");
-      status.className = "approval-status";
-      status.setAttribute("role", "status");
-      status.textContent = "工具尚未执行；请选择允许或拒绝。";
-
-      const actions = document.createElement("div");
-      actions.className = "approval-actions";
-      const rejectButton = document.createElement("button");
-      rejectButton.type = "button";
-      rejectButton.className = "approval-reject";
-      rejectButton.textContent = "拒绝本次";
-      const allowButton = document.createElement("button");
-      allowButton.type = "button";
-      allowButton.className = "approval-allow";
-      allowButton.textContent = "仅允许本次";
-      actions.append(rejectButton, allowButton);
-      card.append(header, description, tool, argsPreview, argsDetails, status, actions);
-      messages.append(card);
-
-      const entry = {
-        runId: event.run_id,
-        card,
-        status,
-        allowButton,
-        rejectButton,
-        state: "waiting",
-      };
-      pendingApprovals.set(event.call_id, entry);
-      allowButton.addEventListener("click", () => respondToApproval(event.call_id, true));
-      rejectButton.addEventListener("click", () => respondToApproval(event.call_id, false));
-      currentAssistantBubble = null;
-      scrollToBottom();
-    }
-
-    // 发送与当前 run / call_id 匹配的决定；每张卡片只允许提交一次。
-    function respondToApproval(callId, approved) {
-      const entry = pendingApprovals.get(callId);
-      if (!entry || entry.state !== "waiting") return;
-      if (!socket || socket.readyState !== WebSocket.OPEN || activeRunId !== entry.runId) {
-        setApprovalState(entry, "cancelled", "连接已关闭，本次工具不会执行。");
+    // 固定面板只显示最早一项。重复事件或并行工具的后续请求不会收起用户正在看的 diff。
+    function renderNextApproval() {
+      const event = pendingApprovals.values().next().value;
+      if (!event) {
+        approvalPanel.hidden = true;
+        delete approvalPanel.dataset.callId;
+        $("#approvalAnnouncement").textContent = "";
         return;
       }
+      if (approvalPanel.dataset.callId === event.call_id) return;
+      const hadFocus = approvalPanel.contains(document.activeElement);
+      approvalPanel.dataset.callId = event.call_id;
+      $("#approvalTitle").textContent = `等待审批 · ${event.name}`;
+      $("#approvalRisk").textContent = riskLabels[event.risk_level] || "工具调用";
+      $("#approvalDescription").textContent = toolDescriptions[event.name] || "请核对这次工具调用的参数。";
 
-      try {
-        socket.send(JSON.stringify({
-          type: "approval.respond",
-          run_id: entry.runId,
-          call_id: callId,
-          approved,
-        }));
-        entry.state = approved ? "allowed" : "rejected";
-        setApprovalState(
-          entry,
-          entry.state,
-          approved ? "已允许本次调用，等待工具执行。" : "已拒绝本次调用，工具不会执行。",
-        );
-      } catch {
-        setApprovalState(entry, "cancelled", "决定未能送达；请检查连接状态。");
-      }
+      const args = event.args || {};
+      const diff = typeof args.diff === "string" ? args.diff : "";
+      const entries = Object.entries(args);
+      $("#approvalPreview").textContent = diff
+        ? `${args.path || "文件"} · ${args.summary || "内容将发生变化"}`
+        : entries.slice(0, 3).map(([key, value]) => {
+          const preview = typeof value === "string" ? value : JSON.stringify(value);
+          return `${key}=${preview.length > 72 ? preview.slice(0, 72) + "…" : preview}`;
+        }).join(" · ");
+      $("#approvalDetails").open = false;
+      $("#approvalSummary").textContent = diff ? "查看变更差异" : "查看完整参数";
+      $("#approvalArgs").textContent = diff || JSON.stringify(args, null, 2);
+      $("#approvalArgs").classList.toggle("approval-diff", Boolean(diff));
+      approvalPanel.hidden = false;
+      $("#approvalAnnouncement").textContent = `等待审批：${event.name}。${args.path || ""}`;
+      if (hadFocus) $("#approvalTitle").focus({ preventScroll: true });
     }
 
-    // run 结束或连接断开时关闭仍等待用户处理的卡片，避免留下过期按钮。
-    function closePendingApprovals(state, label) {
-      for (const entry of pendingApprovals.values()) {
-        if (entry.state === "waiting" || entry.state === "allowed") {
-          setApprovalState(entry, state, label);
-        }
+    function dismissApproval(event) {
+      if (pendingApprovals.get(event.call_id)?.run_id !== event.run_id) return;
+      pendingApprovals.delete(event.call_id);
+      renderNextApproval();
+    }
+
+    approvalPanel.addEventListener("click", (click) => {
+      const button = click.target.closest("button");
+      const event = pendingApprovals.get(approvalPanel.dataset.callId);
+      // 双击的第二下仍属于刚做完的决定，不能顺手批准接替它的新调用。
+      if (!button || !event || click.detail > 1 || activeRunId !== event.run_id) return;
+      if (socket?.readyState !== WebSocket.OPEN) {
+        closePendingApprovals();
+        addNotice("连接已关闭，本次审批无法提交。", true);
+        return;
       }
+      try {
+        socket.send(JSON.stringify({
+          type: "approval.respond", run_id: event.run_id, call_id: event.call_id,
+          approved: button.value === "allow",
+        }));
+      } catch {
+        addNotice("审批决定未能送达，请检查连接状态。", true);
+      }
+      dismissApproval(event);
+    });
+
+    function closePendingApprovals() {
       pendingApprovals.clear();
+      renderNextApproval();
     }
 
     function addRepairAction(card, source) {
@@ -1913,10 +1936,7 @@
         } else {
           addToolActivity(event);
         }
-        const approval = pendingApprovals.get(event.call_id);
-        if (approval && approval.runId === event.run_id && approval.state === "allowed") {
-          setApprovalState(approval, "running", "本次调用已获允许，工具正在执行。");
-        }
+        dismissApproval(event);
       } else if (event.type === "tool.end" || event.type === "tool.error") {
         let card = toolCards.get(event.call_id);
         if (card?.executionTodo || event.name === "write_todos") {
@@ -1944,24 +1964,20 @@
           body.textContent = result;
           card.details.append(body);
         }
-        const approval = pendingApprovals.get(event.call_id);
-        if (approval && approval.runId === event.run_id) {
-          if (event.type === "tool.end") {
-            setApprovalState(approval, "done", "工具已完成。");
-          } else if (approval.state === "waiting") {
-            setApprovalState(approval, "expired", "未收到允许决定或请求已超时；工具未执行。");
-          } else if (approval.state === "rejected") {
-            setApprovalState(approval, "rejected", "已拒绝本次调用；工具未执行。");
-          } else if (approval.state === "allowed" || approval.state === "running") {
-            setApprovalState(approval, "expired", "工具执行失败；请查看下方错误信息。");
-          }
-        }
+        dismissApproval(event);
         if (event.name === "run_command" && event.command_result?.status === "failed") {
           card.repairSource = { runId: event.run_id, callId: event.call_id };
         }
         currentAssistantBubble = null;
       } else if (event.type === "approval.request") {
-        addApprovalRequest(event);
+        if (event.run_id !== activeRunId || cancelButton.disabled || pendingApprovals.has(event.call_id)) return;
+        pendingApprovals.set(event.call_id, event);
+        renderNextApproval();
+      } else if (event.type === "approval.expired") {
+        if (pendingApprovals.get(event.call_id)?.run_id === event.run_id) {
+          addNotice("本次审批已超时，工具未执行。", "warning");
+        }
+        dismissApproval(event);
       } else if (event.type === "run.end") {
         if (currentAssistantBubble) {
           currentAssistantBubble.textContent = event.output || currentAssistantBubble.textContent || "（没有文本输出）";
@@ -1969,7 +1985,7 @@
           addMessage("assistant", "Agent", event.output);
         }
         addNotice(`完成 · ${event.duration_ms ?? 0} ms · ${event.messages ?? 0} 条消息`);
-        closePendingApprovals("expired", "任务已结束；本次工具不会继续执行。");
+        closePendingApprovals();
         activeRunId = null;
         for (const card of toolCards.values()) {
           if (card.runId === event.run_id && card.repairSource) addRepairAction(card, card.repairSource);
@@ -1981,7 +1997,7 @@
         input.focus();
       } else if (event.type === "run.cancelled") {
         addNotice("本轮已取消");
-        closePendingApprovals("cancelled", "任务已取消；本次工具未执行。");
+        closePendingApprovals();
         activeRunId = null;
         setBusy(false);
         finishCurrentTask("cancelled", "任务已取消，可以调整要求后再试。");
@@ -1996,7 +2012,7 @@
           event.recoverable ? "warning" : "error",
         );
         if (!event.recoverable && (!event.run_id || event.run_id === activeRunId)) {
-          closePendingApprovals("expired", "任务发生错误；本次工具未执行。");
+          closePendingApprovals();
           activeRunId = null;
           setBusy(false);
           finishCurrentTask("error", "任务未能完成，请查看对话中的错误信息。");
@@ -2057,7 +2073,7 @@
           setConnection(failed ? "error" : "idle", failed ? "连接失败" : "连接已关闭");
           if (!settled) settleFailure("Agent 服务连接已关闭。请检查服务状态后重试。");
           if (activeRunId) {
-            closePendingApprovals("cancelled", "连接中断；本次工具未执行。");
+            closePendingApprovals();
             activeRunId = null;
             setBusy(false);
             finishCurrentTask("error", "连接中断，任务结果尚未确认。请先检查服务状态。");
@@ -2083,7 +2099,7 @@
     form.addEventListener("submit", async (submitEvent) => {
       submitEvent.preventDefault();
       const instruction = input.value.trim();
-      if (!instruction || activeRunId) return;
+      if (!instruction || sendButton.disabled) return;
 
       addMessage("user", "你", instruction);
       beginRecentTask(instruction);
@@ -2113,13 +2129,15 @@
         socket.send(JSON.stringify({ type: "cancel" }));
         cancelButton.disabled = true;
         cancelButton.textContent = "正在取消…";
-        closePendingApprovals("cancelled", "已请求取消，等待任务退出。");
+        closePendingApprovals();
         finishCurrentTask("cancelling", "已请求取消，正在等待当前调用退出；已完成的操作不会回滚。");
       }
     });
 
     newChatButton.addEventListener("click", () => {
       if (activeRunId) return;
+      recoveryRequest++;
+      sidebarThreadList.querySelector(".active")?.classList.remove("active");
       threadId = null;
       activeRunId = null;
       currentTask = null;
@@ -2128,7 +2146,7 @@
       renderExecutionTodos([]);
       executionTodoSummary.textContent = "未创建";
       executionTodoEmpty.textContent = "复杂任务拆解后，步骤会显示在这里。";
-      pendingApprovals.clear();
+      closePendingApprovals();
       messages.innerHTML = `<div class="welcome" id="welcome"><img class="welcome-mark" src="./assets/automation-agent-logo.png" alt="" aria-hidden="true"><div class="welcome-copy"><h2>你好，我是阿序 <span aria-hidden="true">✦</span></h2><p>你的个人桌面 AI Agent，可以帮你处理本地文件、整理数据和生成通知。</p><div class="suggestions"><button class="suggestion" type="button" data-prompt="只读列出数据目录中的文件，并简要总结。"><span aria-hidden="true">▤</span> 列出数据目录</button><button class="suggestion" type="button" data-prompt="读取 out/report.md，告诉我它现在写了什么。"><span aria-hidden="true">▧</span> 读取报告内容</button></div></div></div>`;
       messages.classList.add("empty-state");
       setBusy(false);
@@ -2171,7 +2189,12 @@
     });
 
     closeHistoryButton.addEventListener("click", () => historyDialog.close());
-    sidebarChooseDirectory.addEventListener("click", () => workingDirectoryButton.click());
+    sidebarChooseDirectory.addEventListener("click", () => requestDirectory());
+    $("#addDirectoryChoice").addEventListener("click", () => {
+      directoryDialog.close();
+      requestDirectory();
+    });
+    $("#closeDirectoryDialog").addEventListener("click", () => directoryDialog.close());
     sidebarDirectoryCollapse.addEventListener("click", () => {
       const collapsed = sidebarProject.dataset.collapsed !== "true";
       sidebarProject.dataset.collapsed = String(collapsed);
@@ -2185,6 +2208,13 @@
       void loadRunHistory(true);
     });
     refreshHistoryButton.addEventListener("click", () => {
+      void loadThreadHistory(true);
+      void loadRunHistory(true);
+    });
+    historyScope.addEventListener("change", () => {
+      historyScopeHint.textContent = historyScope.value === "legacy"
+        ? "旧版没有记录目录。打开旧会话并继续发送消息，即可归入当前目录。"
+        : "恢复会话后，可以从上次停下的位置继续。";
       void loadThreadHistory(true);
       void loadRunHistory(true);
     });
@@ -2271,12 +2301,18 @@
     ));
     sidebarRetryButton.addEventListener("click", () => retryConnectionButton.click());
 
-    workingDirectoryButton.addEventListener("click", () => {
+    function requestDirectory(path) {
+      if (sendButton.disabled) return;
       if (window.parent !== window) {
-        window.parent.postMessage({ type: "automation-agent.choose-working-directory" }, "*");
+        window.parent.postMessage({ type: "automation-agent.choose-working-directory", path }, window.location.origin);
       } else {
         addNotice("工作目录只能在桌面应用中选择。", true);
       }
+    }
+
+    workingDirectoryButton.addEventListener("click", () => {
+      if (savedDirectories.length > 1) directoryDialog.showModal();
+      else requestDirectory();
     });
 
     input.addEventListener("keydown", (event) => {
@@ -2301,7 +2337,7 @@
       window.addEventListener("message", (event) => {
         if (event.source !== window.parent || event.origin !== window.location.origin) return;
         if (event.data?.type === "automation-agent.working-directory") {
-          setWorkingDirectory(event.data.path);
+          setWorkingDirectory(event.data.path, event.data.directories);
           return;
         }
         if (event.data?.type !== "automation-agent.reconnect") return;
@@ -2328,7 +2364,7 @@
           }
           if (previousWasService) {
             if (activeRunId) {
-              closePendingApprovals("cancelled", "服务地址已切换；旧服务上的任务不会自动重发。");
+              closePendingApprovals();
               activeRunId = null;
               setBusy(false);
             }
