@@ -76,12 +76,30 @@ from ..context import check_cancelled
 # 客户端要完整结果的话，让它自己去查文件。
 RESULT_PREVIEW_LIMIT = 500
 _REPAIR_EXTENSIONS = frozenset({".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".c", ".h", ".cc", ".cpp", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php", ".cs", ".vue", ".svelte", ".html", ".css", ".scss", ".sass", ".less"})
+_REPAIR_BLOCKED_PARTS = frozenset({".github", ".gitlab", "alembic", "deploy", "deployment", "infra", "migrations", "migration", "terraform"})
+
+
+def _repair_payload(session: object | None) -> dict[str, str | None]:
+    """将已关闭的修复会话附到工具事件，供工作台立即展示终态。"""
+    status = getattr(session, "terminal_status", "") if session is not None else ""
+    return {
+        "repair_status": status or None,
+        "repair_message": getattr(session, "terminal_message", "") or None,
+    }
+
+
+def _close_repair(session: object | None, status: str, message: str) -> None:
+    """兼容最小上下文替身；生产 RepairSession 会保留第一个终态。"""
+    if session is not None and hasattr(session, "close"):
+        session.close(status, message)
 
 
 def _repair_error(ctx: object, name: str, args: dict[str, Any]) -> str:
     session = getattr(ctx, "repair_session", None)
     if session is None:
         return ""
+    if session.terminal_status:
+        return session.terminal_message or "当前受控修复已结束，不能继续调用工具。"
     if name == "edit_file":
         path = args.get("path")
         if session.attempts >= 3:
@@ -90,8 +108,11 @@ def _repair_error(ctx: object, name: str, args: dict[str, Any]) -> str:
             return "修复模式正在等待上一处编辑的批准或完成。"
         if session.edited_since_check:
             return "修复模式每次只允许一次编辑；请先复跑原检查。"
-        if not isinstance(path, str) or Path(path).suffix.lower() not in _REPAIR_EXTENSIONS:
+        if not isinstance(path, str):
             return "修复模式只允许修改源码、样式或测试文件。"
+        relative = Path(path)
+        if relative.suffix.lower() not in _REPAIR_EXTENSIONS or any(part.lower() in _REPAIR_BLOCKED_PARTS for part in relative.parts):
+            return "修复模式只允许修改源码、样式或测试文件，不能修改配置、依赖、迁移或部署文件。"
         return ""
     if name == "run_command":
         if session.attempts >= 3:
@@ -199,7 +220,7 @@ class EventBridgeMiddleware(AgentMiddleware):
         )
         repair_error = _repair_error(ctx, name, args)
         if repair_error:
-            self._emit({"type": "tool.error", "name": name, "call_id": call_id, "message": repair_error})
+            self._emit({"type": "tool.error", "name": name, "call_id": call_id, "message": repair_error, **_repair_payload(getattr(ctx, "repair_session", None))})
             return ToolMessage(content=repair_error, name=name, tool_call_id=call_id, status="error")
         session = getattr(ctx, "repair_session", None)
         if session is not None and name == "edit_file":
@@ -259,11 +280,19 @@ class EventBridgeMiddleware(AgentMiddleware):
                     message = "用户未批准本次工具调用，工具未执行。"
                 else:
                     message = "当前入口不支持单次授权，本次工具调用已拒绝。"
+                if session is not None and name in {"edit_file", "run_command"}:
+                    approval = getattr(ctx, "approval_results", {}).pop(call_id, "rejected")
+                    terminal = {
+                        "timed_out": ("timed_out", "修复已停止：编辑或检查审批超时。"),
+                        "cancelled": ("cancelled", "修复已停止：用户取消了审批。"),
+                    }.get(approval, ("rejected", "修复已停止：用户拒绝了编辑或检查。"))
+                    _close_repair(session, *terminal)
                 self._emit({
                     "type": "tool.error",
                     "name": name,
                     "call_id": call_id,
                     "message": message,
+                    **_repair_payload(session),
                 })
                 return ToolMessage(
                     content=message,
@@ -283,11 +312,14 @@ class EventBridgeMiddleware(AgentMiddleware):
         try:
             result = handler(request)
         except Exception as exc:
+            if session is not None and name in {"edit_file", "run_command"} and getattr(ctx, "cancel_event", None) is not None and ctx.cancel_event.is_set():
+                _close_repair(session, "cancelled", "修复已停止：用户取消了任务。")
             self._emit({
                 "type": "tool.error",
                 "name": name,
                 "call_id": call_id,
                 "message": f"{type(exc).__name__}: {exc}",
+                **_repair_payload(session),
             })
             # 继续往外抛 —— 中间件不吞异常。
             raise
@@ -299,11 +331,27 @@ class EventBridgeMiddleware(AgentMiddleware):
 
         duration_ms = int((time.perf_counter() - started) * 1000)
 
-        if session is not None and name == "edit_file" and getattr(result, "status", None) != "error":
-            session.edited_since_check = True
-        if session is not None and name == "run_command" and getattr(result, "status", None) != "error":
+        command_result = _command_result(ctx, call_id, result) if name == "run_command" else None
+        if session is not None and name == "edit_file":
+            edit_status = getattr(ctx, "edit_results", {}).pop(call_id, "failed")
+            if edit_status == "succeeded":
+                session.edited_since_check = True
+            elif edit_status == "conflicted":
+                _close_repair(session, "conflicted", "修复已停止：文件在审批期间发生变化。")
+            else:
+                _close_repair(session, "edit_failed", "修复已停止：编辑未成功写入文件。")
+        if session is not None and name == "run_command" and command_result is not None:
             session.attempts += 1
             session.edited_since_check = False
+            status = command_result["status"]
+            if status == "succeeded":
+                _close_repair(session, "succeeded", "检查通过，修复完成。")
+            elif status == "timed_out":
+                _close_repair(session, "timed_out", "修复已停止：原检查命令超时。")
+            elif status == "cancelled":
+                _close_repair(session, "cancelled", "修复已停止：用户取消了原检查。")
+            elif session.attempts >= 3:
+                _close_repair(session, "failed", "修复未完成：三次验证后原检查仍失败。")
 
         # 没抛异常，但重试中间件可能把失败包成了一条 error 状态的 ToolMessage。
         # 那种情况要报失败，不能报成功。
@@ -314,6 +362,7 @@ class EventBridgeMiddleware(AgentMiddleware):
                 "call_id": call_id,
                 "message": str(getattr(result, "content", "")),
                 "duration_ms": duration_ms,
+                **_repair_payload(session),
             })
             return result
 
@@ -324,7 +373,8 @@ class EventBridgeMiddleware(AgentMiddleware):
             "ok": True,
             "duration_ms": duration_ms,
             "result_preview": _preview(result),
-            "command_result": _command_result(ctx, call_id, result) if name == "run_command" else None,
+            "command_result": command_result,
+            **_repair_payload(session),
         })
         return result
 

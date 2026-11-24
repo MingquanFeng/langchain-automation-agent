@@ -217,6 +217,8 @@ class StreamConsumer:
 
         except Exception as exc:
             if isinstance(exc, TaskCancelledError) or self.cancel_event.is_set():
+                if ctx.repair_session is not None:
+                    ctx.repair_session.close("cancelled", "修复已停止：用户取消了任务。")
                 self._emit_terminal(RunCancelled(run_id=self.run_id, reason="用户取消"))
                 return
             # 模型调用失败（API 401、重试耗尽）等异常逃出消费循环。
@@ -235,11 +237,14 @@ class StreamConsumer:
             # 无流式正文时使用最终状态中的文本；模型异常已经走 run.error。
             output = _last_message_text(final_state.get("messages", []))
 
+        repair = ctx.repair_session
         self._emit_terminal(RunEnd(
             run_id=self.run_id,
             output=output,
             messages=len(final_state.get("messages", [])),
             duration_ms=duration_ms,
+            repair_status=repair.terminal_status or None if repair else None,
+            repair_message=repair.terminal_message or None if repair else None,
         ))
 
     def _emit_terminal(self, event: BaseEvent) -> None:

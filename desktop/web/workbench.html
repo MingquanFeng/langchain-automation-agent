@@ -1965,6 +1965,9 @@
           card.details.append(body);
         }
         dismissApproval(event);
+        if (event.repair_status) {
+          addNotice(event.repair_message || "受控修复已结束。", event.repair_status === "succeeded" ? "success" : "warning");
+        }
         if (event.name === "run_command" && event.command_result?.status === "failed") {
           card.repairSource = { runId: event.run_id, callId: event.call_id };
         }
@@ -1984,14 +1987,16 @@
         } else if (event.output) {
           addMessage("assistant", "Agent", event.output);
         }
-        addNotice(`完成 · ${event.duration_ms ?? 0} ms · ${event.messages ?? 0} 条消息`);
+        const repairDone = event.repair_status === "succeeded";
+        const repairStopped = Boolean(event.repair_status) && !repairDone;
+        addNotice(event.repair_message || `完成 · ${event.duration_ms ?? 0} ms · ${event.messages ?? 0} 条消息`, repairStopped ? "warning" : "success");
         closePendingApprovals();
         activeRunId = null;
         for (const card of toolCards.values()) {
           if (card.runId === event.run_id && card.repairSource) addRepairAction(card, card.repairSource);
         }
         setBusy(false);
-        finishCurrentTask("done", "任务已完成，可以继续安排下一项。");
+        finishCurrentTask(repairStopped ? "error" : "done", event.repair_message || (repairDone ? "检查通过，修复完成。" : "任务已完成，可以继续安排下一项。"));
         currentAssistantBubble = null;
         void loadSidebarThreads();
         input.focus();

@@ -460,7 +460,17 @@ def edit_file(
         })
         if change is None:
             return err
-    return _execute_prepared(change)
+    result = _execute_prepared(change)
+    # LangChain 会将普通字符串包装为成功的 ToolMessage。保存机器可读回执后，
+    # 修复状态才能由实际写入结果而不是 ToolMessage 形态驱动。
+    if context is not None and call_id:
+        if result.startswith("已编辑 "):
+            context.edit_results[call_id] = "succeeded"
+        elif "等待批准期间发生了变化" in result:
+            context.edit_results[call_id] = "conflicted"
+        else:
+            context.edit_results[call_id] = "failed"
+    return result
 
 
 @tool(parse_docstring=True)

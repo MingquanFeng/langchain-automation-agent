@@ -195,6 +195,7 @@ class RunManager:
             run_id=run_id,
             emit=consumer.emit_event,
             cancel_event=handle.cancel_event,
+            outcomes=ctx.approval_results,
         )
         handle.approval_broker = broker
         handle.consumer = consumer

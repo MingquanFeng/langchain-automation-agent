@@ -145,6 +145,10 @@ class ToolEnd(BaseEvent):
     # 受控开发命令附带机器可读终态，工作台不用解析展示文本判断失败。
     command_result: dict[str, Any] | None = None
 
+    # 受控修复由实际工具回执结束时，工作台不必猜测模型文本。
+    repair_status: str | None = None
+    repair_message: str | None = None
+
 
 class ToolError(BaseEvent):
     """工具执行失败。"""
@@ -164,6 +168,9 @@ class ToolError(BaseEvent):
     #
     # 失败时也要给 —— 用户关心的是「等了多久才失败」。
     duration_ms: int | None = None
+
+    repair_status: str | None = None
+    repair_message: str | None = None
 
 
 class ApprovalRequest(BaseEvent):
@@ -214,6 +221,9 @@ class RunEnd(BaseEvent):
 
     # 执行耗时，毫秒。
     duration_ms: int | None = None
+
+    repair_status: str | None = None
+    repair_message: str | None = None
 
 
 class RunCancelled(BaseEvent):

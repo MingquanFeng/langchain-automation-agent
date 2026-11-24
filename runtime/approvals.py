@@ -65,6 +65,7 @@ class ApprovalBroker:
         emit: Callable[[BaseEvent], None],
         cancel_event: threading.Event,
         timeout: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+        outcomes: dict[str, str] | None = None,
     ) -> None:
         # run_id：授权属于哪一次 Agent 执行，客户端应在应答中原样返回。
         self.run_id = run_id
@@ -77,6 +78,10 @@ class ApprovalBroker:
 
         # timeout：本次授权的最长等待秒数，便于测试时传入较短时限。
         self.timeout = timeout
+
+        # AgentContext 持有该映射。工具中间件在 request 返回后读取它，
+        # 从而区分拒绝、超时与取消，不能把三者都笼统当作“未批准”。
+        self.outcomes = outcomes if outcomes is not None else {}
 
         # call_id → _PendingApproval。只保留尚未完成的请求，不保存历史决定。
         self._pending: dict[str, _PendingApproval] = {}
@@ -92,12 +97,15 @@ class ApprovalBroker:
         """
         # 无 id 就无法与客户端应答配对；已取消的 run 也不能再发起等待。
         if not call_id or self.cancel_event.is_set():
+            if call_id:
+                self.outcomes[call_id] = "cancelled"
             return False
 
         pending = _PendingApproval()
         with self._turn:
             # 同一个 run 内 call_id 必须唯一；重复 id 无法安全地区分两次决定。
             if call_id in self._pending:
+                self.outcomes[call_id] = "failed"
                 return False
             self._pending[call_id] = pending
 
@@ -105,9 +113,11 @@ class ApprovalBroker:
             with self._turn:
                 while next(iter(self._pending)) != call_id:
                     if self.cancel_event.is_set() or pending.approved is not None:
+                        self.outcomes[call_id] = "cancelled" if self.cancel_event.is_set() else "rejected"
                         return False
                     self._turn.wait(0.1)
                 if self.cancel_event.is_set() or pending.approved is not None:
+                    self.outcomes[call_id] = "cancelled" if self.cancel_event.is_set() else "rejected"
                     return False
                 deadline = time.monotonic() + max(0.0, self.timeout)
                 pending.expires_at = deadline
@@ -127,11 +137,17 @@ class ApprovalBroker:
                         break
                     self._turn.wait(min(0.1, remaining))
                 if pending.approved is not None or self.cancel_event.is_set():
-                    return pending.approved is True and not self.cancel_event.is_set()
+                    if self.cancel_event.is_set():
+                        self.outcomes[call_id] = "cancelled"
+                        return False
+                    self.outcomes[call_id] = "approved" if pending.approved is True else "rejected"
+                    return pending.approved is True
             self.emit(ApprovalExpired(run_id=self.run_id, call_id=call_id))
+            self.outcomes[call_id] = "timed_out"
             return False
         except Exception:
             # 事件未能送达时按拒绝处理，finally 仍会交接到下一项。
+            self.outcomes[call_id] = "failed"
             return False
         finally:
             with self._turn:

@@ -51,6 +51,7 @@ def test_reject_and_duplicate_response_do_not_approve_request():
     assert not thread.is_alive()
     assert result["approved"] is False
     assert broker._pending == {}
+    assert broker.outcomes["call-1"] == "rejected"
 
 
 def test_expired_request_is_cleaned_and_late_response_is_rejected():
@@ -62,6 +63,7 @@ def test_expired_request_is_cleaned_and_late_response_is_rejected():
     assert event.call_id == "call-timeout"
     assert broker.respond("call-timeout", True) is False
     assert broker._pending == {}
+    assert broker.outcomes["call-timeout"] == "timed_out"
 
 
 def test_cancel_wakes_waiting_request_and_clears_it():
@@ -82,6 +84,8 @@ def test_cancel_wakes_waiting_request_and_clears_it():
     assert queued_result["approved"] is False
     assert emitted.empty()
     assert broker._pending == {}
+    assert broker.outcomes["call-cancel"] == "cancelled"
+    assert broker.outcomes["call-queued"] == "cancelled"
 
 
 def test_concurrent_calls_keep_decisions_separate():

@@ -66,6 +66,15 @@ class RepairSession:
     attempts: int = 0
     edited_since_check: bool = False
     edit_pending: bool = False
+    # 空字符串表示修复仍可继续。终态必须来自真实工具回执，不能由模型文本推断。
+    terminal_status: str = ""
+    terminal_message: str = ""
+
+    def close(self, status: str, message: str) -> None:
+        """写入第一个终态，避免后续模型调用覆盖真实的修复结论。"""
+        if not self.terminal_status:
+            self.terminal_status = status
+            self.terminal_message = message
 
 # 各取值的含义：
 #
@@ -198,3 +207,8 @@ class AgentContext:
     # 仅由桌面端“修复此检查”入口注入，不进入会话检查点。
     repair_session: RepairSession | None = field(default=None, repr=False, compare=False)
     command_results: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False, compare=False)
+    # edit_file 返回人类可读文本；这个映射保存实际文件操作终态，防止中间件把
+    # “文件已变化，未写入”误判为一次成功编辑。
+    edit_results: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
+    # 审批通道回填批准、拒绝、超时或取消，受控修复据此决定是否关闭。
+    approval_results: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
