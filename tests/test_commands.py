@@ -33,6 +33,7 @@ def test_preview_accepts_pytest_and_rejects_shell_and_outside_paths(command_work
     })
     assert not error
     assert preview["category"] == "python_test"
+    assert preview["argv"][:3] == [sys.executable, "-I", "-m"]
 
     _, shell_error = commands_mod.prepare_command_preview({
         "argv": ["sh", "-c", "pytest"], "cwd": ".", "timeout_seconds": 60,
@@ -73,6 +74,26 @@ def test_event_preview_rejects_invalid_command_before_approval(command_workspace
     )
     assert preview.error is not None
     assert "白名单" in preview.error
+
+
+def test_python_pytest_runs_in_isolated_mode(command_workspace):
+    """工作目录的 pytest.py 不能劫持 python -m pytest。"""
+    (command_workspace / "pytest.py").write_text(
+        "raise SystemExit('workspace module must not run')\n",
+        encoding="utf-8",
+    )
+
+    normalized, _, category = commands_mod._validate_argv(
+        [sys.executable, "-m", "pytest", "--version"], ".", 60,
+    )
+
+    assert category == "python_test"
+    assert normalized == [sys.executable, "-I", "-m", "pytest", "--version"]
+    status, _, output = commands_mod._run_process(
+        normalized, command_workspace, 60, AgentContext(),
+    )
+    assert status == "succeeded"
+    assert "workspace module must not run" not in output
 
 
 def test_run_command_records_audited_success(command_workspace, monkeypatch):
@@ -129,8 +150,6 @@ def test_repair_session_only_allows_source_and_three_validation_attempts():
     session.edit_pending = False
     session.attempts = 3
     assert "3 次上限" in _repair_error(context, "edit_file", {"path": "src/page.tsx"})
-
-
 def test_command_result_falls_back_to_controlled_tool_output():
     result = SimpleNamespace(content="命令失败（退出码 1）：\n诊断", status="success")
     assert _command_result(AgentContext(), "missing", result) == {"status": "failed", "exit_code": 1}
@@ -180,4 +199,4 @@ def test_process_timeout_and_cancellation_terminate_the_child_group(command_work
         commands_mod._run_process(
             [sys.executable, "-c", "import time; time.sleep(2)"],
             command_workspace, 10, context,
-        )
+        )  

@@ -111,7 +111,11 @@ def _validate_argv(argv: list[str], cwd: str, timeout_seconds: int) -> tuple[lis
             candidate = (resolved_cwd / arg).resolve()
             if not candidate.is_relative_to(root):
                 raise CommandValidationError("pytest 路径必须位于当前工作目录内。")
-        return argv, resolved_cwd, "python_test"
+        # `python -m pytest` 默认把 cwd 放在 sys.path[0]。Agent 若先获批
+        # 写入同名 pytest.py，就能借测试白名单执行任意代码。隔离模式忽略 cwd
+        # 与 PYTHONPATH，仍保留已安装的 pytest 和项目测试路径。
+        normalized = argv if command == "pytest" else [command, "-I", *argv[1:]]
+        return normalized, resolved_cwd, "python_test"
 
     if command == "npm" and len(argv) == 3 and argv[1] == "run":
         script = argv[2]
@@ -279,8 +283,9 @@ def run_command(
         timeout_seconds=timeout_seconds,
     )
     try:
+        normalized_argv, resolved_cwd, _ = _validate_argv(argv, cwd, timeout_seconds)
         status, exit_code, output = _run_process(
-            argv, _resolve_cwd(cwd), timeout_seconds, context,
+            normalized_argv, resolved_cwd, timeout_seconds, context,
         )
     except TaskCancelledError:
         audit_store.finish_command_execution(
