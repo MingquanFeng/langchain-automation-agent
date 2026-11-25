@@ -243,6 +243,14 @@ class StreamConsumer:
         if not output:
             # 无流式正文时使用最终状态中的文本；模型异常已经走 run.error。
             output = _last_message_text(final_state.get("messages", []))
+        if not output.strip():
+            # 内部权限提示不能代替模型的答复；正常结束流也不代表任务完成。
+            self._emit_terminal(RunError(
+                run_id=self.run_id,
+                message="模型未返回有效答复，无法确认任务完成。请重试或调整要求。",
+                recoverable=True,
+            ))
+            return
 
         repair = ctx.repair_session
         self._emit_terminal(RunEnd(
@@ -415,7 +423,12 @@ def _last_message_text(messages: list) -> str:
     （ContextInjectionMiddleware 每轮都插一条），那不是模型的输出。
     """
     for msg in reversed(messages):
+        # 只检查本轮消息，避免空回答时复用上一轮的成功结论。
+        if isinstance(msg, HumanMessage):
+            break
         if isinstance(msg, AIMessage):
+            if msg.name == "context_hint" or msg.tool_calls:
+                continue
             content = getattr(msg, "content", "")
             return content if isinstance(content, str) else ""
     return ""

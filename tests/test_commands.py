@@ -120,6 +120,8 @@ def test_run_command_records_audited_success(command_workspace, monkeypatch):
         runtime=runtime,
     )
     assert "命令完成" in result
+    assert '"-I", "-m", "pytest"' in result
+    assert "工作目录中的 pytest.py 不参与本次模块查找" in result
     assert records[0][1]["run_id"] == "run-command-test"
     assert records[1][2]["status"] == "succeeded"
     assert context.command_results["call-command-test"] == {"status": "succeeded", "exit_code": 0}
@@ -150,6 +152,47 @@ def test_repair_session_only_allows_source_and_three_validation_attempts():
     session.edit_pending = False
     session.attempts = 3
     assert "3 次上限" in _repair_error(context, "edit_file", {"path": "src/page.tsx"})
+def test_three_failed_repair_checks_stop_real_tool_chain(command_workspace):
+    """真实编辑与 pytest 连续失败三轮后，第四次编辑不得申请审批或落盘。"""
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+    from agent.graph import build_agent
+    from fakes import FakeModel
+
+    target = command_workspace / "tests" / "test_probe.py"
+    target.write_text("# attempt 0\ndef test_probe():\n    assert False\n", encoding="utf-8")
+    argv = [sys.executable, "-m", "pytest", "tests/test_probe.py", "-q"]
+    session = RepairSession(argv=argv, cwd=".", timeout_seconds=60, output_summary="failed")
+    approvals = []
+
+    def approve(name, call_id, args):
+        approvals.append(name)
+        return True
+
+    replies = []
+    for attempt in range(1, 5):
+        replies.append(AIMessage(content="", tool_calls=[{
+            "name": "edit_file", "id": f"edit-{attempt}", "type": "tool_call",
+            "args": {"path": "tests/test_probe.py", "old_text": f"# attempt {attempt - 1}",
+                     "new_text": f"# attempt {attempt}"},
+        }]))
+        replies.append(AIMessage(content="", tool_calls=[{
+            "name": "run_command", "id": f"check-{attempt}", "type": "tool_call",
+            "args": {"argv": argv, "cwd": ".", "timeout_seconds": 60},
+        }]))
+    replies.append(AIMessage(content="三次验证仍失败，停止修复。"))
+    agent = build_agent(model=FakeModel(messages=iter(replies)), checkpointer=InMemorySaver())
+    agent.invoke(
+        {"messages": [HumanMessage(content="修复测试，最多三轮。")]},
+        {"configurable": {"thread_id": "three-failed-checks"}},
+        context=AgentContext(allow_write=False, repair_session=session, approval_handler=approve),
+    )
+    assert session.attempts == 3
+    assert session.terminal_status == "failed"
+    assert approvals == ["edit_file", "run_command"] * 3
+    assert target.read_text(encoding="utf-8").startswith("# attempt 3\n")
+
+
 def test_command_result_falls_back_to_controlled_tool_output():
     result = SimpleNamespace(content="命令失败（退出码 1）：\n诊断", status="success")
     assert _command_result(AgentContext(), "missing", result) == {"status": "failed", "exit_code": 1}

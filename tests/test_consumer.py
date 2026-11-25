@@ -38,7 +38,7 @@ from agent.context import AgentContext
 from agent.graph import build_agent
 from fakes import FakeModel
 from langgraph.checkpoint.memory import InMemorySaver
-from runtime.consumer import StreamConsumer
+from runtime.consumer import StreamConsumer, _last_message_text
 from runtime.events import RunCancelled, RunEnd, RunError
 
 
@@ -105,6 +105,43 @@ def _make_agent(*responses):
 
 
 # ---------- 正常流程 ----------
+
+
+def test_final_text_does_not_reuse_internal_hint_or_previous_answer():
+    """空回答不能回退到权限提示或上一轮已完成的回复。"""
+    messages = [
+        AIMessage(content="上一轮已完成"),
+        HumanMessage(content="删除 pytest.py"),
+        AIMessage(content="内部审批提示", name="context_hint"),
+    ]
+    assert _last_message_text(messages) == ""
+    messages.append(AIMessage(content="当前不支持删除文件，文件未删除。"))
+    assert _last_message_text(messages) == "当前不支持删除文件，文件未删除。"
+
+
+def test_empty_model_answer_emits_error_instead_of_success():
+    """只有内部提示和空模型答复时，桌面端必须收到未完成终态。"""
+    class EmptyStreamAgent:
+        def stream(self, *args, **kwargs):
+            # 直接模拟供应商正常结束但没有正文，避免假模型自身重试耗尽。
+            yield "values", {"messages": [
+                HumanMessage(content="删除 pytest.py"),
+                AIMessage(content="内部审批提示", name="context_hint"),
+                AIMessage(content=""),
+            ]}
+
+    async def scenario():
+        queue = asyncio.Queue(maxsize=64)
+        agent = EmptyStreamAgent()
+        thread = _run_consumer(agent, queue, asyncio.get_running_loop())
+        events = await _collect(queue)
+        thread.join(timeout=5)
+        return events
+
+    events = asyncio.run(scenario())
+    assert isinstance(events[-1], RunError)
+    assert "模型未返回有效答复" in events[-1].message
+    assert not any(isinstance(event, RunEnd) for event in events)
 
 
 def test_normal_run_emits_events_in_order():

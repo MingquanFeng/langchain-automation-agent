@@ -306,7 +306,19 @@ def run_command(
     )
     record_result(status, exit_code)
     label = {"succeeded": "完成", "failed": "失败", "timed_out": "超时"}[status]
-    return f"命令{label}（退出码 {exit_code}）：\n{output or '（无输出）'}"
+    # 模型只看到工具结果，不一定能看到审批预览。把实际执行参数一并返回，
+    # 避免它按原始请求解释自动加入 -I 后的模块查找行为。
+    execution = json.dumps(preview["argv"], ensure_ascii=False)
+    isolation = (
+        "\n隔离说明：Python -I 忽略当前目录、PYTHONPATH 和用户 site-packages；"
+        "工作目录中的 pytest.py 不参与本次模块查找。"
+        if "-I" in normalized_argv else ""
+    )
+    return (
+        f"命令{label}（退出码 {exit_code}）：\n"
+        f"实际执行参数：{execution}\n工作目录：{preview['cwd']}{isolation}\n"
+        f"输出：\n{output or '（无输出）'}"
+    )
 
 
 COMMAND_TOOLS = [run_command]

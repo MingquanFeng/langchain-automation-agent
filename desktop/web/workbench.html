@@ -1098,7 +1098,7 @@
     }
 
     function setTaskState(state, description) {
-      const stateLabels = { idle: "空闲中", connecting: "连接中", running: "执行中", cancelling: "正在取消", done: "已完成", cancelled: "已取消", error: "需检查" };
+      const stateLabels = { idle: "空闲中", connecting: "连接中", running: "执行中", cancelling: "正在取消", done: "本轮结束", cancelled: "已取消", error: "需检查" };
       const stateIcons = { idle: "✦", connecting: "◌", running: "↗", cancelling: "◌", done: "✓", cancelled: "Ⅱ", error: "!" };
       taskStatusCard.dataset.state = state;
       taskStateBadge.textContent = stateLabels[state] || "空闲中";
@@ -1152,7 +1152,7 @@
 
     const runStatusLabels = {
       running: "执行中",
-      succeeded: "已完成",
+      succeeded: "本轮结束",
       failed: "失败",
       cancelled: "已取消",
       interrupted: "已中断",
@@ -1705,7 +1705,7 @@
         const title = document.createElement("strong");
         title.textContent = task.instruction;
         const meta = document.createElement("small");
-        const labels = { connecting: "正在连接", running: "执行中", cancelling: "正在取消", done: "已完成", cancelled: "已取消", error: "未完成" };
+        const labels = { connecting: "正在连接", running: "执行中", cancelling: "正在取消", done: "本轮结束", cancelled: "已取消", error: "未完成" };
         meta.textContent = `${labels[task.state] || "任务"} · ${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(task.createdAt)}`;
         copy.append(title, meta);
         item.append(mark, copy);
@@ -1989,14 +1989,15 @@
         }
         const repairDone = event.repair_status === "succeeded";
         const repairStopped = Boolean(event.repair_status) && !repairDone;
-        addNotice(event.repair_message || `完成 · ${event.duration_ms ?? 0} ms · ${event.messages ?? 0} 条消息`, repairStopped ? "warning" : "success");
+        addNotice(event.repair_message || `本轮结束 · ${event.duration_ms ?? 0} ms · ${event.messages ?? 0} 条消息`, repairStopped ? "warning" : "success");
         closePendingApprovals();
         activeRunId = null;
         for (const card of toolCards.values()) {
           if (card.runId === event.run_id && card.repairSource) addRepairAction(card, card.repairSource);
         }
         setBusy(false);
-        finishCurrentTask(repairStopped ? "error" : "done", event.repair_message || (repairDone ? "检查通过，修复完成。" : "任务已完成，可以继续安排下一项。"));
+        // run.end 仅表示模型结束本轮，任务是否达成要以答复和工具结果为准。
+        finishCurrentTask(repairStopped ? "error" : "done", event.repair_message || (repairDone ? "检查通过，修复完成。" : "本轮运行已结束，请查看答复和工具执行结果。"));
         currentAssistantBubble = null;
         void loadSidebarThreads();
         input.focus();
