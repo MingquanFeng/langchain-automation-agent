@@ -141,7 +141,50 @@ def test_empty_model_answer_emits_error_instead_of_success():
     events = asyncio.run(scenario())
     assert isinstance(events[-1], RunError)
     assert "模型未返回有效答复" in events[-1].message
+    assert events[-1].recoverable is False
     assert not any(isinstance(event, RunEnd) for event in events)
+
+    # 把实际终态交给工作台的真实事件分支执行，避免只测后端类型、
+    # 却漏掉 recoverable 语义导致前端永远保持运行中的回归。
+    import subprocess
+    script = r'''
+const fs = require("node:fs");
+const assert = require("node:assert/strict");
+const html = fs.readFileSync("desktop/web/workbench.html", "utf8");
+const handler = html.slice(html.indexOf("    function showEvent(event) {"),
+                           html.indexOf("    function connect() {"));
+let activeRunId = "run-consumer", currentAssistantBubble = {};
+let state = "running", approvalsClosed = false, recoveryRequest = 0;
+const input = { disabled: true, focus() {} };
+const sendButton = { disabled: true, textContent: "运行中…" };
+const newChatButton = {}, workingDirectoryButton = {}, sidebarChooseDirectory = {};
+const cancelButton = { classList: { toggle() {} } };
+const document = { querySelectorAll() { return []; } };
+function addNotice() {}
+function closePendingApprovals() { approvalsClosed = true; }
+function finishCurrentTask(value) { state = value; }
+function loadSidebarThreads() {}
+eval(html.slice(html.indexOf("    function setBusy(busy) {"),
+                html.indexOf("    function scrollToBottom() {")));
+eval(handler);
+const event = JSON.parse(fs.readFileSync(0, "utf8"));
+// 非终态警告不能打断正在运行的任务。
+showEvent({...event, recoverable: true});
+assert.equal(sendButton.disabled, true);
+assert.equal(activeRunId, "run-consumer");
+showEvent(event);
+assert.equal(sendButton.disabled, false);
+assert.equal(sendButton.textContent, "发送 ↑");
+assert.equal(input.disabled, false);
+assert.equal(activeRunId, null);
+assert.equal(state, "error");
+assert.equal(approvalsClosed, true);
+assert.equal(currentAssistantBubble, null);
+'''
+    subprocess.run(
+        ["node", "-e", script], input=events[-1].model_dump_json(), text=True,
+        cwd=Path(__file__).resolve().parent.parent, check=True, capture_output=True,
+    )
 
 
 def test_normal_run_emits_events_in_order():

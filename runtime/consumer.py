@@ -248,7 +248,9 @@ class StreamConsumer:
             self._emit_terminal(RunError(
                 run_id=self.run_id,
                 message="模型未返回有效答复，无法确认任务完成。请重试或调整要求。",
-                recoverable=True,
+                # recoverable=True 专用于不结束运行的协议警告。
+                # 空答复已经结束消费循环，必须让客户端释放忙碌状态。
+                recoverable=False,
             ))
             return
 
