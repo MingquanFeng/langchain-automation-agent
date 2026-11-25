@@ -156,34 +156,17 @@ class ContextInjectionMiddleware(AgentMiddleware):
     对应课件 09 章 4.1 节（courseware/langChain/尚硅谷-09-上下文与记忆.pdf）。区别是课件用 before_model 提前退出，
     这里用 wrap_model_call 改写请求的 system prompt，不中断流程。
 
-    两种钩子各司其职：
-        before_model：只读模式下提前给模型一句提醒。
-        wrap_model_call：把上下文信息追加到系统提示词末尾。
+    wrap_model_call 把上下文信息追加到系统提示词末尾。
+    权限提示不再作为 AIMessage 插入历史，避免供应商将它当作已完成的回答。
     """
 
     def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
         """
-        模型调用之前，只读模式下先提醒一句。
+        保留兼容钩子，但不再向对话注入助手消息。
 
-        返回的消息会进入消息历史，
-        模型下一轮就能看到「这轮不能写」，
-        减少它去尝试写操作再被拦的来回。
+        旧实现会在用户消息后插入 context_hint，部分兼容模型因此返回空正文。
+        权限由 wrap_model_call 的系统上下文传达，实际执行仍由工具守卫控制。
         """
-        ctx = _ctx(runtime)
-        if not ctx.allow_write:
-            notice = (
-                "（提示：写入或外部操作需要对具体工具调用单独授权；未授权的操作不会执行。）"
-                if ctx.approval_handler is not None
-                else "（提示：本轮为只读模式，任何写操作都会被拒绝。）"
-            )
-            return {
-                "messages": [
-                    # name 让持久化会话恢复层能识别内部提示，避免把它当成
-                    # Agent 对用户的正式回答重新显示。历史旧数据还会由服务端
-                    # 按固定文本兼容过滤。
-                    AIMessage(content=notice, name="context_hint")
-                ]
-            }
         return None
 
     def wrap_model_call(self, request, handler):
@@ -224,7 +207,17 @@ class ContextInjectionMiddleware(AgentMiddleware):
         # 否则原提示词会被冲掉 ——
         # 模型就不知道自己该怎么扮演了。
         new_request = request.override(
-            system_message=SystemMessage(content=(content or "") + extra)
+            system_message=SystemMessage(content=(content or "") + extra),
+            # 旧会话仍有内部提示；仅过滤本次模型请求，不改持久化历史。
+            # 保留带 tool_calls 的消息，避免破坏调用与结果的协议配对。
+            messages=[
+                message for message in request.messages
+                if not (
+                    isinstance(message, AIMessage)
+                    and message.name == "context_hint"
+                    and not message.tool_calls
+                )
+            ],
         )
         return handler(new_request)
 

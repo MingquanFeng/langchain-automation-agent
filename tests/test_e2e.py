@@ -321,10 +321,13 @@ def test_context_injected_into_system_prompt():
 
     model = Capture(messages=iter([AIMessage(content="ok")]))
     agent = build_agent(model=model, checkpointer=InMemorySaver())
-    agent.invoke(
-        {"messages": [HumanMessage(content="hi")]},
+    result = agent.invoke(
+        {"messages": [
+            AIMessage(content="旧内部权限提示", name="context_hint"),
+            HumanMessage(content="hi"),
+        ]},
         {"configurable": {"thread_id": "t-prompt"}},
-        context=AgentContext(task_name="prompt-test", allow_write=True),
+        context=AgentContext(task_name="prompt-test", allow_write=False),
     )
     assert model.seen, "模型没收到任何消息"
     joined = "\n".join(model.seen)
@@ -336,6 +339,11 @@ def test_context_injected_into_system_prompt():
     assert "普通进度和最终结果直接回复当前聊天" in joined
     assert "只有用户明确要求" in joined
     assert "成功后立刻汇报并停止调用工具" in joined
+    assert "写权限：禁止" in joined
+    assert "旧内部权限提示" not in joined
+    assert model.seen[-1] == "hi"
+    # 持久化历史保留原记录，但本次不能再新增助手权限提示。
+    assert sum(getattr(m, "name", None) == "context_hint" for m in result["messages"]) == 1
 
 
 def test_notification_tool_descriptions_require_explicit_user_request():
