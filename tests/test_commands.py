@@ -46,6 +46,51 @@ def test_preview_accepts_pytest_and_rejects_shell_and_outside_paths(command_work
     assert "工作目录内" in path_error
 
 
+@pytest.mark.parametrize("invalid_first", [True, False])
+def test_single_command_blocks_retries_and_resets_each_turn(command_workspace, monkeypatch, invalid_first):
+    """首个调用校验失败或执行失败后，换解释器及额外探测均不执行。"""
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+    from agent.graph import build_agent
+    from fakes import FakeModel
+
+    processes, approvals = [], []
+
+    def run_process(argv, *args):
+        processes.append(argv)
+        return "failed", 1, "No module named pytest"
+
+    def approve(name, call_id, args):
+        approvals.append(call_id)
+        return True
+
+    monkeypatch.setattr(commands_mod, "_run_process", run_process)
+    first = ["python3", "-m", "-m", "pytest", "--version"] if invalid_first else ["python3", "-m", "pytest", "--version"]
+    responses = []
+    for turn in range(2):
+        for index, (name, args) in enumerate([
+            ("run_command", {"argv": first}),
+            ("run_command", {"argv": ["python", "-m", "pytest", "--version"]}),
+            ("list_files", {}),
+        ]):
+            responses.append(AIMessage(content="", tool_calls=[{
+                "name": name, "args": args, "id": f"once-{turn}-{index}", "type": "tool_call",
+            }]))
+        responses.append(AIMessage(content="首次尝试失败，已停止。"))
+    agent = build_agent(model=FakeModel(messages=iter(responses)), checkpointer=InMemorySaver())
+    ctx = AgentContext(allow_write=False, approval_handler=approve)
+    for turn in range(2):
+        result = agent.invoke(
+            {"messages": [HumanMessage(content="只运行一次 python3 -m pytest --version。失败后停止。 ")]},
+            {"configurable": {"thread_id": "single-command"}}, context=ctx,
+        )
+        replies = {m.tool_call_id: m for m in result["messages"] if isinstance(m, ToolMessage)}
+        for index in (1, 2):
+            assert "禁止继续调用工具" in replies[f"once-{turn}-{index}"].content
+        assert len(processes) == (0 if invalid_first else turn + 1)
+        assert len(approvals) == len(processes)
+
+
 def test_preview_only_allows_declared_node_scripts_and_redacts_arguments(command_workspace):
     (command_workspace / "package.json").write_text(
         '{"scripts":{"test":"vitest run","deploy":"dangerous","format:check":"prettier --check ."}}',

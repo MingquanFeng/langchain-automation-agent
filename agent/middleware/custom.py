@@ -23,6 +23,7 @@ from __future__ import annotations
 
 # Any：typing 的任意类型标注，用于描述钩子的返回值。
 from typing import Any
+import re
 
 # AgentMiddleware：所有自定义中间件的基类。
 # AgentState：钩子拿到的状态对象，state["messages"] 是消息列表。
@@ -31,7 +32,7 @@ from langchain.agents.middleware import AgentMiddleware, AgentState
 # AIMessage：模型的输出消息。
 # SystemMessage：系统提示词消息。
 # ToolMessage：工具执行结果消息。
-from langchain.messages import AIMessage, SystemMessage, ToolMessage
+from langchain.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 # Runtime：LangGraph 的运行时对象，
 # runtime.context 就是 invoke 时传进来的 AgentContext。
@@ -160,6 +161,16 @@ class ContextInjectionMiddleware(AgentMiddleware):
     权限提示不再作为 AIMessage 插入历史，避免供应商将它当作已完成的回答。
     """
 
+    def before_agent(self, state: AgentState, runtime: Runtime) -> None:
+        """从本轮用户指令启用单次命令约束，不继承上轮已消耗的次数。"""
+        ctx = _ctx(runtime)
+        latest = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
+        instruction = latest.content if latest is not None and isinstance(latest.content, str) else ""
+        ctx.single_command = ctx.repair_session is None and bool(re.search(
+            r"(?:只|仅)(?:运行|执行)(?:一|1)次", instruction,
+        ))
+        ctx.command_attempted = False
+
     def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
         """
         保留兼容钩子，但不再向对话注入助手消息。
@@ -208,6 +219,9 @@ class ContextInjectionMiddleware(AgentMiddleware):
         # 模型就不知道自己该怎么扮演了。
         new_request = request.override(
             system_message=SystemMessage(content=(content or "") + extra),
+            # 首次尝试结束后不再给模型工具，要求它直接汇报。
+            # 执行层仍会拦截忽略此工具清单的模型或并行调用。
+            tools=[] if ctx.single_command and ctx.command_attempted else request.tools,
             # 旧会话仍有内部提示；仅过滤本次模型请求，不改持久化历史。
             # 保留带 tool_calls 的消息，避免破坏调用与结果的协议配对。
             messages=[

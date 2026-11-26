@@ -214,6 +214,17 @@ class EventBridgeMiddleware(AgentMiddleware):
         runtime = getattr(request, "runtime", None)
         ctx = getattr(runtime, "context", None)
         check_cancelled(ctx)
+        if getattr(ctx, "single_command", False):
+            # 在参数校验与审批之前占用名额，失败也不得换解释器重试。
+            # 同一模型响应可并行请求多个工具，因此检查与占用必须原子化。
+            with ctx.command_attempt_lock:
+                blocked = ctx.command_attempted
+                if name == "run_command" and not blocked:
+                    ctx.command_attempted = True
+            if blocked:
+                message = "本轮单次命令已尝试，禁止继续调用工具或更换解释器重试；请直接报告首次尝试结果。"
+                self._emit({"type": "tool.error", "name": name, "call_id": call_id, "message": message})
+                return ToolMessage(content=message, name=name, tool_call_id=call_id, status="error")
         decision = decide_tool_permission(
             name,
             allow_write=bool(getattr(ctx, "allow_write", False)),

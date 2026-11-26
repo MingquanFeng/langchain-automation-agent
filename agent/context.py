@@ -207,6 +207,11 @@ class AgentContext:
     # 仅由桌面端“修复此检查”入口注入，不进入会话检查点。
     repair_session: RepairSession | None = field(default=None, repr=False, compare=False)
     command_results: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False, compare=False)
+    # 明确要求单次命令时，校验失败、审批拒绝也消耗尝试次数。
+    # 锁覆盖并行工具节点，避免两个调用同时通过检查；每轮由中间件重置。
+    single_command: bool = field(default=False, repr=False, compare=False)
+    command_attempted: bool = field(default=False, repr=False, compare=False)
+    command_attempt_lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
     # edit_file 返回人类可读文本；这个映射保存实际文件操作终态，防止中间件把
     # “文件已变化，未写入”误判为一次成功编辑。
     edit_results: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
