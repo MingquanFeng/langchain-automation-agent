@@ -196,6 +196,18 @@
     .activity-tool { color: #45546a; font: 600 10px var(--mono); }
     .activity-meta { margin-left: auto; color: #8b95a4; font: 10px var(--mono); }
     .activity-body { padding: 0 11px 10px; color: #687589; font: 10px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .tool-record-group { margin: -9px 0 18px 37px; animation: arrive .2s ease-out both; }
+    .tool-record-group > details { max-width: 680px; border: 1px solid #e3e8f1; border-radius: 11px; background: #fff; }
+    .tool-record-summary { display: flex; align-items: center; gap: 8px; padding: 9px 11px; cursor: pointer; color: #58677e; font-size: 10px; list-style: none; }
+    .tool-record-summary::-webkit-details-marker { display: none; }
+    .tool-record-summary::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: #8291a9; }
+    .tool-record-group[data-state="running"] .tool-record-summary::before { background: var(--blue); animation: pulse 1.2s infinite; }
+    .tool-record-group[data-state="error"] .tool-record-summary::before { background: var(--amber); }
+    .tool-record-title { color: #45546a; font-weight: 650; }
+    .tool-record-meta { margin-left: auto; color: #8b95a4; font: 10px var(--mono); }
+    .tool-record-list { display: grid; gap: 7px; padding: 0 8px 8px; }
+    .tool-record-list .activity { margin: 0; animation: none; }
+    .tool-record-list .activity details { max-width: none; }
     /* 授权卡片单独强调一次具体操作；琥珀色边线表示需要用户判断。 */
     .approval-card { display: flex; flex: 0 1 auto; flex-direction: column; min-height: 0; max-height: 42vh; margin: 0 14px 8px; border: 1px solid #ead9c3; border-left: 3px solid var(--amber); border-radius: 12px; background: #fffdf9; overflow: hidden; }
     .approval-card[hidden] { display: none; }
@@ -996,6 +1008,7 @@
     let currentTask = null;
     const recentTasks = [];
     const toolCards = new Map();
+    const toolRecordGroups = new Map();
     const pendingApprovals = new Map();
     const approvalPanel = $("#approvalPanel");
     let currentWorkingDirectory = "";
@@ -1809,6 +1822,7 @@
         currentTask = null;
         currentAssistantBubble = null;
         toolCards.clear();
+        toolRecordGroups.clear();
         closePendingApprovals();
         renderExecutionTodos([]);
         executionTodoSummary.textContent = "未创建";
@@ -2062,6 +2076,47 @@
       return notice;
     }
 
+    function getToolRecordGroup(event) {
+      let group = toolRecordGroups.get(event.run_id);
+      if (group) return group;
+      const container = document.createElement("section");
+      container.className = "tool-record-group";
+      container.dataset.state = "running";
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.className = "tool-record-summary";
+      const title = document.createElement("span");
+      title.className = "tool-record-title";
+      title.textContent = "工具调用记录";
+      const meta = document.createElement("span");
+      meta.className = "tool-record-meta";
+      meta.textContent = "执行中";
+      summary.append(title, meta);
+      const list = document.createElement("div");
+      list.className = "tool-record-list";
+      details.append(summary, list);
+      container.append(details);
+      messages.append(container);
+      group = { container, details, list, meta, count: 0, active: 0, failed: 0 };
+      toolRecordGroups.set(event.run_id, group);
+      return group;
+    }
+
+    function updateToolRecordGroup(group) {
+      group.container.dataset.state = group.active ? "running" : group.failed ? "error" : "done";
+      group.meta.textContent = group.active
+        ? `${group.count} 项 · ${group.active} 项执行中`
+        : `${group.count} 项 · ${group.failed ? "有失败" : "已完成"}`;
+    }
+
+    function finishToolRecordGroup(runId, status) {
+      const group = toolRecordGroups.get(runId);
+      if (!group) return;
+      group.active = 0;
+      group.container.dataset.state = status === "error" ? "error" : "done";
+      group.meta.textContent = `${group.count} 项 · ${status === "cancelled" ? "已取消" : status === "error" ? "已中断" : group.failed ? "有失败" : "已完成"}`;
+    }
+
     function addToolActivity(event) {
       const activity = document.createElement("div");
       activity.className = "activity";
@@ -2083,8 +2138,12 @@
         details.append(args);
       }
       activity.append(details);
-      messages.append(activity);
-      toolCards.set(event.call_id, { activity, details, meta, runId: event.run_id, args: event.args || {} });
+      const group = getToolRecordGroup(event);
+      group.count++;
+      group.active++;
+      updateToolRecordGroup(group);
+      group.list.append(activity);
+      toolCards.set(event.call_id, { activity, details, meta, runId: event.run_id, args: event.args || {}, recordGroup: group });
       currentAssistantBubble = null;
       scrollToBottom();
     }
@@ -2222,6 +2281,12 @@
         card.meta.textContent = event.type === "tool.error"
           ? `失败${event.duration_ms == null ? "" : ` · ${event.duration_ms} ms`}`
           : `完成 · ${event.duration_ms ?? 0} ms`;
+        if (card.recordGroup && !card.recordFinished) {
+          card.recordFinished = true;
+          card.recordGroup.active = Math.max(0, card.recordGroup.active - 1);
+          if (event.type === "tool.error") card.recordGroup.failed++;
+          updateToolRecordGroup(card.recordGroup);
+        }
         const result = event.result_preview || event.message;
         if (result) {
           const body = document.createElement("div");
@@ -2244,6 +2309,7 @@
         }
         dismissApproval(event);
       } else if (event.type === "run.end") {
+        finishToolRecordGroup(event.run_id, "done");
         if (currentAssistantBubble) {
           setMessageContent(currentAssistantBubble, event.output || currentAssistantBubble.dataset.rawText || "（没有文本输出）", true);
         } else if (event.output) {
@@ -2262,6 +2328,7 @@
         void loadSidebarThreads();
         input.focus();
       } else if (event.type === "run.cancelled") {
+        finishToolRecordGroup(event.run_id, "cancelled");
         addNotice("本轮已取消");
         closePendingApprovals();
         activeRunId = null;
@@ -2278,6 +2345,7 @@
           event.recoverable ? "warning" : "error",
         );
         if (!event.recoverable && (!event.run_id || event.run_id === activeRunId)) {
+          finishToolRecordGroup(event.run_id || activeRunId, "error");
           closePendingApprovals();
           activeRunId = null;
           setBusy(false);
@@ -2409,6 +2477,7 @@
       currentTask = null;
       currentAssistantBubble = null;
       toolCards.clear();
+      toolRecordGroups.clear();
       renderExecutionTodos([]);
       executionTodoSummary.textContent = "未创建";
       executionTodoEmpty.textContent = "复杂任务拆解后，步骤会显示在这里。";
