@@ -147,6 +147,48 @@ def test_tool_error_is_emitted_once():
     assert "工具炸了" in err_events[0].message
 
 
+def test_failed_command_result_is_preserved_on_tool_error(monkeypatch):
+    """失败命令走 tool.error 时仍要保留状态，工作台才能显示修复入口。"""
+    from langchain_core.messages import ToolMessage
+
+    context = AgentContext(allow_write=True, single_command=False)
+    monkeypatch.setattr("agent.middleware.events.decide_tool_permission", lambda *args, **kwargs: "allow")
+    monkeypatch.setattr(
+        "agent.middleware.events.prepare_approval_preview",
+        lambda *args, **kwargs: type("_Preview", (), {"args": {}, "error": None})(),
+    )
+    context.command_results["failed-command"] = {"status": "failed", "exit_code": 1}
+
+    class _Req:
+        tool_call = {"name": "run_command", "args": {"argv": ["npm", "test"]}, "id": "failed-command"}
+        tool = None
+        state = {}
+        runtime = type("_Runtime", (), {"context": context})()
+
+    events = []
+    middleware = EventBridgeMiddleware()
+    middleware._emit = events.append
+
+    def failed_command(request):
+        return ToolMessage(
+            content="命令失败（退出码 1）",
+            name="run_command",
+            tool_call_id="failed-command",
+            status="error",
+        )
+
+    middleware.wrap_tool_call(_Req(), failed_command)
+
+    normalizer = StreamNormalizer(run_id="run-failed")
+    normalized = [
+        event
+        for payload in events
+        for event in normalizer.normalize("custom", payload)
+    ]
+    error = next(event for event in normalized if isinstance(event, ToolError))
+    assert error.command_result == {"status": "failed", "exit_code": 1}
+
+
 # ---------- 边界：发不出去也不该崩 ----------
 
 

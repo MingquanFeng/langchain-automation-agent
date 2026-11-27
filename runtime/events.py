@@ -169,6 +169,9 @@ class ToolError(BaseEvent):
     # 失败时也要给 —— 用户关心的是「等了多久才失败」。
     duration_ms: int | None = None
 
+    # 受控开发命令附带机器可读终态，供工作台展示失败检查的修复入口。
+    command_result: dict[str, Any] | None = None
+
     repair_status: str | None = None
     repair_message: str | None = None
 

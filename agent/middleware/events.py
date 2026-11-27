@@ -405,6 +405,7 @@ class EventBridgeMiddleware(AgentMiddleware):
                 "call_id": call_id,
                 "message": str(getattr(result, "content", "")),
                 "duration_ms": duration_ms,
+                "command_result": command_result,
                 **_repair_payload(session),
             })
             return result
