@@ -402,6 +402,12 @@
         showSettings(false);
         requestWorkbenchReconnect(++attemptId);
       } else if (message?.type === "automation-agent.workbench.connection") {
+        if (switchingDirectory && message.state !== "connected") {
+          // 旧 WebSocket 在目录切换时必然断开；此时侧车正在重启，不是可重试的最终失败。
+          setConnection("connecting", "正在切换工作目录", currentOrigin);
+          setStatus("connecting", "正在启动新工作目录的 Agent 服务并重连；不会重发任务。");
+          return;
+        }
         setConnection(message.state, message.label || "Agent 状态已更新", currentOrigin);
         if (message.state === "connected") {
           clearTimeout(frameTimer);
