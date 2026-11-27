@@ -77,6 +77,8 @@ from ..context import TaskCancelledError, check_cancelled
 RESULT_PREVIEW_LIMIT = 500
 _REPAIR_EXTENSIONS = frozenset({".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".c", ".h", ".cc", ".cpp", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php", ".cs", ".vue", ".svelte", ".html", ".css", ".scss", ".sass", ".less"})
 _REPAIR_BLOCKED_PARTS = frozenset({".github", ".gitlab", "alembic", "deploy", "deployment", "infra", "migrations", "migration", "terraform"})
+# 明确标记为故意失败的 QA 夹具没有可修复缺陷；防止模型把夹具改绿或绕改其他文件。
+_INTENTIONAL_FAILURE_MARKERS = ("QA 固定失败：用于验证三轮上限", "intentional failure fixture for repair limit")
 
 
 def _repair_payload(session: object | None) -> dict[str, str | None]:
@@ -101,6 +103,10 @@ def _repair_error(ctx: object, name: str, args: dict[str, Any]) -> str:
     if session.terminal_status:
         return session.terminal_message or "当前受控修复已结束，不能继续调用工具。"
     if name == "edit_file":
+        output = session.output_summary.casefold()
+        # 此规则依据失败命令的原始输出，在生成审批请求前拦截所有编辑目标。
+        if any(marker.casefold() in output for marker in _INTENTIONAL_FAILURE_MARKERS):
+            return "原检查输出标记为故意失败的 QA 夹具，禁止编辑任何文件来消除该失败。"
         path = args.get("path")
         if session.attempts >= 3:
             return "修复验证已达到 3 次上限，不能再编辑。"
@@ -233,7 +239,7 @@ class EventBridgeMiddleware(AgentMiddleware):
         if repair_error:
             repair_session = getattr(ctx, "repair_session", None)
             if repair_session is not None:
-                _close_repair(repair_session, "policy_blocked", "修复已停止：工具调用超出受控修复范围。")
+                _close_repair(repair_session, "policy_blocked", f"修复已停止：{repair_error}")
             self._emit({"type": "tool.error", "name": name, "call_id": call_id, "message": repair_error, **_repair_payload(repair_session)})
             return ToolMessage(content=repair_error, name=name, tool_call_id=call_id, status="error")
         session = getattr(ctx, "repair_session", None)

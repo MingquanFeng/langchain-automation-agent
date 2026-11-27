@@ -185,6 +185,18 @@ def test_repair_session_only_allows_source_and_three_validation_attempts():
     assert not _repair_error(context, "edit_file", {"path": "src/page.tsx"})
     assert not _repair_error(context, "edit_file", {"path": "tests/always-fail.cjs"})
 
+    intentional_failure = RepairSession(
+        argv=["npm", "run", "test"], cwd=".", timeout_seconds=60,
+        output_summary="QA 固定失败：用于验证三轮上限",
+    )
+    intentional_context = AgentContext(repair_session=intentional_failure)
+    assert "故意失败的 QA 夹具" in _repair_error(
+        intentional_context, "edit_file", {"path": "tests/always-fail.cjs"},
+    )
+    assert "故意失败的 QA 夹具" in _repair_error(
+        intentional_context, "edit_file", {"path": "src/page.tsx"},
+    )
+
     session.edited_since_check = True
     assert "只允许一次编辑" in _repair_error(context, "edit_file", {"path": "src/page.tsx"})
     assert "原始命令" in _repair_error(context, "run_command", {
@@ -226,6 +238,39 @@ def test_repair_policy_violation_closes_session_and_emits_terminal_status(monkey
     assert result.status == "error"
     assert session.terminal_status == "policy_blocked"
     assert events[-1]["repair_status"] == "policy_blocked"
+
+
+def test_repair_stops_before_approval_for_intentional_failure_fixture(monkeypatch):
+    """固定失败 QA 样例不能触发编辑审批，也不能靠改文件变绿。"""
+    from langchain_core.messages import ToolMessage
+
+    session = RepairSession(
+        argv=["npm", "run", "test"], cwd=".", timeout_seconds=60,
+        output_summary="QA 固定失败：用于验证三轮上限",
+    )
+    context = AgentContext(allow_write=False, repair_session=session, single_command=False)
+
+    class _Req:
+        tool_call = {"name": "edit_file", "args": {"path": "tests/always-fail.cjs"}, "id": "fixture-edit"}
+        tool = None
+        state = {}
+        runtime = type("_Runtime", (), {"context": context})()
+
+    events = []
+    middleware = EventBridgeMiddleware()
+    middleware._emit = events.append
+
+    def must_not_run(request):
+        raise AssertionError("故意失败的 QA 夹具编辑不得请求审批或执行")
+
+    result = middleware.wrap_tool_call(_Req(), must_not_run)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert "故意失败的 QA 夹具" in result.content
+    assert session.terminal_status == "policy_blocked"
+    assert events[-1]["repair_status"] == "policy_blocked"
+    assert "故意失败的 QA 夹具" in events[-1]["repair_message"]
 
 
 def test_three_failed_repair_checks_stop_real_tool_chain(command_workspace):
