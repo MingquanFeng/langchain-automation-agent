@@ -53,10 +53,6 @@ from langchain.agents.middleware import (
     # 模型调用失败时自动重试。
     ModelRetryMiddleware,
 
-    # 为 Agent 提供待办事项管理能力。
-    # 模型可以创建、更新任务列表并追踪任务进度。
-    TodoListMiddleware,
-
     # 限制工具调用次数。
     ToolCallLimitMiddleware,
 
@@ -130,6 +126,7 @@ from .context import AgentContext
 # 具体功能取决于 custom.py 的实现。
 from .middleware.custom import CUSTOM_MIDDLEWARE
 from .middleware.events import EventBridgeMiddleware
+from .middleware.todos import ObservableTodoListMiddleware
 from .middleware.cancellation import (
     CancellationMiddleware, retry_unless_cancelled, tool_failure_message,
 )
@@ -742,7 +739,7 @@ def build_agent(
 # 注意：
 # 它提供任务管理工具，
 # 不代表模型一定会先拆解所有任务。
-TODO = TodoListMiddleware()
+TODO = ObservableTodoListMiddleware()
 
 
 # ============================================================

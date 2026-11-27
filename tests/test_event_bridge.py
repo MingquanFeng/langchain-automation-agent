@@ -147,6 +147,42 @@ def test_tool_error_is_emitted_once():
     assert "工具炸了" in err_events[0].message
 
 
+def test_parallel_write_todos_errors_are_emitted_to_desktop():
+    """内置并发保护产生的错误也必须进入桌面事件流。"""
+    error = (
+        "Error: The `write_todos` tool should never be called multiple times "
+        "in parallel. Please call it only once per model invocation to update "
+        "the todo list."
+    )
+    tool_call = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "write_todos",
+                "args": {"todos": [{"content": "第一项", "status": "pending"}]},
+                "id": "todo-c1",
+                "type": "tool_call",
+            },
+            {
+                "name": "write_todos",
+                "args": {"todos": [{"content": "第二项", "status": "pending"}]},
+                "id": "todo-c2",
+                "type": "tool_call",
+            },
+        ],
+    )
+    model = FakeModel(messages=iter([tool_call, AIMessage(content="清单更新失败")]))
+    events = _run_agent(model, thread_id="evt-todo-parallel")
+
+    errors = [
+        event for event in events
+        if isinstance(event, ToolError) and event.name == "write_todos"
+    ]
+    assert len(errors) == 2
+    assert {event.call_id for event in errors} == {"todo-c1", "todo-c2"}
+    assert all(event.message == error for event in errors)
+
+
 def test_failed_command_result_is_preserved_on_tool_error(monkeypatch):
     """失败命令走 tool.error 时仍要保留状态，工作台才能显示修复入口。"""
     from langchain_core.messages import ToolMessage

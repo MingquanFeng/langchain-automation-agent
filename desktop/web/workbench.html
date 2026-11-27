@@ -1595,7 +1595,8 @@
         `目录：${check.cwd || "（未知）"}`,
         `超时：${check.timeout_seconds ?? "（未知）"} 秒`,
         `退出码：${check.exit_code ?? "（无）"}`,
-        `修复轮次：${check.repair_rounds ?? check.repair_round ?? 0}`,
+        `本次轮次：${check.repair_round ?? 0}`,
+        `累计尝试：${check.repair_rounds ?? 0}`,
         `备份：${(check.repair_backup_ids || []).join("、") || "（无）"}`,
         `修复状态：${(check.repair_sessions || []).map((session) => `${session.status}（${session.attempts} 轮）`).join("、") || "（无）"}`,
         "输出摘要：",
@@ -2007,8 +2008,11 @@
           toolCards.delete(event.call_id);
           if (event.type === "tool.error") {
             executionTodoCard.dataset.state = "error";
-            executionTodoSummary.textContent = "更新失败";
-            addNotice(event.message || "执行清单更新失败。", true);
+            executionTodoSummary.textContent = "同步失败";
+            const reason = event.message || "工具未返回错误详情。";
+            executionTodoEmpty.hidden = false;
+            executionTodoEmpty.textContent = `执行清单同步失败：${reason}`;
+            addNotice(`执行清单同步失败：${reason}`, true);
           }
           currentAssistantBubble = null;
           return;

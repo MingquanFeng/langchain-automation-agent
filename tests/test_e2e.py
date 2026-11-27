@@ -180,6 +180,7 @@ def test_tool_is_callable(tool, tmp_path, monkeypatch):
 def test_agent_builds_with_full_middleware_stack():
     """中间件清单保持完整：限次、重试、待办、上下文清理、自定义三者都在。"""
     import agent.graph as graph_mod
+    from langchain.agents.middleware import TodoListMiddleware
 
     agent = build_agent(model=make_model(AIMessage(content="ok")), checkpointer=InMemorySaver())
     assert agent is not None
@@ -197,13 +198,13 @@ def test_agent_builds_with_full_middleware_stack():
         "ToolCallLimitMiddleware",
         "ModelRetryMiddleware",
         "ToolRetryMiddleware",
-        "TodoListMiddleware",
         "ContextEditingMiddleware",
         "TaskGateMiddleware",
         "ContextInjectionMiddleware",
         "TimingMiddleware",
     ]:
         assert expected in names, f"缺少中间件 {expected}"
+    assert isinstance(graph_mod.TODO, TodoListMiddleware)
 
 
 # ---------- 3. 工具调用链真的执行 ----------
