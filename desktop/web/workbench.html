@@ -411,9 +411,14 @@
     .saved-directory { width: auto; min-width: 0; flex: 1; border: 0; border-radius: 10px; padding: 8px 10px; background: transparent; text-align: left; }
     .saved-directory:hover, .saved-directory[aria-current="true"] { background: #eff7f1; }
     .saved-directory .thread-project-copy, .saved-directory .thread-project-name, .saved-directory .thread-project-path { display: block; }
-    .directory-remove { min-height: 27px; border: 0; border-radius: 7px; padding: 0 7px; color: #a14b4b; background: transparent; font-size: 9px; white-space: nowrap; }
-    .directory-remove:hover:not(:disabled) { background: #fff0ed; }
-    .directory-remove:disabled { cursor: not-allowed; opacity: .45; }
+    .directory-menu-trigger { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border: 0; border-radius: 7px; color: #818b9c; background: transparent; font-size: 16px; line-height: 1; }
+    .directory-menu-trigger:hover:not(:disabled), .directory-menu-trigger[aria-expanded="true"] { color: #42516b; background: #edf0f5; }
+    .directory-menu-trigger:disabled { cursor: not-allowed; opacity: .4; }
+    #directoryContextMenu { position: fixed; inset: auto; width: 184px; margin: 0; border: 1px solid #e7e9ee; border-radius: 14px; padding: 6px; color: #303747; background: #fff; box-shadow: 0 12px 30px #26334d26; }
+    .directory-menu-item { width: 100%; min-height: 37px; display: flex; align-items: center; gap: 10px; border: 0; border-radius: 9px; padding: 0 10px; color: #a14b4b; background: transparent; text-align: left; font-size: 12px; }
+    .directory-menu-item:hover:not(:disabled) { background: #fff0ed; }
+    .directory-menu-item:disabled { cursor: not-allowed; opacity: .5; }
+    .directory-menu-item svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     .thread-project { min-height: 0; border-radius: 13px; padding: 10px; background: linear-gradient(120deg, #eff7f1, #f7fbf8); }
     .thread-project-row { display: flex; align-items: center; gap: 8px; }
     .thread-project-row > svg { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: #26844c; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -749,6 +754,12 @@
       <button class="directory-add" id="addDirectoryChoice" type="button">添加目录</button>
     </section>
   </dialog>
+  <div id="directoryContextMenu" popover="manual" role="menu" aria-label="工作目录操作">
+    <button class="directory-menu-item" id="removeDirectoryMenuItem" type="button" role="menuitem">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      <span>移除项目</span>
+    </button>
+  </div>
   <dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
     <section class="settings-panel">
       <header class="settings-panel-head">
@@ -945,6 +956,8 @@
     const sidebarSavedDirectories = $("#sidebarSavedDirectories");
     const directoryDialog = $("#directoryDialog");
     const directoryChoices = $("#directoryChoices");
+    const directoryContextMenu = $("#directoryContextMenu");
+    const removeDirectoryMenuItem = $("#removeDirectoryMenuItem");
     const sidebarThreadList = $("#sidebarThreadList");
     const sidebarThreadStatus = $("#sidebarThreadStatus");
     const sidebarThreadMoreButton = $("#sidebarThreadMoreButton");
@@ -1012,6 +1025,39 @@
       return parts[parts.length - 1] || path || "工作目录";
     }
 
+    let directoryMenuPath = "";
+    let directoryMenuTrigger = null;
+
+    function closeDirectoryMenu({ restoreFocus = false } = {}) {
+      const wasOpen = directoryContextMenu.matches(":popover-open");
+      if (wasOpen) directoryContextMenu.hidePopover();
+      directoryMenuTrigger?.setAttribute("aria-expanded", "false");
+      const previousTrigger = directoryMenuTrigger;
+      directoryMenuPath = "";
+      directoryMenuTrigger = null;
+      if (restoreFocus && wasOpen) previousTrigger?.focus();
+    }
+
+    function openDirectoryMenu(path, trigger) {
+      if (directoryContextMenu.matches(":popover-open") && directoryMenuTrigger === trigger) {
+        closeDirectoryMenu();
+        return;
+      }
+      closeDirectoryMenu();
+      directoryMenuPath = path;
+      directoryMenuTrigger = trigger;
+      trigger.setAttribute("aria-expanded", "true");
+      directoryContextMenu.showPopover();
+      const triggerBounds = trigger.getBoundingClientRect();
+      const menuBounds = directoryContextMenu.getBoundingClientRect();
+      const left = Math.max(8, Math.min(triggerBounds.right - menuBounds.width, window.innerWidth - menuBounds.width - 8));
+      const top = triggerBounds.bottom + menuBounds.height + 8 <= window.innerHeight
+        ? triggerBounds.bottom + 5
+        : Math.max(8, triggerBounds.top - menuBounds.height - 5);
+      directoryContextMenu.style.left = `${left}px`;
+      directoryContextMenu.style.top = `${top}px`;
+    }
+
     function directoryChoice(path) {
       const row = document.createElement("div");
       row.className = "saved-directory-item";
@@ -1032,22 +1078,26 @@
       copy.append(name, detail);
       button.append(sidebarProject.querySelector("svg").cloneNode(true), copy);
       button.addEventListener("click", () => {
+        closeDirectoryMenu();
         directoryDialog.close();
         if (path !== currentWorkingDirectory) requestDirectory(path);
       });
-      const removeButton = document.createElement("button");
-      removeButton.type = "button";
-      removeButton.className = "directory-remove";
-      removeButton.textContent = "移除";
-      removeButton.title = "从工作目录列表移除，不删除磁盘文件";
-      removeButton.setAttribute("aria-label", `从列表移除工作目录 ${directoryLabel(path)}`);
-      removeButton.disabled = sendButton.disabled || path === currentWorkingDirectory;
-      removeButton.addEventListener("click", () => requestRemoveDirectory(path));
-      row.append(button, removeButton);
+      const menuTrigger = document.createElement("button");
+      menuTrigger.type = "button";
+      menuTrigger.className = "directory-menu-trigger";
+      menuTrigger.textContent = "…";
+      menuTrigger.title = `工作目录 ${directoryLabel(path)} 的操作`;
+      menuTrigger.setAttribute("aria-label", `打开工作目录 ${directoryLabel(path)} 的菜单`);
+      menuTrigger.setAttribute("aria-haspopup", "menu");
+      menuTrigger.setAttribute("aria-expanded", "false");
+      menuTrigger.disabled = sendButton.disabled || path === currentWorkingDirectory;
+      menuTrigger.addEventListener("click", () => openDirectoryMenu(path, menuTrigger));
+      row.append(button, menuTrigger);
       return row;
     }
 
     function requestRemoveDirectory(path) {
+      closeDirectoryMenu();
       if (path === currentWorkingDirectory || sendButton.disabled) return;
       if (window.parent !== window) {
         window.parent.postMessage({ type: "automation-agent.remove-working-directory", path }, window.location.origin);
@@ -1056,7 +1106,25 @@
       }
     }
 
+    removeDirectoryMenuItem.addEventListener("click", () => {
+      if (directoryMenuPath) requestRemoveDirectory(directoryMenuPath);
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!directoryContextMenu.matches(":popover-open")) return;
+      if (directoryContextMenu.contains(event.target) || directoryMenuTrigger?.contains(event.target)) return;
+      closeDirectoryMenu();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && directoryContextMenu.matches(":popover-open")) {
+        event.stopPropagation();
+        closeDirectoryMenu({ restoreFocus: true });
+      }
+    });
+    window.addEventListener("resize", () => closeDirectoryMenu());
+    window.addEventListener("scroll", () => closeDirectoryMenu(), true);
+
     function setWorkingDirectory(path, directories) {
+      closeDirectoryMenu();
       currentWorkingDirectory = typeof path === "string" ? path : "";
       savedDirectories = Array.isArray(directories) ? directories : [];
       const directoryName = directoryLabel(currentWorkingDirectory);
@@ -1830,13 +1898,14 @@
 
     function setBusy(busy) {
       if (busy) recoveryRequest++;
+      if (busy) closeDirectoryMenu();
       sendButton.disabled = busy;
       input.disabled = busy;
       newChatButton.disabled = busy;
       // 宿主切换目录会重启服务。从提交到任务终态都锁定目录和会话入口。
       workingDirectoryButton.disabled = busy;
       sidebarChooseDirectory.disabled = busy;
-      document.querySelectorAll(".saved-directory, .directory-remove, .thread-item").forEach((item) => { item.disabled = busy; });
+      document.querySelectorAll(".saved-directory, .directory-menu-trigger, .thread-item").forEach((item) => { item.disabled = busy; });
       cancelButton.classList.toggle("hidden", !busy);
       sendButton.textContent = busy ? "运行中…" : "发送 ↑";
       cancelButton.disabled = false;
