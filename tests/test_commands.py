@@ -305,6 +305,42 @@ def test_repair_session_only_allows_source_and_three_validation_attempts():
     assert "3 次上限" in _repair_error(context, "edit_file", {"path": "src/page.tsx"})
 
 
+@pytest.mark.parametrize(("name", "args", "session_state"), [
+    ("edit_file", {"path": "src/other.js"}, {"edit_pending": True}),
+    ("edit_file", {"path": "src/other.js"}, {"edited_since_check": True}),
+    ("run_command", {"argv": ["npm", "test"], "cwd": ".", "timeout_seconds": 60}, {"edit_pending": True}),
+])
+def test_parallel_repair_call_does_not_close_session(monkeypatch, name, args, session_state):
+    """同一批次的重复调用被拒绝时，保留首处编辑或待批检查的会话。"""
+    from langchain_core.messages import ToolMessage
+
+    session = RepairSession(argv=["npm", "test"], cwd=".", timeout_seconds=60, output_summary="failed")
+    for field, value in session_state.items():
+        setattr(session, field, value)
+    context = AgentContext(allow_write=False, repair_session=session, single_command=False)
+
+    class _Req:
+        tool_call = {"name": name, "args": args, "id": "parallel-call"}
+        tool = None
+        state = {}
+        runtime = type("_Runtime", (), {"context": context})()
+
+    events = []
+    middleware = EventBridgeMiddleware()
+    middleware._emit = events.append
+
+    def must_not_run(request):
+        raise AssertionError("并发的第二处编辑不得执行")
+
+    result = middleware.wrap_tool_call(_Req(), must_not_run)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.content
+    assert session.terminal_status == ""
+    assert events[-1]["repair_status"] is None
+
+
 def test_repair_policy_violation_closes_session_and_emits_terminal_status(monkeypatch):
     """越权编辑被护栏拒绝后应结束修复，不能继续探测无关文件。"""
     from langchain_core.messages import ToolMessage

@@ -1893,7 +1893,7 @@
       button.textContent = "修复此检查";
       button.addEventListener("click", async () => {
         if (activeRunId) return;
-        const instruction = "修复刚才失败的开发检查，使用受控修复流程。";
+        const instruction = "修复刚才失败的开发检查，严格使用受控修复流程。每轮严格串行：只调用一次 edit_file，等待审批和写入完成；然后只调用来源中的原检查命令一次，等待结果后再决定下一轮。禁止并发或批量编辑。最多三轮；不得修改原检查命令或降低测试期望。";
         addMessage("user", "你", instruction);
         beginRecentTask(instruction);
         setBusy(true);

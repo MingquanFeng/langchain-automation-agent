@@ -238,7 +238,20 @@ class EventBridgeMiddleware(AgentMiddleware):
         repair_error = _repair_error(ctx, name, args)
         if repair_error:
             repair_session = getattr(ctx, "repair_session", None)
-            if repair_session is not None:
+            # 模型可能在一条响应里并发发出多个编辑。首个编辑等待审批期间，
+            # 其余编辑应单独拒绝；不能因并发请求提前关闭仍待用户批准的会话。
+            deferred_repair_call = (
+                repair_session is not None
+                and not repair_session.terminal_status
+                and (
+                    name == "edit_file"
+                    and (repair_session.edit_pending or repair_session.edited_since_check)
+                    or name == "run_command"
+                    and repair_session.edit_pending
+                    and not repair_session.edited_since_check
+                )
+            )
+            if repair_session is not None and not deferred_repair_call:
                 _close_repair(repair_session, "policy_blocked", f"修复已停止：{repair_error}")
             self._emit({"type": "tool.error", "name": name, "call_id": call_id, "message": repair_error, **_repair_payload(repair_session)})
             return ToolMessage(content=repair_error, name=name, tool_call_id=call_id, status="error")
