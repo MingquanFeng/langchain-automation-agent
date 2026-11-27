@@ -182,6 +182,21 @@ def prepare_command_preview(args: dict[str, Any]) -> tuple[dict[str, Any], str]:
     }, ""
 
 
+def validate_saved_command(argv: list[str], cwd: str, timeout_seconds: int) -> tuple[dict[str, Any], str]:
+    """重验审计命令，并确认归一化参数与保存值完全一致。"""
+    raw_argv = list(argv)
+    if len(raw_argv) >= 4 and raw_argv[0] in {sys.executable, "python", "python3"} and raw_argv[1] == "-I":
+        raw_argv.pop(1)
+    preview, error = prepare_command_preview({
+        "argv": raw_argv, "cwd": cwd, "timeout_seconds": timeout_seconds,
+    })
+    if error:
+        return preview, error
+    if preview["argv"] != argv or preview["cwd"] != cwd or preview["timeout_seconds"] != timeout_seconds:
+        return preview, "保存的检查参数与当前白名单校验结果不一致。"
+    return preview, ""
+
+
 def _safe_environment() -> dict[str, str]:
     """只继承运行常见开发命令所需环境，不传递 API Key 等应用变量。"""
     # Tauri sidecar 的 PATH 可能不含 Homebrew Node 或 rustup Cargo；只补标准安装目录，
@@ -313,6 +328,11 @@ def run_command(
         argv=json.dumps(preview["argv"], ensure_ascii=False),
         cwd=preview["cwd"],
         timeout_seconds=timeout_seconds,
+        workspace=str(files_mod.SANDBOX.resolve()),
+        repair_run_id=str(getattr(context, "run_id", "") or "") if getattr(context, "repair_session", None) else None,
+        repair_source_run_id=getattr(getattr(context, "repair_session", None), "source_run_id", None),
+        repair_source_call_id=getattr(getattr(context, "repair_session", None), "source_call_id", None),
+        repair_round=(getattr(getattr(context, "repair_session", None), "attempts", 0) + 1) if getattr(context, "repair_session", None) else None,
     )
     try:
         normalized_argv, resolved_cwd, _ = _validate_argv(argv, cwd, timeout_seconds)

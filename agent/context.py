@@ -63,6 +63,8 @@ class RepairSession:
     cwd: str
     timeout_seconds: int
     output_summary: str
+    source_run_id: str = ""
+    source_call_id: str = ""
     attempts: int = 0
     edited_since_check: bool = False
     edit_pending: bool = False

@@ -260,6 +260,57 @@ def test_command_audit_records_only_the_first_terminal_state(tmp_path):
     }
 
 
+def test_command_audit_migrates_and_repair_history_cascades(tmp_path):
+    """旧审计表可迁移；修复轮次、备份和删除级联能跨实例读取。"""
+    import sqlite3
+
+    path = tmp_path / "runtime.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE command_executions (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, call_id TEXT NOT NULL, category TEXT NOT NULL, argv TEXT NOT NULL, cwd TEXT NOT NULL, timeout_seconds INTEGER NOT NULL, status TEXT NOT NULL, exit_code INTEGER, output_summary TEXT NOT NULL DEFAULT '', started_at REAL NOT NULL, finished_at REAL)")
+    connection.commit()
+    connection.close()
+
+    store = RuntimeStore(path)
+    store.initialize()
+    workspace = str(tmp_path / "project")
+    store.start_run(run_id="source", thread_id="thread", task_name="check", trigger="api", instruction="run", workspace=workspace)
+    execution_id = store.start_command_execution(
+        run_id="source", call_id="call", category="python_test", argv='["python3", "-I", "-m", "pytest"]',
+        cwd=".", timeout_seconds=30, workspace=workspace,
+    )
+    store.finish_command_execution(execution_id, status="failed", exit_code=1, output_summary="failed")
+    store.finish_run("source", status="failed")
+    assert store.get_failed_command_for_thread(
+        run_id="source", call_id="call", thread_id="thread", workspace=workspace,
+    ) is not None
+    assert store.get_failed_command_for_thread(
+        run_id="source", call_id="call", thread_id="thread", workspace=str(tmp_path / "other"),
+    ) is None
+
+    store.start_run(
+        run_id="repair", thread_id="thread", task_name="repair", trigger="api", instruction="repair",
+        workspace=workspace, repair_source_run_id="source", repair_source_call_id="call",
+    )
+    repair_check_id = store.start_command_execution(
+        run_id="repair", call_id="verify", category="python_test", argv='["python3", "-I", "-m", "pytest"]',
+        cwd=".", timeout_seconds=30, workspace=workspace, repair_run_id="repair",
+        repair_source_run_id="source", repair_source_call_id="call", repair_round=1,
+    )
+    store.finish_command_execution(repair_check_id, status="succeeded", exit_code=0, output_summary="ok")
+    store.update_repair_session("repair", status="succeeded", attempts=1, backup_id="20261127T120000Z-abcdef123456")
+    store.finish_run("repair", status="succeeded")
+    checks = RuntimeStore(path).get_run_checks("repair", workspace=workspace)
+    assert checks[0]["repair_round"] == 1
+    assert checks[0]["repair_status"] == "succeeded"
+    assert checks[0]["repair_attempts"] == 1
+    assert checks[0]["repair_backup_ids"] == ["20261127T120000Z-abcdef123456"]
+
+    assert store.delete_run("source", workspace=workspace) is True
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM command_executions").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM repair_sessions").fetchone()[0] == 0
+
+
 # ============================================================
 # 3. 同步 runner 持久化
 # ============================================================
@@ -389,6 +440,33 @@ def test_websocket_success_is_queryable_from_runs_endpoint(
     assert records[0]["output"] == "流式任务完成"
 
 
+def test_run_checks_endpoint_is_workspace_scoped_and_revalidates_repairability(
+    isolated_server_store, tmp_path, monkeypatch,
+):
+    """检查历史仅在所属工作目录可见，并按当前命令白名单计算可修复状态。"""
+    import runtime.server as server_mod
+
+    workspace = str(tmp_path / "project")
+    monkeypatch.setattr(server_mod, "DATA_DIR", Path(workspace))
+    access = server_mod.DesktopAccess("c" * 64, "d" * 64)
+    monkeypatch.setattr(server_mod.app.state, "desktop_access", access, raising=False)
+    isolated_server_store.start_run(
+        run_id="checks-source", thread_id="checks-thread", task_name="check", trigger="api",
+        instruction="check", workspace=workspace,
+    )
+    audit_id = isolated_server_store.start_command_execution(
+        run_id="checks-source", call_id="check-call", category="git_check",
+        argv='["git", "status", "--short"]', cwd=".", timeout_seconds=30, workspace=workspace,
+    )
+    isolated_server_store.finish_command_execution(audit_id, status="failed", exit_code=1, output_summary="failed")
+    isolated_server_store.finish_run("checks-source", status="failed")
+
+    with TestClient(server_mod.app, headers={"Authorization": f"Bearer {access.token}"}) as client:
+        response = client.get("/runs/checks-source/checks")
+        assert response.status_code == 200
+        assert response.json()[0]["repairable"] is True
+        monkeypatch.setattr(server_mod, "DATA_DIR", tmp_path / "other-project")
+        assert client.get("/runs/checks-source/checks").status_code == 404
 def test_websocket_cancel_is_persisted_as_cancelled(isolated_server_store, monkeypatch):
     """WebSocket 取消终态与持久化状态一致。"""
     import runtime.server as server_mod

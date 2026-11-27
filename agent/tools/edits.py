@@ -31,6 +31,7 @@ import hashlib
 
 # json：保存自描述备份元数据和原文。
 import json
+import logging
 
 # os：设置备份目录和文件权限。
 import os
@@ -85,6 +86,7 @@ BACKUP_DIR = Path(RUNTIME.sqlite_path).expanduser().resolve().parent / ".automat
 
 # ID 只允许程序生成的 UTC 时间 + 12 位十六进制随机串。
 BACKUP_ID_RE = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{12}")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -466,6 +468,13 @@ def edit_file(
     if context is not None and call_id:
         if result.startswith("已编辑 "):
             context.edit_results[call_id] = "succeeded"
+            match = re.search(r"备份 (\d{8}T\d{6}Z-[0-9a-f]{12})", result)
+            if match and getattr(context, "run_id", None):
+                try:
+                    from runtime.storage import get_runtime_store
+                    get_runtime_store().update_repair_session(context.run_id, backup_id=match.group(1))
+                except Exception:
+                    logger.exception("无法保存修复备份标识：%s", context.run_id)
         elif "等待批准期间发生了变化" in result:
             context.edit_results[call_id] = "conflicted"
         else:

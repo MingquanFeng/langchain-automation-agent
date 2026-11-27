@@ -331,6 +331,26 @@ def list_agent_runs(
     return app.state.runtime_store.list_runs(limit=limit, offset=offset, workspace=_history_workspace(scope))
 
 
+@app.get("/runs/{run_id}/checks")
+def list_run_checks(run_id: str, scope: HistoryScope = "current") -> list[dict]:
+    """读取一次运行的脱敏检查与修复记录。"""
+    checks = app.state.runtime_store.get_run_checks(run_id, workspace=_history_workspace(scope))
+    if checks is None:
+        raise HTTPException(status_code=404, detail="此范围内没有该运行记录")
+    from agent.tools.commands import validate_saved_command
+    workspace = _history_workspace(scope)
+    for check in checks:
+        if check["repairable"]:
+            _, error = validate_saved_command(check["argv"], check["cwd"], check["timeout_seconds"])
+            check["repairable"] = not error and (workspace is None or check["workspace"] == workspace)
+    fields = (
+        "call_id", "category", "argv", "cwd", "timeout_seconds", "status", "exit_code",
+        "output_summary", "repair_round", "repair_rounds", "repair_sessions",
+        "repair_backup_ids", "repairable",
+    )
+    return [{key: check[key] for key in fields} for check in checks]
+
+
 # ============================================================
 # 4. 长期记忆管理接口
 # ============================================================
@@ -959,11 +979,20 @@ async def _handle_run_start(
             run_id=command.repair_source_run_id,
             call_id=command.repair_source_call_id,
             thread_id=command.thread_id,
+            workspace=_history_workspace(),
         )
         if source is None:
             await queue.put(RunError(run_id="", message="找不到当前会话中的失败检查记录", recoverable=True))
             return
-        repair_session = RepairSession(**source)
+        from agent.tools.commands import validate_saved_command
+        _, validation_error = validate_saved_command(source["argv"], source["cwd"], source["timeout_seconds"])
+        if validation_error:
+            await queue.put(RunError(run_id="", message="原检查参数无法在当前项目中精确恢复，不能启动修复。", recoverable=True))
+            return
+        repair_session = RepairSession(
+            **source, source_run_id=command.repair_source_run_id,
+            source_call_id=command.repair_source_call_id,
+        )
         instruction = (
             "修复以下失败开发检查。先分析诊断，再以最小改动修复与失败直接相关的源码或测试文件；"
             "不得修改无关源码来绕过失败。若检查脚本主动制造失败或没有可定位的修复目标，停止并说明原因。"
@@ -1013,6 +1042,8 @@ async def _handle_run_start(
                 instruction=run.instruction,
                 started_at=run.started_at,
                 workspace=_history_workspace(),
+                repair_source_run_id=repair_session.source_run_id if repair_session else None,
+                repair_source_call_id=repair_session.source_call_id if repair_session else None,
             ),
             on_terminal=lambda event: _record_terminal_event(
                 app.state.runtime_store, event
@@ -1050,6 +1081,9 @@ def _record_terminal_event(store, event: BaseEvent) -> None:
         output = ""
         error = getattr(event, "message", "运行失败")
     try:
+        repair_status = getattr(event, "repair_status", None)
+        if repair_status:
+            store.update_repair_session(event.run_id, status=repair_status)
         store.finish_run(
             event.run_id,
             status=status,

@@ -211,6 +211,29 @@ class RuntimeStore:
                     "CREATE INDEX IF NOT EXISTS idx_command_executions_run_id "
                     "ON command_executions(run_id, id)"
                 )
+                command_columns = {
+                    row["name"] for row in connection.execute("PRAGMA table_info(command_executions)")
+                }
+                for name, definition in (
+                    ("workspace", "TEXT"), ("repair_run_id", "TEXT"),
+                    ("repair_source_run_id", "TEXT"), ("repair_source_call_id", "TEXT"),
+                    ("repair_round", "INTEGER"),
+                ):
+                    if name not in command_columns:
+                        connection.execute(f"ALTER TABLE command_executions ADD COLUMN {name} {definition}")
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS repair_sessions (
+                        repair_run_id TEXT PRIMARY KEY, source_run_id TEXT NOT NULL,
+                        source_call_id TEXT NOT NULL, thread_id TEXT NOT NULL,
+                        workspace TEXT, status TEXT NOT NULL DEFAULT 'running',
+                        attempts INTEGER NOT NULL DEFAULT 0, backup_ids TEXT NOT NULL DEFAULT '[]',
+                        started_at REAL NOT NULL, finished_at REAL
+                    )"""
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_repair_sessions_source "
+                    "ON repair_sessions(source_run_id, source_call_id)"
+                )
 
             # 指令和输出可能包含用户数据；POSIX 下数据库文件仅允许当前用户读写。
             if os.name != "nt":
@@ -317,6 +340,8 @@ class RuntimeStore:
         instruction: str,
         started_at: float | None = None,
         workspace: str | None = None,
+        repair_source_run_id: str | None = None,
+        repair_source_call_id: str | None = None,
     ) -> None:
         """登记一次 Agent 运行。
 
@@ -337,6 +362,17 @@ class RuntimeStore:
                 ).fetchone()["workspace"]
                 if owner != workspace:
                     raise ThreadWorkspaceConflict("此会话属于其他工作目录，请先切换目录。")
+            if repair_source_run_id or repair_source_call_id:
+                source_valid = connection.execute(
+                    "SELECT 1 FROM agent_runs r JOIN command_executions c ON c.run_id = r.run_id "
+                    "JOIN thread_workspaces tw ON tw.thread_id = r.thread_id "
+                    "WHERE r.run_id = ? AND r.thread_id = ? AND r.status != 'running' "
+                    "AND c.call_id = ? AND c.status = 'failed' AND c.workspace = ? "
+                    "AND tw.workspace = ? LIMIT 1",
+                    (repair_source_run_id, thread_id, repair_source_call_id, workspace, workspace),
+                ).fetchone()
+                if source_valid is None:
+                    raise ThreadWorkspaceConflict("失败检查已变化或不属于当前工作目录，不能启动修复。")
             connection.execute(
                 """
                 INSERT INTO agent_runs(
@@ -349,6 +385,13 @@ class RuntimeStore:
                     started_at if started_at is not None else time.time(),
                 ),
             )
+            if repair_source_run_id and repair_source_call_id:
+                connection.execute(
+                    "INSERT INTO repair_sessions(repair_run_id, source_run_id, source_call_id, thread_id, workspace, started_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (run_id, repair_source_run_id, repair_source_call_id, thread_id, workspace,
+                     started_at if started_at is not None else time.time()),
+                )
 
     def finish_run(
         self,
@@ -403,6 +446,11 @@ class RuntimeStore:
         cwd: str,
         timeout_seconds: int,
         started_at: float | None = None,
+        workspace: str | None = None,
+        repair_run_id: str | None = None,
+        repair_source_run_id: str | None = None,
+        repair_source_call_id: str | None = None,
+        repair_round: int | None = None,
     ) -> int:
         """写入一条待完成的开发命令审计记录并返回其主键。"""
         self.initialize()
@@ -410,12 +458,14 @@ class RuntimeStore:
             cursor = connection.execute(
                 """
                 INSERT INTO command_executions(
-                    run_id, call_id, category, argv, cwd, timeout_seconds, status, started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
+                    run_id, call_id, category, argv, cwd, timeout_seconds, status, started_at,
+                    workspace, repair_run_id, repair_source_run_id, repair_source_call_id, repair_round
+                ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id, call_id, category, redact_sensitive_text(argv), cwd,
                     timeout_seconds, started_at if started_at is not None else time.time(),
+                    workspace, repair_run_id, repair_source_run_id, repair_source_call_id, repair_round,
                 ),
             )
             return int(cursor.lastrowid)
@@ -444,20 +494,23 @@ class RuntimeStore:
                 ),
             )
 
-    def get_failed_command_for_thread(self, *, run_id: str, call_id: str, thread_id: str) -> dict | None:
+    def get_failed_command_for_thread(self, *, run_id: str, call_id: str, thread_id: str, workspace: str | None = None) -> dict | None:
         """读取同一会话内可用于修复的失败命令审计记录。"""
         self.initialize()
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT c.argv, c.cwd, c.timeout_seconds, c.output_summary
+                SELECT c.argv, c.cwd, c.timeout_seconds, c.output_summary, c.workspace
                 FROM command_executions AS c
                 JOIN agent_runs AS r ON r.run_id = c.run_id
                 WHERE c.run_id = ? AND c.call_id = ? AND r.thread_id = ?
-                  AND c.status = 'failed'
+                  AND c.status = 'failed' AND r.status != 'running' AND c.workspace IS NOT NULL
+                  AND c.workspace = ? AND c.workspace = (
+                    SELECT workspace FROM thread_workspaces WHERE thread_id = ?
+                  )
                 LIMIT 1
                 """,
-                (run_id, call_id, thread_id),
+                (run_id, call_id, thread_id, workspace, thread_id),
             ).fetchone()
         if row is None:
             return None
@@ -469,6 +522,85 @@ class RuntimeStore:
             return None
         return {"argv": argv, "cwd": row["cwd"], "timeout_seconds": row["timeout_seconds"], "output_summary": row["output_summary"]}
 
+    def update_repair_session(self, repair_run_id: str, *, status: str | None = None, attempts: int | None = None, backup_id: str | None = None) -> None:
+        """保存修复轮次、终态和可恢复备份标识。"""
+        self.initialize()
+        with self._connect() as connection:
+            row = connection.execute("SELECT backup_ids FROM repair_sessions WHERE repair_run_id = ?", (repair_run_id,)).fetchone()
+            if row is None:
+                return
+            backups = self._safe_json_string_list(row["backup_ids"])
+            if backup_id and backup_id not in backups:
+                backups.append(backup_id)
+            connection.execute(
+                "UPDATE repair_sessions SET status = COALESCE(?, status), attempts = COALESCE(?, attempts), "
+                "backup_ids = ?, finished_at = CASE WHEN ? IS NULL OR ? = 'running' THEN finished_at ELSE ? END "
+                "WHERE repair_run_id = ?",
+                (status, attempts, json.dumps(backups), status, status, time.time(), repair_run_id),
+            )
+
+    def get_run_checks(self, run_id: str, *, workspace: str | None = None) -> list[dict] | None:
+        """读取运行命令审计和关联修复记录；workspace 不匹配时返回 None。"""
+        self.initialize()
+        scope, params = self._run_scope(workspace)
+        with self._connect() as connection:
+            owner = connection.execute(f"SELECT 1 FROM agent_runs WHERE run_id = ? AND {scope}", (run_id, *params)).fetchone()
+            if owner is None:
+                return None
+            rows = connection.execute(
+                "SELECT c.*, r.thread_id, r.status AS run_status, tw.workspace AS thread_workspace, "
+                "rs.status AS repair_status, rs.attempts AS repair_attempts, rs.backup_ids "
+                "FROM command_executions c LEFT JOIN repair_sessions rs "
+                "ON rs.repair_run_id = c.repair_run_id JOIN agent_runs r ON r.run_id = c.run_id "
+                "LEFT JOIN thread_workspaces tw ON tw.thread_id = r.thread_id "
+                "WHERE c.run_id = ? ORDER BY c.id", (run_id,),
+            ).fetchall()
+            related = connection.execute(
+                "SELECT * FROM repair_sessions WHERE source_run_id = ? ORDER BY started_at", (run_id,),
+            ).fetchall()
+        related_by_call: dict[str, list[dict]] = {}
+        for session in related:
+            related_by_call.setdefault(session["source_call_id"], []).append(dict(session))
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                argv = json.loads(item["argv"])
+            except (TypeError, json.JSONDecodeError):
+                argv = []
+            item["argv"] = argv if isinstance(argv, list) and all(isinstance(value, str) for value in argv) else []
+            try:
+                backups = json.loads(item.pop("backup_ids") or "[]")
+            except (TypeError, json.JSONDecodeError):
+                backups = []
+            item["repair_backup_ids"] = backups if isinstance(backups, list) and all(isinstance(value, str) for value in backups) else []
+            sessions = related_by_call.get(item["call_id"], [])
+            item["repair_rounds"] = sum(session["attempts"] for session in sessions)
+            item["repair_sessions"] = [
+                {"status": session["status"], "attempts": session["attempts"],
+                 "backup_ids": self._safe_json_string_list(session["backup_ids"])}
+                for session in sessions
+            ]
+            item["repair_backup_ids"] = list(dict.fromkeys(
+                [*item["repair_backup_ids"], *(backup for session in item["repair_sessions"] for backup in session["backup_ids"])]
+            ))
+            item["repairable"] = bool(
+                item["status"] == "failed" and item["run_status"] != "running" and item["workspace"] is not None
+                and item["workspace"] == item["thread_workspace"]
+                and item["cwd"] is not None and item["argv"]
+            )
+            result.append(item)
+        return result
+
+    @staticmethod
+    def _safe_json_string_list(value: str | None) -> list[str]:
+        """解析可能来自旧数据库的字符串列表；损坏或不完整数据按空列表展示。"""
+        try:
+            decoded = json.loads(value or "[]")
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return decoded if isinstance(decoded, list) and all(isinstance(item, str) for item in decoded) else []
+
     def mark_interrupted_runs(self) -> int:
         """将服务上次退出时未结束的运行改为 `interrupted`。
 
@@ -477,6 +609,16 @@ class RuntimeStore:
         """
         self.initialize()
         with self._connect() as connection:
+            now = time.time()
+            connection.execute(
+                "UPDATE command_executions SET status = 'interrupted', finished_at = ? "
+                "WHERE status = 'running'", (now,),
+            )
+            connection.execute(
+                "UPDATE repair_sessions SET status = 'interrupted', finished_at = ? "
+                "WHERE status = 'running' AND repair_run_id IN "
+                "(SELECT run_id FROM agent_runs WHERE status = 'running')", (now,),
+            )
             cursor = connection.execute(
                 """
                 UPDATE agent_runs
@@ -485,7 +627,7 @@ class RuntimeStore:
                     finished_at = ?
                 WHERE status = 'running'
                 """,
-                (time.time(),),
+                (now,),
             )
             return cursor.rowcount
 
@@ -542,6 +684,26 @@ class RuntimeStore:
         self.initialize()
         scope, params = self._run_scope(workspace)
         with self._connect() as connection:
+            exists = connection.execute(
+                f"SELECT 1 FROM agent_runs WHERE run_id = ? AND status != 'running' AND {scope}",
+                (run_id, *params),
+            ).fetchone()
+            if exists is None:
+                return False
+            active_repair = connection.execute(
+                "SELECT 1 FROM repair_sessions rs JOIN agent_runs r ON r.run_id = rs.repair_run_id "
+                "WHERE rs.source_run_id = ? AND r.status = 'running' LIMIT 1", (run_id,),
+            ).fetchone()
+            if active_repair is not None:
+                return False
+            connection.execute(
+                "DELETE FROM command_executions WHERE run_id = ? OR repair_source_run_id = ?",
+                (run_id, run_id),
+            )
+            connection.execute(
+                "DELETE FROM repair_sessions WHERE repair_run_id = ? OR source_run_id = ?",
+                (run_id, run_id),
+            )
             cursor = connection.execute(
                 f"DELETE FROM agent_runs WHERE run_id = ? AND status != 'running' AND {scope}",
                 (run_id, *params),
@@ -583,6 +745,19 @@ class RuntimeStore:
         """删除会话关联的全部运行记录；Checkpointer 由服务层单独清理。"""
         self.initialize()
         with self._connect() as connection:
+            run_ids = [row["run_id"] for row in connection.execute(
+                "SELECT run_id FROM agent_runs WHERE thread_id = ?", (thread_id,),
+            )]
+            if run_ids:
+                placeholders = ",".join("?" for _ in run_ids)
+                connection.execute(
+                    f"DELETE FROM command_executions WHERE run_id IN ({placeholders}) OR repair_source_run_id IN ({placeholders})",
+                    (*run_ids, *run_ids),
+                )
+                connection.execute(
+                    f"DELETE FROM repair_sessions WHERE repair_run_id IN ({placeholders}) OR source_run_id IN ({placeholders})",
+                    (*run_ids, *run_ids),
+                )
             connection.execute("DELETE FROM thread_workspaces WHERE thread_id = ?", (thread_id,))
             cursor = connection.execute(
                 "DELETE FROM agent_runs WHERE thread_id = ?", (thread_id,)
@@ -594,6 +769,19 @@ class RuntimeStore:
         self.initialize()
         scope, params = self._run_scope(workspace)
         with self._connect() as connection:
+            run_ids = [row["run_id"] for row in connection.execute(
+                f"SELECT run_id FROM agent_runs WHERE status != 'running' AND {scope}", params,
+            )]
+            if run_ids:
+                placeholders = ",".join("?" for _ in run_ids)
+                connection.execute(
+                    f"DELETE FROM command_executions WHERE run_id IN ({placeholders}) OR repair_source_run_id IN ({placeholders})",
+                    (*run_ids, *run_ids),
+                )
+                connection.execute(
+                    f"DELETE FROM repair_sessions WHERE repair_run_id IN ({placeholders}) OR source_run_id IN ({placeholders})",
+                    (*run_ids, *run_ids),
+                )
             cursor = connection.execute(f"DELETE FROM agent_runs WHERE status != 'running' AND {scope}", params)
             return cursor.rowcount
 

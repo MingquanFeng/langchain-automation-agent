@@ -1522,6 +1522,11 @@
       instruction.textContent = run.instruction || "（没有任务指令）";
 
       item.append(header, instruction);
+      const checks = document.createElement("div");
+      checks.className = "history-checks";
+      checks.textContent = "正在读取检查记录…";
+      item.append(checks);
+      void loadChecksForRun(run, checks, historyScope.value);
       const recordedText = run.output || run.error;
       if (recordedText) {
         const output = document.createElement("details");
@@ -1579,6 +1584,73 @@
       return item;
     }
 
+    function renderCheckModel(check, container, repair) {
+      const details = document.createElement("details");
+      details.className = "history-output";
+      const summary = document.createElement("summary");
+      const argv = Array.isArray(check.argv) ? check.argv.join(" ") : "（参数不可恢复）";
+      summary.textContent = `${check.category || "检查"} · ${check.status || "未知状态"} · ${argv}`;
+      const body = document.createElement("pre");
+      body.textContent = [
+        `目录：${check.cwd || "（未知）"}`,
+        `超时：${check.timeout_seconds ?? "（未知）"} 秒`,
+        `退出码：${check.exit_code ?? "（无）"}`,
+        `修复轮次：${check.repair_rounds ?? check.repair_round ?? 0}`,
+        `备份：${(check.repair_backup_ids || []).join("、") || "（无）"}`,
+        `修复状态：${(check.repair_sessions || []).map((session) => `${session.status}（${session.attempts} 轮）`).join("、") || "（无）"}`,
+        "输出摘要：",
+        check.output_summary || "（无输出）",
+      ].join("\n");
+      details.append(summary, body);
+      container.append(details);
+      if (check.repairable && repair) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "history-action";
+        button.textContent = "修复此检查";
+        button.addEventListener("click", repair);
+        container.append(button);
+      }
+    }
+
+    async function loadChecksForRun(run, container, scope = "current") {
+      try {
+        const response = await serviceFetch(historyPath(`/runs/${encodeURIComponent(run.run_id)}/checks`, scope));
+        if (!response.ok) throw await apiError(response, "读取检查记录失败");
+        const checks = await response.json();
+        container.replaceChildren();
+        if (!checks.length) {
+          container.textContent = "这次运行没有开发检查记录。";
+          return;
+        }
+        for (const check of checks) {
+          const canRepair = scope === "current" && check.repairable;
+          renderCheckModel(check, container, canRepair ? async () => {
+            if (await recoverThread(run, scope)) startRepair({ runId: run.run_id, callId: check.call_id });
+          } : null);
+        }
+      } catch (error) {
+        container.textContent = error.message;
+      }
+    }
+
+    async function loadChecksForChat(runId) {
+      try {
+        const response = await serviceFetch(historyPath(`/runs/${encodeURIComponent(runId)}/checks`));
+        if (!response.ok) return;
+        const checks = await response.json();
+        for (const check of checks) {
+          const card = toolCards.get(check.call_id);
+          if (!card?.details || card.checkRendered) continue;
+          card.checkRendered = true;
+          renderCheckModel(check, card.details, check.repairable
+            ? () => startRepair({ runId, callId: check.call_id }) : null);
+        }
+      } catch {
+        // 聊天工具结果仍保留原始回执；历史面板可再次查询持久化检查记录。
+      }
+    }
+
     async function loadRunHistory(reset = false) {
       if (historyLoading) return;
       if (reset) {
@@ -1617,13 +1689,13 @@
     }
 
     async function recoverThread(run, scope = "current") {
-      if (sendButton.disabled) return;
+      if (sendButton.disabled) return false;
       const request = ++recoveryRequest;
       try {
         const response = await serviceFetch(historyPath(`/threads/messages?thread_id=${encodeURIComponent(run.thread_id)}`, scope));
         if (!response.ok) throw await apiError(response, "读取会话内容失败");
         const snapshot = await response.json();
-        if (request !== recoveryRequest) return;
+        if (request !== recoveryRequest) return false;
         threadId = snapshot.thread_id || run.thread_id;
         activeRunId = null;
         currentTask = null;
@@ -1664,10 +1736,12 @@
         historyDialog.close();
         document.querySelector("main.chat-app").dataset.railOpen = "false";
         input.focus();
+        return true;
       } catch (error) {
-        if (request !== recoveryRequest) return;
+        if (request !== recoveryRequest) return false;
         if (historyDialog.open) historyStatus.textContent = error.message;
         else sidebarThreadStatus.textContent = error.message;
+        return false;
       }
     }
 
@@ -1885,32 +1959,22 @@
       renderNextApproval();
     }
 
-    function addRepairAction(card, source) {
-      if (card.repairButton || !threadId) return;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "approval-allow";
-      button.textContent = "修复此检查";
-      button.addEventListener("click", async () => {
-        if (activeRunId) return;
-        const instruction = "修复刚才失败的开发检查，严格使用受控修复流程。每轮严格串行：只调用一次 edit_file，等待审批和写入完成；然后只调用来源中的原检查命令一次，等待结果后再决定下一轮。禁止并发或批量编辑。最多三轮；不得修改原检查命令或降低测试期望。";
-        addMessage("user", "你", instruction);
-        beginRecentTask(instruction);
-        setBusy(true);
-        try {
-          const ws = await connect();
-          ws.send(JSON.stringify({
-            type: "run.start", instruction, task_name: "修复失败检查", thread_id: threadId,
-            repair_source_run_id: source.runId, repair_source_call_id: source.callId,
-          }));
-        } catch (error) {
-          setBusy(false);
-          finishCurrentTask("error", "无法启动修复任务。");
-          addNotice(error.message, true);
-        }
+    function startRepair(source) {
+      if (activeRunId || !threadId) return;
+      const instruction = "修复刚才失败的开发检查，严格使用受控修复流程。每轮严格串行：只调用一次 edit_file，等待审批和写入完成；然后只调用来源中的原检查命令一次，等待结果后再决定下一轮。禁止并发或批量编辑。最多三轮；不得修改原检查命令或降低测试期望。";
+      addMessage("user", "你", instruction);
+      beginRecentTask(instruction);
+      setBusy(true);
+      void connect().then((ws) => {
+        ws.send(JSON.stringify({
+          type: "run.start", instruction, task_name: "修复失败检查", thread_id: threadId,
+          repair_source_run_id: source.runId, repair_source_call_id: source.callId,
+        }));
+      }).catch((error) => {
+        setBusy(false);
+        finishCurrentTask("error", "无法启动修复任务。");
+        addNotice(error.message, true);
       });
-      card.details.append(button);
-      card.repairButton = button;
     }
 
     function showEvent(event) {
@@ -1968,9 +2032,6 @@
         if (event.repair_status) {
           addNotice(event.repair_message || "受控修复已结束。", event.repair_status === "succeeded" ? "success" : "warning");
         }
-        if (event.name === "run_command" && event.command_result?.status === "failed") {
-          card.repairSource = { runId: event.run_id, callId: event.call_id };
-        }
         currentAssistantBubble = null;
       } else if (event.type === "approval.request") {
         if (event.run_id !== activeRunId || cancelButton.disabled || pendingApprovals.has(event.call_id)) return;
@@ -1992,9 +2053,7 @@
         addNotice(event.repair_message || `本轮结束 · ${event.duration_ms ?? 0} ms · ${event.messages ?? 0} 条消息`, repairStopped ? "warning" : "success");
         closePendingApprovals();
         activeRunId = null;
-        for (const card of toolCards.values()) {
-          if (card.runId === event.run_id && card.repairSource) addRepairAction(card, card.repairSource);
-        }
+        void loadChecksForChat(event.run_id);
         setBusy(false);
         // run.end 仅表示模型结束本轮，任务是否达成要以答复和工具结果为准。
         finishCurrentTask(repairStopped ? "error" : "done", event.repair_message || (repairDone ? "检查通过，修复完成。" : "本轮运行已结束，请查看答复和工具执行结果。"));

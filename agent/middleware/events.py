@@ -43,6 +43,8 @@
 
 from __future__ import annotations
 
+import logging
+
 # time：算工具执行的耗时。
 import time
 import re
@@ -50,6 +52,8 @@ from pathlib import Path
 
 # Any：typing 的任意类型标注。
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # AgentMiddleware：所有自定义中间件的基类。
 # ToolCallRequest：工具调用的请求对象。
@@ -417,6 +421,15 @@ class EventBridgeMiddleware(AgentMiddleware):
                 _close_repair(session, "cancelled", "修复已停止：用户取消了原检查。")
             elif session.attempts >= 3:
                 _close_repair(session, "failed", "修复未完成：三次验证后原检查仍失败。")
+
+        if session is not None and getattr(ctx, "run_id", None):
+            try:
+                from runtime.storage import get_runtime_store
+                get_runtime_store().update_repair_session(
+                    ctx.run_id, status=session.terminal_status or "running", attempts=session.attempts,
+                )
+            except Exception:
+                logger.exception("无法保存修复检查状态：%s", ctx.run_id)
 
         # 没抛异常，但重试中间件可能把失败包成了一条 error 状态的 ToolMessage。
         # 那种情况要报失败，不能报成功。
