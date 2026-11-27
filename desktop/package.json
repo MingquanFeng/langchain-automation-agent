@@ -6,6 +6,7 @@
   "scripts": {
     "tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri",
     "build:runtime": "python3 scripts/build_runtime.py",
+    "check": "node scripts/check.mjs",
     "predev": "npm run build:runtime",
     "dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
     "prebuild": "npm run build:runtime",

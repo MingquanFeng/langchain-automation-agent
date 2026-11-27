@@ -113,6 +113,99 @@ def test_preview_only_allows_declared_node_scripts_and_redacts_arguments(command
     assert error
 
 
+def test_preview_finds_nearest_nested_python_node_and_rust_projects(command_workspace):
+    """在工作区子目录运行命令时，按 cwd 识别最近的项目清单。"""
+    python_project = command_workspace / "services" / "python-api"
+    (python_project / "tests").mkdir(parents=True)
+    (python_project / "pyproject.toml").write_text("[project]\nname = 'python-api'\n", encoding="utf-8")
+
+    python_preview, python_error = commands_mod.prepare_command_preview({
+        "argv": [sys.executable, "-m", "pytest", "tests", "-q"],
+        "cwd": "services/python-api", "timeout_seconds": 60,
+    })
+    assert not python_error
+    assert python_preview["category"] == "python_test"
+    assert python_preview["cwd"] == "services/python-api"
+
+    node_project = command_workspace / "desktop"
+    node_project.mkdir()
+    (node_project / "package.json").write_text(
+        '{"scripts":{"test":"node --test"}}', encoding="utf-8",
+    )
+    node_preview, node_error = commands_mod.prepare_command_preview({
+        "argv": ["npm", "run", "test"], "cwd": "desktop", "timeout_seconds": 60,
+    })
+    assert not node_error
+    assert node_preview["category"] == "node_script"
+
+    rust_project = command_workspace / "native"
+    rust_project.mkdir()
+    (rust_project / "Cargo.toml").write_text("[package]\nname='native'\nversion='0.1.0'\n", encoding="utf-8")
+    rust_preview, rust_error = commands_mod.prepare_command_preview({
+        "argv": ["cargo", "test"], "cwd": "native", "timeout_seconds": 60,
+    })
+    assert not rust_error
+    assert rust_preview["category"] == "rust_check"
+
+
+def test_nested_node_manifest_does_not_fall_back_to_workspace_scripts(command_workspace):
+    """子项目清单优先；不能借工作区根清单放行子项目未声明脚本。"""
+    (command_workspace / "package.json").write_text(
+        '{"scripts":{"test":"node --test"}}', encoding="utf-8",
+    )
+    nested = command_workspace / "desktop"
+    nested.mkdir()
+    (nested / "package.json").write_text('{"scripts":{}}', encoding="utf-8")
+
+    _, error = commands_mod.prepare_command_preview({
+        "argv": ["npm", "run", "test"], "cwd": "desktop", "timeout_seconds": 60,
+    })
+    assert "package.json" in error
+
+
+def test_preview_reports_missing_project_manifests(tmp_path, monkeypatch):
+    """没有对应项目清单时，在审批前明确拒绝三类命令。"""
+    empty_workspace = tmp_path / "empty-workspace"
+    empty_workspace.mkdir()
+    monkeypatch.setattr(files_mod, "SANDBOX", empty_workspace.resolve())
+
+    _, python_error = commands_mod.prepare_command_preview({
+        "argv": [sys.executable, "-m", "pytest", "--version"], "cwd": ".", "timeout_seconds": 60,
+    })
+    assert "未识别为 Python 项目" in python_error
+
+    _, node_error = commands_mod.prepare_command_preview({
+        "argv": ["npm", "run", "test"], "cwd": ".", "timeout_seconds": 60,
+    })
+    assert "package.json" in node_error
+
+    _, rust_error = commands_mod.prepare_command_preview({
+        "argv": ["cargo", "check"], "cwd": ".", "timeout_seconds": 60,
+    })
+    assert "未识别为 Rust 项目" in rust_error
+
+
+def test_preview_reports_missing_node_and_cargo_before_approval(command_workspace, monkeypatch):
+    """Node 或 Cargo 不可用时，在审批前给出明确提示。"""
+    (command_workspace / "package.json").write_text(
+        '{"scripts":{"check":"node --check app.js"}}', encoding="utf-8",
+    )
+    (command_workspace / "Cargo.toml").write_text(
+        "[package]\nname='native'\nversion='0.1.0'\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(commands_mod.shutil, "which", lambda executable, path=None: None)
+
+    _, node_error = commands_mod.prepare_command_preview({
+        "argv": ["npm", "run", "check"], "cwd": ".", "timeout_seconds": 60,
+    })
+    assert "未找到 node" in node_error
+
+    _, cargo_error = commands_mod.prepare_command_preview({
+        "argv": ["cargo", "check"], "cwd": ".", "timeout_seconds": 60,
+    })
+    assert "未找到 cargo" in cargo_error
+
+
 def test_event_preview_rejects_invalid_command_before_approval(command_workspace):
     preview = prepare_approval_preview(
         "run_command", "cmd-1", {"argv": ["pip", "install", "x"]}, AgentContext(),
@@ -332,16 +425,19 @@ def test_process_output_is_bounded_and_redacted(command_workspace):
     assert "[输出已截断至 64 KiB]" in output
 
 
-def test_safe_environment_includes_installed_node_directory(monkeypatch, tmp_path):
-    """桌面 sidecar 的精简 PATH 仍能找到固定位置的 Homebrew npm/node。"""
+def test_safe_environment_includes_installed_node_and_cargo_directories(monkeypatch, tmp_path):
+    """桌面 sidecar 的精简 PATH 只补入固定 Homebrew 与 rustup 工具目录。"""
     node_bin = tmp_path / "node-bin"
     node_bin.mkdir()
     (node_bin / "npm").touch()
+    cargo_bin = tmp_path / ".cargo" / "bin"
+    cargo_bin.mkdir(parents=True)
+    (cargo_bin / "cargo").touch()
     monkeypatch.setattr(commands_mod, "_NODE_BIN_DIRS", (str(node_bin),))
-    monkeypatch.setattr(commands_mod.os, "environ", {"PATH": "/usr/bin", "HOME": "/tmp/home"})
+    monkeypatch.setattr(commands_mod.os, "environ", {"PATH": "/usr/bin", "HOME": str(tmp_path)})
     environment = commands_mod._safe_environment()
-    assert environment["PATH"].split(commands_mod.os.pathsep)[0] == str(node_bin)
-    assert environment["HOME"] == "/tmp/home"
+    assert environment["PATH"].split(commands_mod.os.pathsep)[:2] == [str(node_bin), str(cargo_bin)]
+    assert environment["HOME"] == str(tmp_path)
 
 
 def test_process_timeout_and_cancellation_terminate_the_child_group(command_workspace):

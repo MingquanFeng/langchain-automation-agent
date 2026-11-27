@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -55,9 +56,21 @@ def _resolve_cwd(cwd: str) -> Path:
     return candidate
 
 
-def _manifest_scripts(root: Path) -> set[str]:
-    """读取工作目录根部 package.json 的脚本名，格式异常时安全地返回空集合。"""
-    manifest = root / "package.json"
+def _nearest_project_root(cwd: Path, root: Path, markers: tuple[str, ...]) -> Path | None:
+    """从实际 cwd 向上找最近项目标记，搜索范围不超出工作区根目录。"""
+    current = cwd
+    while current.is_relative_to(root):
+        if any((current / marker).is_file() for marker in markers):
+            return current
+        if current == root:
+            break
+        current = current.parent
+    return None
+
+
+def _manifest_scripts(project_root: Path) -> set[str]:
+    """读取最近 package.json 的脚本名，格式异常时安全地返回空集合。"""
+    manifest = project_root / "package.json"
     if not manifest.is_file():
         return set()
     try:
@@ -68,11 +81,17 @@ def _manifest_scripts(root: Path) -> set[str]:
     return set(scripts) if isinstance(scripts, dict) else set()
 
 
-def _has_python_project(root: Path) -> bool:
-    """用常见清单或测试目录识别 Python 项目，兼容未采用 pyproject 的旧项目。"""
-    return any((root / name).exists() for name in ("pyproject.toml", "pytest.ini", "setup.py", "tests")) or bool(
-        list(root.glob("requirements*.txt"))
-    )
+def _nearest_python_project_root(cwd: Path, root: Path) -> Path | None:
+    """识别 cwd 所属的最近 Python 项目，兼容没有 pyproject 的旧项目。"""
+    markers = ("pyproject.toml", "pytest.ini", "setup.py", "tests")
+    current = cwd
+    while current.is_relative_to(root):
+        if any((current / marker).exists() for marker in markers) or any(current.glob("requirements*.txt")):
+            return current
+        if current == root:
+            break
+        current = current.parent
+    return None
 
 
 def _validate_argv(argv: list[str], cwd: str, timeout_seconds: int) -> tuple[list[str], Path, str]:
@@ -102,7 +121,7 @@ def _validate_argv(argv: list[str], cwd: str, timeout_seconds: int) -> tuple[lis
         is_pytest = command == "pytest" or (len(suffix) >= 2 and suffix[:2] == ["-m", "pytest"])
         if not is_pytest:
             raise CommandValidationError("Python 仅允许 pytest 或 python -m pytest。")
-        if not _has_python_project(root):
+        if _nearest_python_project_root(resolved_cwd, root) is None:
             raise CommandValidationError("当前工作目录未识别为 Python 项目，不能运行 pytest。")
         path_args = suffix if command == "pytest" else suffix[2:]
         for arg in path_args:
@@ -119,12 +138,13 @@ def _validate_argv(argv: list[str], cwd: str, timeout_seconds: int) -> tuple[lis
 
     if command == "npm" and len(argv) == 3 and argv[1] == "run":
         script = argv[2]
-        if script not in _ALLOWED_NPM_SCRIPTS or script not in _manifest_scripts(root):
+        project_root = _nearest_project_root(resolved_cwd, root, ("package.json",))
+        if project_root is None or script not in _ALLOWED_NPM_SCRIPTS or script not in _manifest_scripts(project_root):
             raise CommandValidationError("npm 只允许 package.json 中的 test、lint、build、check 或格式检查脚本。")
         return argv, resolved_cwd, "node_script"
 
     if command == "cargo" and len(argv) >= 2:
-        if not (root / "Cargo.toml").is_file():
+        if _nearest_project_root(resolved_cwd, root, ("Cargo.toml",)) is None:
             raise CommandValidationError("当前工作目录未识别为 Rust 项目，不能运行 Cargo。")
         subcommand = argv[1]
         if subcommand in _CARGO_SUBCOMMANDS and all(item != "--release" or subcommand == "build" for item in argv[2:]):
@@ -145,6 +165,15 @@ def prepare_command_preview(args: dict[str, Any]) -> tuple[dict[str, Any], str]:
         normalized, resolved_cwd, category = _validate_argv(argv, cwd, timeout_seconds)
     except CommandValidationError as exc:
         return {"argv": []}, str(exc)
+    required_executables = {
+        "node_script": ("node", "npm"),
+        "rust_check": ("cargo",),
+        "rust_format_check": ("cargo",),
+    }.get(category, ())
+    environment_path = _safe_environment()["PATH"]
+    for executable in required_executables:
+        if shutil.which(executable, path=environment_path) is None:
+            return {"argv": []}, f"当前环境未找到 {executable}，请安装并配置后再运行检查。"
     return {
         "argv": [_redact(item) for item in normalized],
         "cwd": str(resolved_cwd.relative_to(_workspace_root())) or ".",
@@ -155,11 +184,14 @@ def prepare_command_preview(args: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
 def _safe_environment() -> dict[str, str]:
     """只继承运行常见开发命令所需环境，不传递 API Key 等应用变量。"""
-    # Tauri sidecar 的 PATH 可能不含 Homebrew Node；只补固定系统安装目录，
-    # 不扫描项目目录或用户自定义脚本路径。
+    # Tauri sidecar 的 PATH 可能不含 Homebrew Node 或 rustup Cargo；只补标准安装目录，
+    # 不扫描项目目录或任意用户自定义脚本路径。
     node_paths = [path for path in _NODE_BIN_DIRS if Path(path, "npm").is_file()]
-    path_parts = [*node_paths, os.environ.get("PATH", os.defpath)]
-    environment = {"PATH": os.pathsep.join(path_parts), "HOME": os.environ.get("HOME", "")}
+    home = os.environ.get("HOME", "")
+    cargo_bin = Path(home) / ".cargo" / "bin" if home else None
+    cargo_paths = [str(cargo_bin)] if cargo_bin is not None and (cargo_bin / "cargo").is_file() else []
+    path_parts = [*node_paths, *cargo_paths, os.environ.get("PATH", os.defpath)]
+    environment = {"PATH": os.pathsep.join(path_parts), "HOME": home}
     for name in ("LANG", "LC_ALL", "LC_CTYPE", "TERM"):
         value = os.environ.get(name)
         if value:
