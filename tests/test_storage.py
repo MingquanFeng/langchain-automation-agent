@@ -301,8 +301,13 @@ def test_command_audit_migrates_and_repair_history_cascades(tmp_path):
     store.finish_run("repair", status="succeeded")
     checks = RuntimeStore(path).get_run_checks("repair", workspace=workspace)
     assert checks[0]["repair_round"] == 1
+    assert checks[0]["repair_rounds"] == 1
     assert checks[0]["repair_status"] == "succeeded"
     assert checks[0]["repair_attempts"] == 1
+    assert checks[0]["repair_sessions"] == [{
+        "status": "succeeded", "attempts": 1,
+        "backup_ids": ["20261127T120000Z-abcdef123456"],
+    }]
     assert checks[0]["repair_backup_ids"] == ["20261127T120000Z-abcdef123456"]
 
     assert store.delete_run("source", workspace=workspace) is True

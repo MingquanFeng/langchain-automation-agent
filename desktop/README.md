@@ -26,6 +26,8 @@ AUTOMATION_AGENT_PYTHON=/opt/miniconda3/envs/langchain1.2/bin/python npm run bui
 
 `npm run dev` 和 `npm run build` 会先调用 `scripts/build_runtime.py`，生成当前 macOS 架构的 PyInstaller sidecar，再启动 Tauri。`npm run build` 成功后会自动把最新的 `阿序 · Axu.app` 移到桌面，并替换桌面上的旧版本。首次需要联网安装构建依赖。sidecar 会从当前 Python 环境收集运行时依赖；桌面应用使用时不要求用户安装 Python。当前只配置 Apple Silicon 与 Intel Mac 的构建目标，签名和公证尚未配置。
 
+完整开发检查与桌面验收流程记录在仓库根目录 [`PLAN.md`](../PLAN.md)。2026-11-27 已用隔离 Node 项目验收真实 `.app` 的修复通过、三轮失败停止、重启后运行历史和备份显示，以及不同工作目录的历史隔离。重建命令会替换桌面 App：`AUTOMATION_AGENT_PYTHON=/opt/miniconda3/envs/langchain1.2/bin/python npm run build`。
+
 桌面应用启动时会选择一个空闲端口，只绑定 `127.0.0.1`。宿主通过 `/health` 核对本次启动标记，再把连接地址和仅本次启动有效的凭证交给工作台。工作台通过 `Authorization: Bearer` 访问 HTTP API，并在 WebSocket 子协议握手中传递凭证。重启服务会更换凭证，工作台只向宿主提供的地址发送凭证。
 
 托管服务要求逐次审批写入和外部通知，并关闭定时任务管理。多个工具同时请求审批时，输入框上方每次只显示一项，可以展开参数或文件差异。每项从展示时起有 60 秒可供决定，取消任务会撤销待批请求。独立运行的 `python -m runtime` 保留原有接口用于开发。应用关闭窗口或退出时会向托管服务发送 `SIGTERM`，超时后再回收整个 sidecar 进程组。

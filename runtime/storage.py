@@ -575,12 +575,21 @@ class RuntimeStore:
                 backups = []
             item["repair_backup_ids"] = backups if isinstance(backups, list) and all(isinstance(value, str) for value in backups) else []
             sessions = related_by_call.get(item["call_id"], [])
-            item["repair_rounds"] = sum(session["attempts"] for session in sessions)
+            if sessions:
+                item["repair_rounds"] = sum(session["attempts"] for session in sessions)
+            else:
+                item["repair_rounds"] = item["repair_attempts"] or item["repair_round"] or 0
             item["repair_sessions"] = [
                 {"status": session["status"], "attempts": session["attempts"],
                  "backup_ids": self._safe_json_string_list(session["backup_ids"])}
                 for session in sessions
             ]
+            if not sessions and item["repair_status"] is not None:
+                item["repair_sessions"] = [{
+                    "status": item["repair_status"],
+                    "attempts": item["repair_attempts"] or 0,
+                    "backup_ids": item["repair_backup_ids"],
+                }]
             item["repair_backup_ids"] = list(dict.fromkeys(
                 [*item["repair_backup_ids"], *(backup for session in item["repair_sessions"] for backup in session["backup_ids"])]
             ))
