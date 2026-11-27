@@ -392,6 +392,8 @@
         openModelDialog();
       } else if (message?.type === "automation-agent.choose-working-directory") {
         void chooseWorkingDirectory(message.path);
+      } else if (message?.type === "automation-agent.remove-working-directory") {
+        void removeWorkingDirectory(message.path);
       } else if (message?.type === "automation-agent.workbench.ready") {
         clearTimeout(frameTimer);
         frameLoaded = true;
@@ -598,6 +600,26 @@
       } finally {
         switchingDirectory = false;
         frame.inert = false;
+      }
+    }
+
+    async function removeWorkingDirectory(path) {
+      if (switchingDirectory || typeof path !== "string" || !path) return;
+      try {
+        const directories = await nativeInvoke("remove_working_directory", { path });
+        if (!Array.isArray(directories) || !managedRuntime) throw new Error("本机服务没有返回已保存目录列表。");
+        managedRuntime.directories = directories;
+        syncWorkingDirectoryToFrame();
+        frame.contentWindow.postMessage({
+          type: "automation-agent.directory-removal-result",
+          success: true,
+        }, window.location.origin);
+      } catch (error) {
+        frame.contentWindow?.postMessage({
+          type: "automation-agent.directory-removal-result",
+          success: false,
+          error: error.message || String(error),
+        }, window.location.origin);
       }
     }
 

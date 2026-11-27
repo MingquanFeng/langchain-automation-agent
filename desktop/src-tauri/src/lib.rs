@@ -176,6 +176,37 @@ fn save_working_directory(
     let mut directories = previous.to_vec();
     directories.retain(|saved| saved != path);
     directories.insert(0, path.to_path_buf());
+    persist_working_directories(settings_path, &directories)?;
+    Ok(directories)
+}
+
+// 只从快捷目录清单移除路径；它不删除目录内容，也不允许移除正在使用的目录。
+fn remove_saved_working_directory(
+    settings_path: &std::path::Path,
+    previous: &[PathBuf],
+    active: &std::path::Path,
+    path: &std::path::Path,
+) -> Result<Vec<PathBuf>, String> {
+    if path == active {
+        return Err("当前工作目录不能从列表移除。".into());
+    }
+    if !previous.iter().any(|saved| saved == path) {
+        return Err("该目录不在已保存列表中。".into());
+    }
+    let directories: Vec<PathBuf> = previous
+        .iter()
+        .filter(|saved| *saved != path)
+        .cloned()
+        .collect();
+    persist_working_directories(settings_path, &directories)?;
+    Ok(directories)
+}
+
+// 原子保存目录清单，避免应用退出或磁盘写入失败时留下半份配置。
+fn persist_working_directories(
+    settings_path: &std::path::Path,
+    directories: &[PathBuf],
+) -> Result<(), String> {
     // 旧配置只有一行。继续每行保存一个规范路径，首行代表上次使用的目录。
     // 临时文件写完再替换，退出或磁盘写满时仍可读取原清单。
     let temporary = settings_path.with_extension(format!("{}.tmp", std::process::id()));
@@ -188,7 +219,7 @@ fn save_working_directory(
             options.mode(0o600);
         }
         let mut file = options.open(&temporary)?;
-        for directory in &directories {
+        for directory in directories {
             writeln!(file, "{}", directory.display())?;
         }
         file.sync_all()?;
@@ -198,7 +229,7 @@ fn save_working_directory(
         let _ = fs::remove_file(&temporary);
         return Err(format!("无法保存工作目录：{error}"));
     }
-    Ok(directories)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -225,6 +256,7 @@ mod workspace_tests {
         assert_eq!(switched_back, a);
         assert_eq!(final_list, [a, b]);
     }
+
 }
 
 #[tauri::command]
@@ -260,6 +292,30 @@ fn set_working_directory(
         return Err(error);
     }
     Ok(true)
+}
+
+#[tauri::command]
+fn remove_working_directory(
+    path: String,
+    state: State<'_, Arc<RuntimeState>>,
+) -> Result<Vec<String>, String> {
+    if path.trim().is_empty() || path.chars().any(char::is_control) {
+        return Err("请选择有效的工作目录。".into());
+    }
+    let path = PathBuf::from(path);
+    let mut info = state.info.lock().expect("runtime info mutex poisoned");
+    let settings_path = state.app_home.join("working-directory.txt");
+    let directories = remove_saved_working_directory(
+        &settings_path,
+        &info.working_directories,
+        &info.working_directory,
+        &path,
+    )?;
+    info.working_directories = directories.clone();
+    Ok(directories
+        .iter()
+        .map(|directory| directory.to_string_lossy().into_owned())
+        .collect())
 }
 
 #[tauri::command]
@@ -620,7 +676,8 @@ pub fn run() {
             read_runtime_log,
             restart_runtime,
             save_model_api_key,
-            set_working_directory
+            set_working_directory,
+            remove_working_directory
         ])
         .setup(|app| {
             let state = create_runtime_state(app.handle())

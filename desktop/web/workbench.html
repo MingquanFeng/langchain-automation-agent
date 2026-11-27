@@ -407,9 +407,13 @@
     .directory-groups { min-height: 0; overflow-y: auto; }
     .saved-directories { display: grid; gap: 3px; }
     .saved-directories:not(:empty) { margin: 6px 0; }
-    .saved-directory { width: 100%; min-width: 0; border: 0; border-radius: 10px; padding: 8px 10px; background: transparent; text-align: left; }
+    .saved-directory-item { min-width: 0; display: flex; align-items: center; gap: 3px; }
+    .saved-directory { width: auto; min-width: 0; flex: 1; border: 0; border-radius: 10px; padding: 8px 10px; background: transparent; text-align: left; }
     .saved-directory:hover, .saved-directory[aria-current="true"] { background: #eff7f1; }
     .saved-directory .thread-project-copy, .saved-directory .thread-project-name, .saved-directory .thread-project-path { display: block; }
+    .directory-remove { min-height: 27px; border: 0; border-radius: 7px; padding: 0 7px; color: #a14b4b; background: transparent; font-size: 9px; white-space: nowrap; }
+    .directory-remove:hover:not(:disabled) { background: #fff0ed; }
+    .directory-remove:disabled { cursor: not-allowed; opacity: .45; }
     .thread-project { min-height: 0; border-radius: 13px; padding: 10px; background: linear-gradient(120deg, #eff7f1, #f7fbf8); }
     .thread-project-row { display: flex; align-items: center; gap: 8px; }
     .thread-project-row > svg { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: #26844c; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -1009,6 +1013,8 @@
     }
 
     function directoryChoice(path) {
+      const row = document.createElement("div");
+      row.className = "saved-directory-item";
       const button = document.createElement("button");
       button.type = "button";
       button.className = "thread-project-row saved-directory";
@@ -1029,7 +1035,25 @@
         directoryDialog.close();
         if (path !== currentWorkingDirectory) requestDirectory(path);
       });
-      return button;
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "directory-remove";
+      removeButton.textContent = "移除";
+      removeButton.title = "从工作目录列表移除，不删除磁盘文件";
+      removeButton.setAttribute("aria-label", `从列表移除工作目录 ${directoryLabel(path)}`);
+      removeButton.disabled = sendButton.disabled || path === currentWorkingDirectory;
+      removeButton.addEventListener("click", () => requestRemoveDirectory(path));
+      row.append(button, removeButton);
+      return row;
+    }
+
+    function requestRemoveDirectory(path) {
+      if (path === currentWorkingDirectory || sendButton.disabled) return;
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: "automation-agent.remove-working-directory", path }, window.location.origin);
+      } else {
+        addNotice("移除已保存目录仅在桌面应用中可用。", true);
+      }
     }
 
     function setWorkingDirectory(path, directories) {
@@ -1812,7 +1836,7 @@
       // 宿主切换目录会重启服务。从提交到任务终态都锁定目录和会话入口。
       workingDirectoryButton.disabled = busy;
       sidebarChooseDirectory.disabled = busy;
-      document.querySelectorAll(".saved-directory, .thread-item").forEach((item) => { item.disabled = busy; });
+      document.querySelectorAll(".saved-directory, .directory-remove, .thread-item").forEach((item) => { item.disabled = busy; });
       cancelButton.classList.toggle("hidden", !busy);
       sendButton.textContent = busy ? "运行中…" : "发送 ↑";
       cancelButton.disabled = false;
@@ -2405,6 +2429,11 @@
     if (window.parent !== window) {
       window.addEventListener("message", (event) => {
         if (event.source !== window.parent || event.origin !== window.location.origin) return;
+        if (event.data?.type === "automation-agent.directory-removal-result") {
+          if (event.data.success) addNotice("已从工作目录列表移除；磁盘文件未删除。");
+          else addNotice(`移除工作目录失败：${event.data.error || "未知错误"}`, true);
+          return;
+        }
         if (event.data?.type === "automation-agent.working-directory") {
           setWorkingDirectory(event.data.path, event.data.directories);
           return;
