@@ -75,7 +75,7 @@ from ..context import TaskCancelledError, check_cancelled
 # 完整塞进事件里会撑爆客户端的界面与网络。
 # 客户端要完整结果的话，让它自己去查文件。
 RESULT_PREVIEW_LIMIT = 500
-_REPAIR_EXTENSIONS = frozenset({".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".c", ".h", ".cc", ".cpp", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php", ".cs", ".vue", ".svelte", ".html", ".css", ".scss", ".sass", ".less"})
+_REPAIR_EXTENSIONS = frozenset({".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".c", ".h", ".cc", ".cpp", ".rs", ".go", ".java", ".kt", ".swift", ".rb", ".php", ".cs", ".vue", ".svelte", ".html", ".css", ".scss", ".sass", ".less"})
 _REPAIR_BLOCKED_PARTS = frozenset({".github", ".gitlab", "alembic", "deploy", "deployment", "infra", "migrations", "migration", "terraform"})
 
 
@@ -231,7 +231,10 @@ class EventBridgeMiddleware(AgentMiddleware):
         )
         repair_error = _repair_error(ctx, name, args)
         if repair_error:
-            self._emit({"type": "tool.error", "name": name, "call_id": call_id, "message": repair_error, **_repair_payload(getattr(ctx, "repair_session", None))})
+            repair_session = getattr(ctx, "repair_session", None)
+            if repair_session is not None:
+                _close_repair(repair_session, "policy_blocked", "修复已停止：工具调用超出受控修复范围。")
+            self._emit({"type": "tool.error", "name": name, "call_id": call_id, "message": repair_error, **_repair_payload(repair_session)})
             return ToolMessage(content=repair_error, name=name, tool_call_id=call_id, status="error")
         session = getattr(ctx, "repair_session", None)
         if session is not None and name == "edit_file":

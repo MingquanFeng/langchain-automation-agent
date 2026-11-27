@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.context import AgentContext, RepairSession, TaskCancelledError
-from agent.middleware.events import _command_result, _repair_error
+from agent.middleware.events import EventBridgeMiddleware, _command_result, _repair_error
 from agent.tools import commands as commands_mod
 from agent.tools import files as files_mod
 from agent.tools.edits import prepare_approval_preview
@@ -183,6 +183,7 @@ def test_repair_session_only_allows_source_and_three_validation_attempts():
     })
     assert "源码" in _repair_error(context, "edit_file", {"path": "package.json"})
     assert not _repair_error(context, "edit_file", {"path": "src/page.tsx"})
+    assert not _repair_error(context, "edit_file", {"path": "tests/always-fail.cjs"})
 
     session.edited_since_check = True
     assert "只允许一次编辑" in _repair_error(context, "edit_file", {"path": "src/page.tsx"})
@@ -197,6 +198,36 @@ def test_repair_session_only_allows_source_and_three_validation_attempts():
     session.edit_pending = False
     session.attempts = 3
     assert "3 次上限" in _repair_error(context, "edit_file", {"path": "src/page.tsx"})
+
+
+def test_repair_policy_violation_closes_session_and_emits_terminal_status(monkeypatch):
+    """越权编辑被护栏拒绝后应结束修复，不能继续探测无关文件。"""
+    from langchain_core.messages import ToolMessage
+
+    session = RepairSession(argv=["npm", "test"], cwd=".", timeout_seconds=60, output_summary="failed")
+    context = AgentContext(allow_write=False, repair_session=session, single_command=False)
+
+    class _Req:
+        tool_call = {"name": "edit_file", "args": {"path": "package.json"}, "id": "blocked-edit"}
+        tool = None
+        state = {}
+        runtime = type("_Runtime", (), {"context": context})()
+
+    events = []
+    middleware = EventBridgeMiddleware()
+    middleware._emit = events.append
+
+    def must_not_run(request):
+        raise AssertionError("被修复护栏拒绝的编辑不得执行")
+
+    result = middleware.wrap_tool_call(_Req(), must_not_run)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert session.terminal_status == "policy_blocked"
+    assert events[-1]["repair_status"] == "policy_blocked"
+
+
 def test_three_failed_repair_checks_stop_real_tool_chain(command_workspace):
     """真实编辑与 pytest 连续失败三轮后，第四次编辑不得申请审批或落盘。"""
     from langchain_core.messages import AIMessage, HumanMessage

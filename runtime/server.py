@@ -965,7 +965,8 @@ async def _handle_run_start(
             return
         repair_session = RepairSession(**source)
         instruction = (
-            "修复以下失败开发检查。先分析诊断，再以最小改动修复源码或测试文件。"
+            "修复以下失败开发检查。先分析诊断，再以最小改动修复与失败直接相关的源码或测试文件；"
+            "不得修改无关源码来绕过失败。若检查脚本主动制造失败或没有可定位的修复目标，停止并说明原因。"
             "每次 edit_file 和验证命令都会单独请求用户批准；只可复跑原命令，最多 3 次。"
             "检查通过后立即汇总；第三次仍失败时停止并说明剩余问题。\n\n"
             f"原命令：{source['argv']}\ncwd：{source['cwd']}\n超时：{source['timeout_seconds']} 秒\n"
