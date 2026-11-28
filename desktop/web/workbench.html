@@ -1156,6 +1156,13 @@
 
     function setWorkingDirectory(path, directories) {
       closeDirectoryMenu();
+      const changed = Boolean(currentWorkingDirectory && path !== currentWorkingDirectory);
+      if (changed) {
+        newChatButton.click();
+        recentTasks.length = 0;
+        renderRecentTasks();
+        sidebarThreadList.replaceChildren();
+      }
       currentWorkingDirectory = typeof path === "string" ? path : "";
       savedDirectories = Array.isArray(directories) ? directories : [];
       const directoryName = directoryLabel(currentWorkingDirectory);
@@ -1177,6 +1184,7 @@
       sidebarSavedDirectories.replaceChildren(...savedDirectories.filter((item) => item !== path).map(directoryChoice));
       directoryChoices.replaceChildren(...savedDirectories.map(directoryChoice));
       historyScope.hidden = !currentWorkingDirectory;
+      if (changed) void loadSidebarThreads();
     }
 
     // 把协议风险等级转换成界面上的简短说明，帮助用户快速判断操作影响。
@@ -1934,7 +1942,7 @@
       sendButton.disabled = busy;
       input.disabled = busy;
       newChatButton.disabled = busy;
-      // 宿主切换目录会重启服务。从提交到任务终态都锁定目录和会话入口。
+      // 任务运行期间锁定目录和会话入口，避免同一轮任务跨工作区。
       workingDirectoryButton.disabled = busy;
       sidebarChooseDirectory.disabled = busy;
       document.querySelectorAll(".saved-directory, .directory-menu-trigger, .thread-item").forEach((item) => { item.disabled = busy; });
