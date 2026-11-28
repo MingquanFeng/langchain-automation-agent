@@ -162,6 +162,7 @@ const cancelButton = { classList: { toggle() {} } };
 const document = { querySelectorAll() { return []; } };
 function addNotice() {}
 function closePendingApprovals() { approvalsClosed = true; }
+function finishToolRecordGroup() {}
 function finishCurrentTask(value) { state = value; }
 function loadSidebarThreads() {}
 eval(html.slice(html.indexOf("    function setBusy(busy) {"),

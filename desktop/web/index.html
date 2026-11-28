@@ -404,12 +404,6 @@
         showSettings(false);
         requestWorkbenchReconnect(++attemptId);
       } else if (message?.type === "automation-agent.workbench.connection") {
-        if (switchingDirectory && message.state !== "connected") {
-          // 旧 WebSocket 在目录切换时必然断开；此时侧车正在重启，不是可重试的最终失败。
-          setConnection("connecting", "正在切换工作目录", currentOrigin);
-          setStatus("connecting", "正在启动新工作目录的 Agent 服务并重连；不会重发任务。");
-          return;
-        }
         setConnection(message.state, message.label || "Agent 状态已更新", currentOrigin);
         if (message.state === "connected") {
           clearTimeout(frameTimer);
@@ -564,20 +558,11 @@
         // 路径失效时宿主会返回错误，此时原会话仍在，用户可以继续操作。
         const switched = await nativeInvoke("set_working_directory", { path: selected });
         if (switched === false && currentOrigin === managedRuntime?.origin) return;
-        clearTimeout(frameTimer);
-        attemptId += 1;
-        currentOrigin = null;
-        frameLoaded = false;
-        updateSettingsEntry();
-        frame.hidden = true;
-        frame.src = "about:blank";
-        workspace.dataset.mode = "loading";
-        addressInput.value = "";
-        addressInput.placeholder = "正在等待本机服务分配端口…";
-        addressInput.disabled = true;
-        connectButton.disabled = true;
-
-        await waitForManagedRuntime();
+        const info = await nativeInvoke("runtime_info");
+        if (info.status !== "ready") throw new Error(info.error || "Agent 服务未就绪，目录已保存但未同步到工作台。");
+        rememberManagedRuntime(info);
+        syncWorkingDirectoryToFrame();
+        setStatus("connected", "工作目录已切换；Agent 服务和 WebSocket 保持连接。");
       } catch (error) {
         setStatus("error", `切换工作目录失败：${error.message || error}`);
         showSettings(true);
@@ -594,6 +579,7 @@
             showSettings(true);
           } else if (info.status === "ready") {
             rememberManagedRuntime(info);
+            syncWorkingDirectoryToFrame();
             if (!frameLoaded) connectToService(info.serviceUrl, { managed: true });
           }
         } catch { /* 保留上方错误状态。 */ }

@@ -262,7 +262,6 @@ mod workspace_tests {
 #[tauri::command]
 fn set_working_directory(
     path: String,
-    app: tauri::AppHandle,
     state: State<'_, Arc<RuntimeState>>,
 ) -> Result<bool, String> {
     if path.trim().is_empty() || path.chars().any(char::is_control) {
@@ -286,11 +285,6 @@ fn set_working_directory(
         info.working_directory = path;
     }
 
-    stop_runtime(state.inner());
-    if let Err(error) = start_runtime(&app, state.inner()) {
-        state.fail(error.clone());
-        return Err(error);
-    }
     Ok(true)
 }
 
@@ -428,9 +422,11 @@ fn create_runtime_state(app: &tauri::AppHandle) -> Result<Arc<RuntimeState>, Str
     let default_working_directory = app_home.join("data");
     fs::create_dir_all(&default_working_directory)
         .map_err(|error| format!("无法创建默认工作目录：{error}"))?;
-    let (working_directory, working_directories) = read_working_directories(
-        &app_home.join("working-directory.txt"), &default_working_directory,
-    )?;
+    let working_directory_path = app_home.join("working-directory.txt");
+    let (working_directory, working_directories) =
+        read_working_directories(&working_directory_path, &default_working_directory)?;
+    // 首次启动时也持久化默认目录；常驻 sidecar 会用这份宿主清单校验每轮工作区。
+    persist_working_directories(&working_directory_path, &working_directories)?;
 
     let config_path = app_home.join(".env");
     if !config_path.exists() {

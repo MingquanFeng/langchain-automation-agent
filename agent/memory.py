@@ -61,6 +61,7 @@ from langgraph.store.base import BaseStore
 # 导入 config 模块，而不是在这里复制 DATA_DIR / RUNTIME 的取值逻辑。
 # 这样命令行覆盖工作目录后，current_memory_namespaces() 仍以统一配置为准。
 from . import config
+from .workspace import current_workspace
 
 
 # ============================================================
@@ -219,14 +220,12 @@ def current_memory_namespaces() -> MemoryNamespaces:
     """
     返回当前运行配置对应的用户级与项目级命名空间。
 
-    RUNTIME.memory_user_id 来自 MEMORY_USER_ID；DATA_DIR 来自普通环境配置
-    或桌面 sidecar 注入的 __CLI_DATA_DIR__。因此桌面版切换工作目录后，
-    新启动的 sidecar 会自然落到新的项目命名空间，而 Store 数据库本身
-    仍位于应用支持目录中。
+    RUNTIME.memory_user_id 来自 MEMORY_USER_ID；桌面任务使用本次运行绑定的
+    工作目录生成项目命名空间。用户级记忆仍跨项目共享。
     """
     return build_memory_namespaces(
         user_id=config.RUNTIME.memory_user_id,
-        project_dir=config.DATA_DIR,
+        project_dir=current_workspace(config.DATA_DIR),
     )
 
 

@@ -45,7 +45,7 @@ class CommandValidationError(ValueError):
 
 def _workspace_root() -> Path:
     """返回规范化的工作目录；命令及 cwd 永远不能走出这里。"""
-    return files_mod.SANDBOX.resolve()
+    return files_mod.workspace_root()
 
 
 def _resolve_cwd(cwd: str) -> Path:
@@ -328,7 +328,7 @@ def run_command(
         argv=json.dumps(preview["argv"], ensure_ascii=False),
         cwd=preview["cwd"],
         timeout_seconds=timeout_seconds,
-        workspace=str(files_mod.SANDBOX.resolve()),
+        workspace=str(files_mod.workspace_root()),
         repair_run_id=str(getattr(context, "run_id", "") or "") if getattr(context, "repair_session", None) else None,
         repair_source_run_id=getattr(getattr(context, "repair_session", None), "source_run_id", None),
         repair_source_call_id=getattr(getattr(context, "repair_session", None), "source_call_id", None),

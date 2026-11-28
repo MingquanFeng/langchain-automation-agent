@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import re
@@ -19,6 +20,7 @@ from agent.context import AgentContext
 from agent.graph import build_agent
 from agent.tools import edits as edits_mod
 from agent.tools import files as files_mod
+from agent.workspace import workspace_scope
 from fakes import FakeModel
 
 
@@ -237,3 +239,28 @@ def test_backup_ids_and_workspace_ownership_are_validated(edit_workspace, monkey
         "restore_file_backup", "wrong-workspace", {"backup_id": backup_id}, context,
     )
     assert "另一个工作目录" in wrong_workspace.error
+
+
+def test_backup_pruning_keeps_other_workspace_records(edit_workspace, tmp_path):
+    """一个项目超过备份上限时，只删除本项目最旧备份。"""
+    _, backups = edit_workspace
+    project_a, project_b = tmp_path / "project-a", tmp_path / "project-b"
+    project_a.mkdir()
+    project_b.mkdir()
+    backups.mkdir()
+
+    project_a_backups = []
+    for index in range(edits_mod.MAX_BACKUPS + 1):
+        path = backups / f"project-a-{index:03}.json"
+        path.write_text(json.dumps({"workspace": str(project_a)}), encoding="utf-8")
+        os.utime(path, (index + 1, index + 1))
+        project_a_backups.append(path)
+    project_b_backup = backups / "project-b.json"
+    project_b_backup.write_text(json.dumps({"workspace": str(project_b)}), encoding="utf-8")
+
+    with workspace_scope(project_a):
+        edits_mod._prune_backups()
+
+    assert not project_a_backups[0].exists()
+    assert all(path.exists() for path in project_a_backups[1:])
+    assert project_b_backup.exists()

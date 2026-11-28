@@ -51,6 +51,7 @@ from pathlib import Path
 # 3. 函数的类型注解变成参数的 JSON Schema。
 # 4. 函数体多出 .invoke() 等调用方式。
 from langchain_core.tools import tool
+from ..workspace import current_workspace
 
 # DATA_DIR：项目的数据目录，定义在 agent/config.py。
 #
@@ -67,6 +68,11 @@ from ..config import DATA_DIR
 # resolve() 会把路径规范化（消掉 ..、软链接等），
 # 之后再做包含关系判断，避免用 ../ 绕出去。
 SANDBOX = DATA_DIR.resolve()
+
+
+def workspace_root() -> Path:
+    """返回当前运行绑定的沙箱根目录；普通调用仍使用配置默认目录。"""
+    return current_workspace(SANDBOX).resolve()
 
 # MAX_READ_BYTES：单次读取的字节上限。
 #
@@ -181,9 +187,10 @@ def _resolve(path: str) -> Path:
         绝对路径、软链接都能绕出去。
         先规范化再判断包含关系才是可靠的。
     """
-    target = (SANDBOX / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
-    if not target.is_relative_to(SANDBOX):
-        raise ValueError(f"路径超出允许范围（仅允许 {SANDBOX}）：{path}")
+    sandbox = workspace_root()
+    target = (sandbox / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+    if not target.is_relative_to(sandbox):
+        raise ValueError(f"路径超出允许范围（仅允许 {sandbox}）：{path}")
     return target
 
 
@@ -248,7 +255,7 @@ def _is_sensitive_file(target: Path) -> bool:
         return True
 
     try:
-        relative_parts = target.relative_to(SANDBOX).parts[:-1]
+        relative_parts = target.relative_to(workspace_root()).parts[:-1]
     except ValueError:
         return True
     return any(part.lower() in SENSITIVE_DIR_NAMES for part in relative_parts)
@@ -258,7 +265,7 @@ def _is_sensitive_path(path: str, resolved: Path) -> bool:
     """同时检查用户给出的路径和解析后的目标，避免用软链接绕过保护。"""
     requested = Path(path)
     if not requested.is_absolute():
-        requested = SANDBOX / requested
+        requested = workspace_root() / requested
     return _is_sensitive_file(requested) or _is_sensitive_file(resolved)
 
 
@@ -303,7 +310,7 @@ def _walk_visible(root: Path, stats: _ScanStats):
                     resolved = candidate.resolve()
                     excluded = not (
                         resolved.is_relative_to(root)
-                        and resolved.is_relative_to(SANDBOX)
+                        and resolved.is_relative_to(workspace_root())
                     )
                 except (OSError, RuntimeError):
                     excluded = True
@@ -331,7 +338,7 @@ def _iter_visible_files(root: Path, stats: _ScanStats):
                 resolved = candidate.resolve()
                 if not (
                     resolved.is_relative_to(root)
-                    and resolved.is_relative_to(SANDBOX)
+                    and resolved.is_relative_to(workspace_root())
                 ):
                     continue
             except (OSError, RuntimeError):
@@ -402,7 +409,7 @@ def _describe(target: Path) -> str:
     """
     stat = target.stat()
     mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
-    return f"{target.relative_to(SANDBOX)}  ({stat.st_size} bytes, {mtime})"
+    return f"{target.relative_to(workspace_root())}  ({stat.st_size} bytes, {mtime})"
 
 
 def _read_text(target: Path) -> str:
@@ -550,7 +557,8 @@ def directory_tree(
         return f"max_entries 必须在 1-{MAX_TREE_ENTRIES} 之间。"
 
     stats = _ScanStats()
-    label = "." if root == SANDBOX else str(root.relative_to(SANDBOX))
+    sandbox = workspace_root()
+    label = "." if root == sandbox else str(root.relative_to(sandbox))
     lines = [f"[D] {label}/"]
     truncated = False
 
@@ -573,7 +581,7 @@ def directory_tree(
                     if not (
                         candidate.is_file()
                         and resolved.is_relative_to(root)
-                        and resolved.is_relative_to(SANDBOX)
+                        and resolved.is_relative_to(workspace_root())
                     ):
                         continue
                 except (OSError, RuntimeError):
@@ -709,7 +717,7 @@ def search_text(
             preview = line.strip().replace("\t", "    ")
             if len(preview) > MAX_SEARCH_LINE_CHARS:
                 preview = preview[:MAX_SEARCH_LINE_CHARS] + "…"
-            relative = candidate.relative_to(SANDBOX)
+            relative = candidate.relative_to(workspace_root())
             results.append(f"{relative}:{line_number}: {preview}")
         if has_more:
             break
@@ -805,7 +813,7 @@ def write_file(path: str, content: str) -> str:
     # parents=True 递归建父目录，exist_ok=True 目录已存在也不报错。
     target.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(target, content)
-    return f"已写入 {target.relative_to(SANDBOX)}（{len(content)} 字符）"
+    return f"已写入 {target.relative_to(workspace_root())}（{len(content)} 字符）"
 
 
 @tool(parse_docstring=True)
@@ -829,7 +837,7 @@ def append_file(path: str, content: str) -> str:
     # 原子替换反而要把整个旧内容读进内存再写回，大文件上不划算。
     with target.open("a", encoding="utf-8") as f:
         f.write(content)
-    return f"已追加 {len(content)} 字符到 {target.relative_to(SANDBOX)}"
+    return f"已追加 {len(content)} 字符到 {target.relative_to(workspace_root())}"
 
 
 @tool(parse_docstring=True)
@@ -850,7 +858,7 @@ def save_json(path: str, data: dict | list) -> str:
     # ensure_ascii=False：保留中文原样，不要转成 \uXXXX。
     # indent=2：缩进两格，方便人和模型都能读。
     _atomic_write(target, json.dumps(data, ensure_ascii=False, indent=2))
-    return f"已保存 JSON 到 {target.relative_to(SANDBOX)}"
+    return f"已保存 JSON 到 {target.relative_to(workspace_root())}"
 
 
 @tool(parse_docstring=True)

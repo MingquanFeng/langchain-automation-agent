@@ -66,6 +66,7 @@ from ..tools.edits import (
     prepare_approval_preview,
 )
 from ..context import TaskCancelledError, check_cancelled
+from ..workspace import workspace_scope
 
 
 # ============================================================
@@ -191,6 +192,13 @@ class EventBridgeMiddleware(AgentMiddleware):
     """
 
     def wrap_tool_call(self, request, handler):
+        """按当前运行工作区包住完整工具流程，包括审批预览和真正执行。"""
+        runtime = getattr(request, "runtime", None)
+        context = getattr(runtime, "context", None)
+        with workspace_scope(getattr(context, "workspace", None)):
+            return self._wrap_tool_call_in_workspace(request, handler)
+
+    def _wrap_tool_call_in_workspace(self, request, handler):
         """包住一次工具调用，在前后发事件。
 
         参数：

@@ -1025,6 +1025,9 @@
 
     function serviceFetch(path, { method = "GET", body } = {}) {
       const headers = serviceAccessToken ? { Authorization: `Bearer ${serviceAccessToken}` } : {};
+      if (serviceAccessToken && currentWorkingDirectory) {
+        headers["X-Agent-Workspace"] = encodeURIComponent(currentWorkingDirectory);
+      }
       if (body !== undefined) headers["Content-Type"] = "application/json";
       return fetch(new URL(path, `${serviceOrigin}/`), {
         method,
@@ -2223,6 +2226,7 @@
       void connect().then((ws) => {
         ws.send(JSON.stringify({
           type: "run.start", instruction, task_name: "修复失败检查", thread_id: threadId,
+          workspace: currentWorkingDirectory || undefined,
           repair_source_run_id: source.runId, repair_source_call_id: source.callId,
         }));
       }).catch((error) => {
@@ -2448,6 +2452,7 @@
           instruction,
           task_name: instruction.slice(0, 30),
           thread_id: threadId || undefined,
+          workspace: currentWorkingDirectory || undefined,
         }));
       } catch (error) {
         setBusy(false);

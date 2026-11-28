@@ -132,6 +132,9 @@ class AgentContext:
     # 默认 manual，表示手动任务。
     task_name: str = "manual"
 
+    # 当前任务使用的规范化项目路径；桌面端每轮独立传入，不修改进程全局配置。
+    workspace: str | None = field(default=None, repr=False, compare=False)
+
     # --------------------------------------------------------
     # 2. 任务触发来源
     # --------------------------------------------------------

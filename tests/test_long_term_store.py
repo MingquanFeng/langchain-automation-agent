@@ -42,10 +42,12 @@ from agent.memory import (
     MemoryConflictError,
     MemoryValidationError,
     build_memory_namespaces,
+    current_memory_namespaces,
     delete_memory_record,
     list_memory_records,
     save_memory_record,
 )
+from agent.workspace import workspace_scope
 
 
 # ============================================================
@@ -236,12 +238,26 @@ def test_namespaces_do_not_expose_local_identity_or_absolute_path(tmp_path):
     # 用户原文和项目绝对路径都不应直接出现在命名空间中。
     assert "alice@example.com" not in serialized
     assert str(project.resolve()) not in serialized
-
     # profile 与 projects 是同一用户根节点下的两个并列分支，
     # 查询用户级记忆时不会因前缀匹配混入项目级数据。
     assert namespaces.user[-1] == "profile"
     assert namespaces.project[-2] == "projects"
     assert namespaces.user[:-1] == namespaces.project[:-2]
+
+
+def test_project_memory_namespace_follows_each_run_workspace(tmp_path):
+    """并发工作区各用独立项目记忆；用户级偏好仍跨项目共享。"""
+    project_a, project_b = tmp_path / "project-a", tmp_path / "project-b"
+    project_a.mkdir()
+    project_b.mkdir()
+
+    with workspace_scope(project_a):
+        namespaces_a = current_memory_namespaces()
+    with workspace_scope(project_b):
+        namespaces_b = current_memory_namespaces()
+
+    assert namespaces_a.user == namespaces_b.user
+    assert namespaces_a.project != namespaces_b.project
 
 
 def test_same_key_is_isolated_between_projects(monkeypatch, tmp_path):

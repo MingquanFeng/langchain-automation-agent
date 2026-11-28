@@ -450,9 +450,19 @@ def test_run_checks_endpoint_is_workspace_scoped_and_revalidates_repairability(
 ):
     """检查历史仅在所属工作目录可见，并按当前命令白名单计算可修复状态。"""
     import runtime.server as server_mod
+    import runtime.workspaces as workspaces_mod
 
-    workspace = str(tmp_path / "project")
-    monkeypatch.setattr(server_mod, "DATA_DIR", Path(workspace))
+    project = tmp_path / "project"
+    other_project = tmp_path / "other-project"
+    project.mkdir()
+    other_project.mkdir()
+    workspace = str(project)
+    app_home = tmp_path / "desktop-home"
+    app_home.mkdir()
+    (app_home / "working-directory.txt").write_text(
+        f"{project}\n{other_project}\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(workspaces_mod, "APP_HOME", app_home)
     access = server_mod.DesktopAccess("c" * 64, "d" * 64)
     monkeypatch.setattr(server_mod.app.state, "desktop_access", access, raising=False)
     isolated_server_store.start_run(
@@ -466,12 +476,15 @@ def test_run_checks_endpoint_is_workspace_scoped_and_revalidates_repairability(
     isolated_server_store.finish_command_execution(audit_id, status="failed", exit_code=1, output_summary="failed")
     isolated_server_store.finish_run("checks-source", status="failed")
 
-    with TestClient(server_mod.app, headers={"Authorization": f"Bearer {access.token}"}) as client:
+    headers = {"Authorization": f"Bearer {access.token}", "X-Agent-Workspace": workspace}
+    with TestClient(server_mod.app, headers=headers) as client:
         response = client.get("/runs/checks-source/checks")
         assert response.status_code == 200
         assert response.json()[0]["repairable"] is True
-        monkeypatch.setattr(server_mod, "DATA_DIR", tmp_path / "other-project")
-        assert client.get("/runs/checks-source/checks").status_code == 404
+        assert client.get(
+            "/runs/checks-source/checks",
+            headers={**headers, "X-Agent-Workspace": str(other_project)},
+        ).status_code == 404
 def test_websocket_cancel_is_persisted_as_cancelled(isolated_server_store, monkeypatch):
     """WebSocket 取消终态与持久化状态一致。"""
     import runtime.server as server_mod
@@ -617,7 +630,9 @@ def test_desktop_history_follows_workspace_and_preserves_unfiled_threads(
 ):
     """两个同名目录分别恢复历史；清空运行记录不会抹掉归属；旧会话续聊时才归档。"""
     import runtime.server as server
+    import runtime.workspaces as workspaces_mod
     from agent.graph import build_agent
+    from urllib.parse import quote
 
     agent = build_agent(
         model=FakeModel(messages=iter(AIMessage(content="已记录") for _ in range(5))),
@@ -628,46 +643,70 @@ def test_desktop_history_follows_workspace_and_preserves_unfiled_threads(
     access = server.DesktopAccess("a" * 64, "b" * 64)
     monkeypatch.setattr(server.app.state, "desktop_access", access, raising=False)
     project_a, project_b = tmp_path / "甲" / "项目", tmp_path / "乙" / "项目"
+    project_a.mkdir(parents=True)
+    project_b.mkdir(parents=True)
+    app_home = tmp_path / "desktop-home"
+    app_home.mkdir()
+    (app_home / "working-directory.txt").write_text(
+        f"{project_a}\n{project_b}\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(workspaces_mod, "APP_HOME", app_home)
     headers = {"Authorization": f"Bearer {access.token}"}
     protocols = [server.DESKTOP_WS_PROTOCOL, f"bearer.{access.token}"]
 
     with TestClient(server.app, headers=headers) as client:
-        def run(instruction, thread_id=None):
+        def run(workspace, instruction, thread_id=None):
             with client.websocket_connect("/ws", subprotocols=protocols) as websocket:
-                websocket.send_json({"type": "run.start", "instruction": instruction, "thread_id": thread_id})
+                websocket.send_json({
+                    "type": "run.start", "instruction": instruction,
+                    "thread_id": thread_id, "workspace": str(workspace),
+                })
                 return _receive_until_terminal(websocket, {"run.end", "run.error"})
 
-        def titles(scope="current", **params):
-            page = client.get("/threads", params={"scope": scope, **params}).json()
+        def scoped_headers(workspace):
+            return {
+                **headers,
+                "X-Agent-Workspace": quote(str(workspace), safe="/:@-_.!~*'()"),
+            }
+
+        def titles(workspace, scope="current", **params):
+            page = client.get(
+                "/threads", params={"scope": scope, **params}, headers=scoped_headers(workspace),
+            ).json()
             return [item["title"] for item in page["threads"]]
 
-        monkeypatch.setattr(server, "DATA_DIR", project_a)
-        events_a = run("甲的对话")
+        events_a = run(project_a, "甲的对话")
         assert events_a[-1]["type"] == "run.end"
         thread_a, run_a = events_a[0]["thread_id"], events_a[0]["run_id"]
-        assert titles() == ["甲的对话"]
-        assert titles("legacy") == ["旧版对话"]
+        assert titles(project_a) == ["甲的对话"]
+        assert titles(project_a, "legacy") == ["旧版对话"]
 
-        monkeypatch.setattr(server, "DATA_DIR", project_b)
-        assert titles() == []
-        assert client.get("/runs").json() == []
-        assert client.get("/threads/messages", params={"thread_id": thread_a}).status_code == 404
-        assert client.delete("/threads", params={"thread_id": thread_a}).status_code == 404
-        assert client.delete(f"/runs/{run_a}").json()["deleted"] is False
-        assert run("错误目录续聊", thread_a)[-1]["type"] == "run.error"
-        assert run("乙的对话")[-1]["type"] == "run.end"
-        assert titles() == ["乙的对话"]
-        assert client.delete("/runs").json() == {"deleted": 1}
-        assert titles() == ["乙的对话"]
+        assert titles(project_b) == []
+        assert client.get("/runs", headers=scoped_headers(project_b)).json() == []
+        assert client.get(
+            "/threads/messages", params={"thread_id": thread_a}, headers=scoped_headers(project_b),
+        ).status_code == 404
+        assert client.delete(
+            "/threads", params={"thread_id": thread_a}, headers=scoped_headers(project_b),
+        ).status_code == 404
+        assert client.delete(f"/runs/{run_a}", headers=scoped_headers(project_b)).json()["deleted"] is False
+        assert run(project_b, "错误目录续聊", thread_a)[-1]["type"] == "run.error"
+        assert run(project_b, "乙的对话")[-1]["type"] == "run.end"
+        assert titles(project_b) == ["乙的对话"]
+        assert client.delete("/runs", headers=scoped_headers(project_b)).json() == {"deleted": 1}
+        assert titles(project_b) == ["乙的对话"]
 
-        monkeypatch.setattr(server, "DATA_DIR", project_a)
-        assert [row["run_id"] for row in client.get("/runs").json()] == [run_a]
-        previous = client.get("/threads/messages", params={"thread_id": thread_a}).json()
+        assert [row["run_id"] for row in client.get("/runs", headers=scoped_headers(project_a)).json()] == [run_a]
+        previous = client.get(
+            "/threads/messages", params={"thread_id": thread_a}, headers=scoped_headers(project_a),
+        ).json()
         assert previous["messages"][0]["content"] == "甲的对话"
-        assert run("继续旧版对话", "old")[-1]["type"] == "run.end"
-        assert titles("legacy") == []
-        assert titles(limit=1, offset=1) == ["甲的对话"]
-        assert client.delete("/threads", params={"thread_id": "old"}).json()["deleted_runs"] == 1
+        assert run(project_a, "继续旧版对话", "old")[-1]["type"] == "run.end"
+        assert titles(project_a, "legacy") == []
+        assert titles(project_a, limit=1, offset=1) == ["甲的对话"]
+        assert client.delete(
+            "/threads", params={"thread_id": "old"}, headers=scoped_headers(project_a),
+        ).json()["deleted_runs"] == 1
         assert "old" not in RuntimeStore(isolated_server_store.path).thread_workspaces()
 
 

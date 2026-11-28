@@ -574,9 +574,16 @@ def test_malformed_approval_response_is_recoverable(client):
 
 
 @pytest.fixture
-def desktop_access(monkeypatch):
+def desktop_access(monkeypatch, tmp_path):
     """为当前测试启用桌面托管模式，使用可控的测试凭证。"""
+    from agent.tools.files import SANDBOX
+    import runtime.workspaces as workspaces_mod
+
     access = server_mod.DesktopAccess("a" * 64, "b" * 64)
+    app_home = tmp_path / "desktop-home"
+    app_home.mkdir()
+    (app_home / "working-directory.txt").write_text(f"{SANDBOX.resolve()}\n", encoding="utf-8")
+    monkeypatch.setattr(workspaces_mod, "APP_HOME", app_home)
     # Starlette State 将业务属性保存在内部映射中；上一次 monkeypatch
     # 回收后该动态属性可能不存在，因此允许在这里重新创建。
     monkeypatch.setattr(app.state, "desktop_access", access, raising=False)
@@ -612,6 +619,7 @@ def test_desktop_http_requires_token_but_allows_health_and_preflight(client, des
     response = client.get("/runs", headers=headers)
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
+    assert client.get("/runs", headers={**headers, "X-Agent-Workspace": str(Path(__file__).parent)}).status_code == 400
     assert client.delete("/tasks/example", headers=headers).status_code == 403
 
 

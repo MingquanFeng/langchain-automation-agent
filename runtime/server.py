@@ -37,6 +37,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from secrets import compare_digest
 from typing import Annotated, Literal
+from urllib.parse import unquote
 
 # FastAPI：Web 框架。
 # WebSocket / WebSocketDisconnect：桌面版的事件流端点。
@@ -51,6 +52,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 # RUNTIME：应用运行配置，这里取调度开关和通知渠道。
 from agent.config import DATA_DIR, RUNTIME
+from agent.workspace import current_workspace, workspace_scope
 
 # AgentContext：单次调用的运行时上下文。
 from agent.context import AgentContext, RepairSession
@@ -78,6 +80,7 @@ from .concurrency import THREAD_RUNS
 # list_jobs / start_scheduler / stop_scheduler：调度器接口。
 from .scheduler import list_jobs, start_scheduler, stop_scheduler
 from .storage import ThreadWorkspaceConflict, get_runtime_store
+from .workspaces import resolve_workspace
 
 # ScheduledTask / add_task / all_tasks / remove_task：任务表接口。
 from .tasks import ScheduledTask, add_task, all_tasks, configure_persistence, remove_task
@@ -176,7 +179,15 @@ async def authorize_desktop_http(request: Request, call_next):
             status_code=401,
             headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
         )
-    response = await call_next(request)
+    requested_workspace = request.headers.get("x-agent-workspace")
+    if requested_workspace is not None:
+        requested_workspace = unquote(requested_workspace)
+    try:
+        workspace = resolve_workspace(requested_workspace, managed=True)
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400, headers={"Cache-Control": "no-store"})
+    with workspace_scope(workspace):
+        response = await call_next(request)
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -310,7 +321,7 @@ def _history_workspace(scope: HistoryScope = "current") -> str | None:
     """托管服务只使用宿主选定的规范路径。独立服务沿用原有的全局历史接口。"""
     if getattr(app.state, "desktop_access", None) is None:
         return None
-    return str(DATA_DIR) if scope == "current" else ""
+    return str(current_workspace(DATA_DIR)) if scope == "current" else ""
 
 
 def _check_thread_scope(thread_id: str, scope: HistoryScope) -> None:
@@ -795,6 +806,7 @@ class StartCommand(WSCommand):
     instruction: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50_000)]
     task_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)] | None = None
     thread_id: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
+    workspace: Annotated[str, StringConstraints(min_length=1, max_length=4096)] | None = None
     allow_write: bool = False
     repair_source_run_id: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
     repair_source_call_id: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
@@ -951,7 +963,7 @@ async def _handle_ws_command(
         if managed and command.allow_write:
             await queue.put(RunError(run_id="", message="桌面模式不支持整轮授权，请逐次审批"))
             return
-        await _handle_run_start(manager=manager, queue=queue, conn_id=conn_id, command=command)
+        await _handle_run_start(manager=manager, queue=queue, conn_id=conn_id, command=command, managed=managed)
     elif isinstance(command, CancelCommand):
         await _handle_ws_cancel(manager=manager, queue=queue, conn_id=conn_id)
     elif isinstance(command, ApprovalCommand):
@@ -966,8 +978,15 @@ async def _handle_run_start(
     queue: asyncio.Queue,
     conn_id: str,
     command: StartCommand,
+    managed: bool,
 ) -> None:
     """启动一次执行。"""
+    try:
+        workspace_path = resolve_workspace(command.workspace, managed=managed)
+    except ValueError as exc:
+        await queue.put(RunError(run_id="", message=str(exc), recoverable=True))
+        return
+    workspace = str(workspace_path) if managed else None
     instruction = command.instruction
     task_name = command.task_name or instruction[:30]
     repair_session = None
@@ -979,13 +998,17 @@ async def _handle_run_start(
             run_id=command.repair_source_run_id,
             call_id=command.repair_source_call_id,
             thread_id=command.thread_id,
-            workspace=_history_workspace(),
+            workspace=workspace,
         )
         if source is None:
             await queue.put(RunError(run_id="", message="找不到当前会话中的失败检查记录", recoverable=True))
             return
         from agent.tools.commands import validate_saved_command
-        _, validation_error = validate_saved_command(source["argv"], source["cwd"], source["timeout_seconds"])
+        if workspace is None:
+            _, validation_error = validate_saved_command(source["argv"], source["cwd"], source["timeout_seconds"])
+        else:
+            with workspace_scope(workspace_path):
+                _, validation_error = validate_saved_command(source["argv"], source["cwd"], source["timeout_seconds"])
         if validation_error:
             await queue.put(RunError(run_id="", message="原检查参数无法在当前项目中精确恢复，不能启动修复。", recoverable=True))
             return
@@ -1020,6 +1043,7 @@ async def _handle_run_start(
         # WebSocket 是 HTTP 层触发的，用 api。
         trigger="api",
         allow_write=command.allow_write,
+        workspace=workspace,
         notify_channel=RUNTIME.notify_channel,
         repair_session=repair_session,
     )
@@ -1041,7 +1065,7 @@ async def _handle_run_start(
                 trigger=ctx.trigger,
                 instruction=run.instruction,
                 started_at=run.started_at,
-                workspace=_history_workspace(),
+                workspace=workspace,
                 repair_source_run_id=repair_session.source_run_id if repair_session else None,
                 repair_source_call_id=repair_session.source_call_id if repair_session else None,
             ),

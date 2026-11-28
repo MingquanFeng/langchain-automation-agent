@@ -227,7 +227,7 @@ def _load_backup(backup_id: str) -> tuple[dict[str, Any] | None, str]:
         return None, f"无法读取备份 {backup_id}：{type(exc).__name__}: {exc}"
     if not isinstance(record, dict):
         return None, f"备份 {backup_id} 格式无效。"
-    if record.get("workspace") != str(files_mod.SANDBOX):
+    if record.get("workspace") != str(files_mod.workspace_root()):
         return None, "该备份属于另一个工作目录，不能恢复到当前工作目录。"
     content = record.get("content")
     relative = record.get("path")
@@ -239,13 +239,18 @@ def _load_backup(backup_id: str) -> tuple[dict[str, Any] | None, str]:
 
 
 def _prune_backups() -> None:
-    """只保留最新 MAX_BACKUPS 个 JSON 备份；清理失败不影响本次编辑。"""
+    """只清理当前工作区的旧备份，不影响其他项目的恢复记录。"""
     try:
-        backups = sorted(
-            BACKUP_DIR.glob("*.json"),
-            key=lambda item: item.stat().st_mtime,
-            reverse=True,
-        )
+        workspace = str(files_mod.workspace_root())
+        backups = []
+        for candidate in BACKUP_DIR.glob("*.json"):
+            try:
+                record = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(record, dict) and record.get("workspace") == workspace:
+                backups.append(candidate)
+        backups.sort(key=lambda item: item.stat().st_mtime, reverse=True)
         for stale in backups[MAX_BACKUPS:]:
             stale.unlink(missing_ok=True)
     except OSError:
@@ -260,12 +265,13 @@ def _save_backup(target: Path, before: str, after: str, reason: str) -> str:
     except OSError:
         pass
     now = datetime.now(timezone.utc)
+    workspace = files_mod.workspace_root()
     backup_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:12]}"
     record = {
         "version": 1,
         "backup_id": backup_id,
-        "workspace": str(files_mod.SANDBOX),
-        "path": str(target.relative_to(files_mod.SANDBOX)),
+        "workspace": str(workspace),
+        "path": str(target.relative_to(workspace)),
         "created_at": now.isoformat(),
         "reason": reason,
         "before_sha256": _digest(before),
@@ -333,7 +339,7 @@ def _prepare_edit(args: dict[str, Any]) -> tuple[_PreparedChange | None, str]:
     proposed, err = _replacement(current, old_text, new_text, replace_all)
     if proposed is None:
         return None, err
-    relative = str(target.relative_to(files_mod.SANDBOX))
+    relative = str(target.relative_to(files_mod.workspace_root()))
     diff, summary = _unified_diff(relative, current, proposed)
     return _PreparedChange(
         operation="edit",
@@ -360,7 +366,7 @@ def _prepare_restore(args: dict[str, Any]) -> tuple[_PreparedChange | None, str]
     proposed = record["content"]
     if proposed == current:
         return None, "当前文件与该备份内容相同，无需恢复。"
-    relative = str(target.relative_to(files_mod.SANDBOX))
+    relative = str(target.relative_to(files_mod.workspace_root()))
     diff, summary = _unified_diff(relative, current, proposed)
     return _PreparedChange(
         operation="restore",
@@ -502,7 +508,7 @@ def list_file_backups(path: str = "", limit: int = 20) -> str:
             return err
         if files_mod._is_sensitive_path(path, target):
             return "出于安全原因，不能查看敏感配置或密钥文件的备份。"
-        relative_filter = str(target.relative_to(files_mod.SANDBOX))
+        relative_filter = str(target.relative_to(files_mod.workspace_root()))
     if not BACKUP_DIR.is_dir():
         return "当前工作目录还没有文件备份。"
 

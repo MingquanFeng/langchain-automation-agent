@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
 from agent.tools import files as files_mod
+from agent.workspace import workspace_scope
 
 
 # ============================================================
@@ -149,3 +152,28 @@ def test_search_tools_reject_sensitive_and_out_of_sandbox_roots(workspace):
 def test_list_files_enforces_its_documented_result_ceiling(workspace):
     """旧列表工具也不能通过调用参数绕过 200 条输出硬上限。"""
     assert "1-200" in files_mod.list_files.invoke({"max_results": 201})
+
+
+def test_concurrent_workspace_contexts_keep_file_reads_and_writes_isolated(tmp_path):
+    """并行任务各自读写绑定目录，不受其他任务的工作区选择影响。"""
+    projects = [tmp_path / "project-a", tmp_path / "project-b"]
+    for index, project in enumerate(projects):
+        project.mkdir()
+        (project / "same.txt").write_text(f"项目{index}", encoding="utf-8")
+    barrier = Barrier(2)
+
+    def read_and_write(project: Path, index: int) -> tuple[str, str]:
+        with workspace_scope(project):
+            barrier.wait(timeout=5)
+            read = files_mod.read_file.func(path="same.txt")
+            write = files_mod.write_file.func(path="out/result.txt", content=f"结果{index}")
+            return read, write
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda item: read_and_write(item[1], item[0]), enumerate(projects)))
+
+    assert "项目0" in results[0][0] and "项目1" in results[1][0]
+    assert (projects[0] / "out/result.txt").read_text(encoding="utf-8") == "结果0"
+    assert (projects[1] / "out/result.txt").read_text(encoding="utf-8") == "结果1"
+    assert "已写入 out/result.txt" in results[0][1]
+    assert "已写入 out/result.txt" in results[1][1]
